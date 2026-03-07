@@ -29,3 +29,5 @@
 "000026_add_and_cut_aa"	"0 minimal, 3600 minimal_plus_amino_acids, 14400 minimal"
 "000027_cut_and_add_aa"	"0 minimal_plus_amino_acids, 18000 minimal, 36000 minimal_plus_amino_acids"
 "000028_add_aa_long"	"0 minimal, 24000 minimal_plus_amino_acids"
+"000030_GLC_ramp_20_to_5_to_2mM"	"0 minimal_GLC_20mM, 1800 minimal_GLC_5mM, 3600 minimal_GLC_2mM"
+"000031_GLC_ramp_2_to_5_to_20mM"	"0 minimal_GLC_2mM, 1800 minimal_GLC_5mM, 3600 minimal_GLC_20mM"
