@@ -14,6 +14,16 @@ Docker containers are easier to build and isolated from your development compute
 support debugging into a Docker container but we haven't tested that.) `pyenv` virtual environments take more steps to build
 and depend on your computer's OS, but are lighter weight and easier for debugging.
 
+For the collaborator-focused unified workflow (Docker locally, Apptainer/Singularity on clusters, and Conda fallback), see:
+
+- `docker/local/README.md`
+
+## Docker runtime guide
+
+For Docker build/run commands and local simulation workflow details, use:
+
+- [`docker/local/README.md`](docker/local/README.md)
+
 
 ## Quick start
 

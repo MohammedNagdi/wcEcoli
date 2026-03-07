@@ -43,6 +43,9 @@ nosetests.*.xml
 /out
 /colony/out
 reconstruction/ecoli/scripts/nca/out/
+/000000.npz
+cluster/images/
+*.sif
 
 # Cached sim data #
 ###################
@@ -124,4 +127,3 @@ reconstruction/ecoli/scripts/nca/data/regulon-db/*.tsv
 *.fdb_latexmk
 *.fls
 *.synctex.gz
-

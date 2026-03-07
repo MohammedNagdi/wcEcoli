@@ -1,0 +1,11 @@
+# symbol	category	description
+acrA	transport	Multi-drug efflux pump
+ftsZ	division	Cell division protein
+groS	chaperone	Chaperone system
+tufA	translation	Elongation factor Tu
+lpp	envelope	Major lipoprotein
+ompA	envelope	Outer membrane protein
+gapA	glycolysis	Glyceraldehyde-3P dehydrogenase
+acpP	lipid	Acyl carrier protein
+recA	dna_repair	DNA recombination/repair
+rpoD	transcription	Sigma factor 70

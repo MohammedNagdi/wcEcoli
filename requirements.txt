@@ -95,7 +95,7 @@ pytest-cov==4.1.0
 PyYAML==6.0.1  # not compatible with Cython 3 until they replace distutils use
 requests==2.29.0  # update to 2.30 when docker is ready for urllib3 2.0
 ruamel.yaml==0.17.26
-stochastic-arrow==1.0.0
+#stochastic-arrow==1.0.0
 swiglpk==5.0.8
 sympy==1.12
 Unum==4.2.1
