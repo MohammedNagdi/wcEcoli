@@ -121,7 +121,38 @@ runtime/setup_conda_fallback.sh my_wcecoli_env
 
 This script preserves the same dependency ordering used in your validated setup notes.
 
-## 4) Extraction + plotting quickstart
+## 4) Environmental variable experiments (media/recipe/timeline)
+
+Use these files to define environmental experiments:
+
+- `media`: base molecule concentrations.
+  - File location: `reconstruction/ecoli/flat/condition/media/*.tsv`
+  - Example: set glucose concentration by changing the `"GLC"` row in a copied media file.
+- `media recipe`: named medium assembled from base media (+ optional additions/removals).
+  - File location: `reconstruction/ecoli/flat/condition/media_recipes.tsv`
+  - Example: define `minimal_GLC_20mM` pointing to `MIX0-57-GLC-20mM`.
+- `timeline`: time-ordered sequence of media-recipe states used during simulation.
+  - File location: `reconstruction/ecoli/flat/condition/timelines_def.tsv`
+  - Example event string: `0 minimal_GLC_20mM, 1800 minimal_GLC_5mM, 3600 minimal_GLC_2mM`.
+
+Ways to vary the environment:
+
+- Change only `media`: create a new base media file with adjusted concentrations and keep timeline structure the same.
+- Change only `media recipe`: reuse existing media but create new named recipe mappings.
+- Change only `timeline`: keep media/recipes fixed, but change switch times and sequence.
+- Combine all three: new concentrations + new recipe names + dynamic time-shift schedule.
+
+Typical workflow for new environment variants:
+
+```bash
+# 1) edit media and/or media_recipes and/or timelines_def
+# 2) rebuild parameterized data
+docker/local/run.sh parca <sim_dir>
+# 3) run timeline variant (index depends on sorted timeline IDs)
+docker/local/run.sh sim --variant timeline <first_index> <last_index> <sim_dir>
+```
+
+## 5) Extraction + plotting quickstart
 
 Default single-cell target (`wildtype_000000/000000/generation_000000/000000`):
 
@@ -144,7 +175,7 @@ Gene targets are configurable in:
 
 - `tools/extract/gene_targets.tsv`
 
-## Logging patterns
+## 6) Logging patterns
 
 Interactive logging to host files:
 
@@ -166,7 +197,7 @@ docker run -d --name wcecoli-parca \
 docker logs -f wcecoli-parca
 ```
 
-## Persistence and editing model
+## 7) Persistence and editing model
 
 The runtime binds host directories:
 
@@ -184,7 +215,7 @@ Code sync behavior:
 - In live-edit mode, if compiled extensions are missing, run:
   - `WCECOLI_BIND_SOURCE=1 docker/local/run.sh run make clean compile`
 
-## Notes
+## 8) Notes
 
 - Default image name: `wcecoli-local` (override with `WCECOLI_DOCKER_IMAGE`).
 - Runtime sets:
