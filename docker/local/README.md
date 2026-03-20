@@ -142,14 +142,49 @@ Ways to vary the environment:
 - Change only `timeline`: keep media/recipes fixed, but change switch times and sequence.
 - Combine all three: new concentrations + new recipe names + dynamic time-shift schedule.
 
-Typical workflow for new environment variants:
+Required checklist when adding new media IDs (important):
+
+1. Add or edit base media files in `reconstruction/ecoli/flat/condition/media/*.tsv`.
+2. If you created new media filenames, register them in:
+   - `reconstruction/ecoli/knowledge_base_raw.py` (condition/media file list).
+3. Add or update recipe names in:
+   - `reconstruction/ecoli/flat/condition/media_recipes.tsv`.
+4. Add condition rows for any new nutrient labels used in recipes/timelines:
+   - `reconstruction/ecoli/flat/condition/condition_defs.tsv`
+   - include a valid doubling time for each new nutrient label.
+5. Add or update timeline rows in:
+   - `reconstruction/ecoli/flat/condition/timelines_def.tsv`.
+
+If you skip step 2, Parca may fail with missing stock media (KeyError on base media).
+If you skip step 4, simulation may fail with missing nutrient doubling-time mappings.
+
+Typical run workflow for new environment variants:
 
 ```bash
-# 1) edit media and/or media_recipes and/or timelines_def
-# 2) rebuild parameterized data
+# 1) edit media/recipes/conditions/timelines (and knowledge_base_raw.py for new media files)
+# 2) rebuild image if not using bind-source mode
+docker/local/run.sh build
+# 3) rebuild parameterized data
 docker/local/run.sh parca <sim_dir>
-# 3) run timeline variant (index depends on sorted timeline IDs)
-docker/local/run.sh sim --variant timeline <first_index> <last_index> <sim_dir>
+# 4) run timelines variant (index depends on sorted timeline IDs)
+docker/local/run.sh sim --variant timelines <first_index> <last_index> <sim_dir>
+```
+
+Find timeline indices (sorted order used by the variant):
+
+```bash
+python - <<'PY'
+from pathlib import Path
+p = Path("reconstruction/ecoli/flat/condition/timelines_def.tsv")
+ids = []
+for line in p.read_text().splitlines():
+    line = line.strip()
+    if not line or line.startswith("#") or line.startswith('"timeline"'):
+        continue
+    ids.append(line.split('\t')[0].strip('"'))
+for i, tid in enumerate(sorted(ids)):
+    print(i, tid)
+PY
 ```
 
 ## 5) Extraction + plotting quickstart
