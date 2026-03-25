@@ -85,17 +85,44 @@ class LocalEnvironment(wholecell.states.external_state.ExternalState):
 		self.exchange_to_env_map = sim_data.external_state.exchange_to_env_map
 		self.import_constraint_threshold = sim_data.external_state.import_constraint_threshold
 
+		# sinusoidal mixing config (None unless the sinusoidal_media variant is active).
+		# Use getattr for backward compatibility with sim_data pickled before this
+		# attribute was added to ExternalState.
+		self.sinusoidal_config = getattr(
+			sim_data.external_state, 'sinusoidal_media_config', None)
+
 	def update(self):
 		'''update self.current_media_id based on self.current_timeline and self.time'''
 
-		current_index = [i for i, t in enumerate(self._times) if self.time()>=t][-1]
-
-		if self.current_media_id != self.current_timeline[current_index][1]:
-			self.current_media_id = self.current_timeline[current_index][1]
-			current_media = self.saved_media[self.current_media_id]
-			concentrations = np.array([current_media[molecule_id] for molecule_id in self._moleculeIDs])
+		if self.sinusoidal_config is not None:
+			t = self.time()
+			T = self.sinusoidal_config['period']
+			t0 = self.sinusoidal_config['start_time']
+			p = (np.sin(2 * np.pi / T * (t - t0)) + 1) / 2  # fraction of media_b
+			r = 1 - p                                          # fraction of media_a
+			conc_a = self.saved_media[self.sinusoidal_config['media_a']]
+			conc_b = self.saved_media[self.sinusoidal_config['media_b']]
+			ca = np.array([conc_a[mol_id] for mol_id in self._moleculeIDs])
+			cb = np.array([conc_b[mol_id] for mol_id in self._moleculeIDs])
+			# Suppress the 0 * inf = nan IEEE 754 warning; we fix those entries below.
+			with np.errstate(invalid='ignore'):
+				concentrations = r * ca + p * cb
+			# For any molecule that is infinite in either base medium the mixed
+			# concentration is also infinite (unlimited availability stays unlimited).
+			concentrations[np.isinf(ca) | np.isinf(cb)] = np.inf
 			self.container.countsIs(concentrations)
-			print('update media: {}'.format(self.current_media_id))
+			# current_media_id is left unchanged (set at init from media_b)
+			# so downstream processes that use it for doubling-time lookups
+			# continue to find a valid key.
+		else:
+			current_index = [i for i, t in enumerate(self._times) if self.time()>=t][-1]
+
+			if self.current_media_id != self.current_timeline[current_index][1]:
+				self.current_media_id = self.current_timeline[current_index][1]
+				current_media = self.saved_media[self.current_media_id]
+				concentrations = np.array([current_media[molecule_id] for molecule_id in self._moleculeIDs])
+				self.container.countsIs(concentrations)
+				print('update media: {}'.format(self.current_media_id))
 
 		if ASSERT_POSITIVE_CONCENTRATIONS and (self.container.counts() < 0).any():
 			raise NegativeConcentrationError(
@@ -157,6 +184,7 @@ class LocalEnvironment(wholecell.states.external_state.ExternalState):
 		self.container.tableCreate(tableWriter)
 		tableWriter.writeAttributes(
 			# nutrientTimeSeriesLabel = self.current_timeline_id,
+			subcolumns={'media_concentrations': 'objectNames'},
 			)
 
 	def tableAppend(self, tableWriter):
