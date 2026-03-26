@@ -23,6 +23,7 @@ variants = [
 	'remove_one_aa',
 	'remove_one_aa_shift',
 	'rrna_operon_knockout',
+	'sinusoidal_media',
 	'rrna_location',
 	'rrna_orientation',
 	'tf_activity',
