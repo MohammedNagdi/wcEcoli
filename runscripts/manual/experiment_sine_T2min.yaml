@@ -1,0 +1,6 @@
+sim_dir: sim_glc_exp
+media_a: minimal
+media_b: minimal_GLC_2mM
+period_min: 2
+generations: 4
+seed: 0

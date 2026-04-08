@@ -33,6 +33,8 @@ Examples:
 Env vars:
   WCECOLI_DOCKER_IMAGE=<name>   Override image name (default: wcecoli-local)
   WCECOLI_BIND_SOURCE=1         Bind host repo to /wcEcoli for live code edits
+  SINE_MEDIA_A=<media_id>       Base media for sinusoidal_media variant (default: MIX0-57)
+  SINE_MEDIA_B=<media_id>       Second media for sinusoidal_media variant (default: MIX0-57-GLC-2mM)
 USAGE
 }
 
@@ -46,6 +48,13 @@ prepare_run_args() {
   fi
   if [[ "$(uname -s)" == "Linux" ]]; then
     DOCKER_RUN_ARGS+=(--user "$(id -u):$(id -g)")
+  fi
+  # Forward sinusoidal media env vars if set
+  if [[ -n "${SINE_MEDIA_A:-}" ]]; then
+    DOCKER_RUN_ARGS+=(-e "SINE_MEDIA_A=${SINE_MEDIA_A}")
+  fi
+  if [[ -n "${SINE_MEDIA_B:-}" ]]; then
+    DOCKER_RUN_ARGS+=(-e "SINE_MEDIA_B=${SINE_MEDIA_B}")
   fi
 }
 

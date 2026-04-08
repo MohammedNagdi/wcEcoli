@@ -80,6 +80,10 @@ class ExternalState(object):
 		# set default current_timeline_id to None, this can be overwritten by the timelines variant
 		self.current_timeline_id = None
 
+		# sinusoidal media mixing config, set by the sinusoidal_media variant
+		# dict with keys: media_a, media_b, period (s), start_time (s)
+		self.sinusoidal_media_config = None
+
 		# make a dictionary with all media conditions specified by media_recipes
 		self.saved_media = self.make_media.make_saved_media()
 
