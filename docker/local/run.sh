@@ -47,7 +47,16 @@ prepare_run_args() {
     DOCKER_RUN_ARGS+=(-t)
   fi
   if [[ "$(uname -s)" == "Linux" ]]; then
-    DOCKER_RUN_ARGS+=(--user "$(id -u):$(id -g)")
+    # Rootless Podman maps container root to the host user automatically,
+    # so skip --user to avoid UID remapping issues.
+    _is_podman=0
+    if command -v podman &>/dev/null; then
+      _docker_ver="$(docker --version 2>&1 || true)"
+      [[ "$_docker_ver" =~ [Pp]odman ]] && _is_podman=1
+    fi
+    if [[ "$_is_podman" -eq 0 ]]; then
+      DOCKER_RUN_ARGS+=(--user "$(id -u):$(id -g)")
+    fi
   fi
   # Forward sinusoidal media env vars if set
   if [[ -n "${SINE_MEDIA_A:-}" ]]; then
