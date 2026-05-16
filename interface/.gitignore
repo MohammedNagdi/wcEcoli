@@ -9,6 +9,8 @@ backend/app/**/__pycache__/
 frontend/dist/
 
 # Database (generated at runtime)
+backend/*.db
+backend/*.sqlite
 backend/data/*.db
 backend/data/*.sqlite
 
