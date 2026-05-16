@@ -25,3 +25,6 @@ Thumbs.db
 
 # Sim output (large binary files)
 sim_output/
+
+# Environment (machine-specific)
+.env
