@@ -1,0 +1,63 @@
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+      - ../reconstruction:/data/reconstruction:ro
+      - ../models:/data/models:ro
+      - api-db:/app/data
+      - sim-output:/data/out:ro
+    environment:
+      - RECONSTRUCTION_PATH=/data/reconstruction
+      - MODELS_PATH=/data/models
+      - DATABASE_PATH=/app/data/wcecoli.db
+      - SIM_OUTPUT_DIR=/data/out
+      - WCECOLI_ROOT=/data
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.services.sim_worker"]
+    volumes:
+      - ./backend/app:/app/app
+      - ../reconstruction:/data/reconstruction:ro
+      - ../models:/data/models:ro
+      - api-db:/app/data
+      - sim-output:/data/out
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - RECONSTRUCTION_PATH=/data/reconstruction
+      - MODELS_PATH=/data/models
+      - DATABASE_PATH=/app/data/wcecoli.db
+      - WCECOLI_ROOT=/data
+      - SIM_OUTPUT_DIR=/data/out
+      - DOCKER_IMAGE=wcecoli-sim:latest
+      - SIM_OUTPUT_VOLUME=interface_sim-output
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    environment:
+      - VITE_API_URL=http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  api-db:
+  sim-output:
