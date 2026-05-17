@@ -14,7 +14,7 @@ import type {
   MoleculeListResponse, MoleculeIdsResponse, MoleculeTimeseriesResponse,
   TrainRequest, TrainResponse, DataSummary,
   DesignOverview, EssentialityStats,
-  ComparisonResponse,
+  ComparisonResponse, FailedJobSummary,
 } from '../types'
 
 const BASE = '/api'
@@ -185,6 +185,18 @@ export async function getExperimentResults(experimentId: number): Promise<Experi
 
 export async function cancelJob(id: number): Promise<void> {
   await fetch(`${BASE}/jobs/${id}`, { method: 'DELETE' })
+}
+
+export async function retryJob(id: number): Promise<SimulationJob> {
+  return fetchJSON(`/jobs/${id}/retry`, { method: 'POST' })
+}
+
+export async function deleteJobPermanent(id: number): Promise<void> {
+  await fetch(`${BASE}/jobs/${id}/permanent`, { method: 'DELETE' })
+}
+
+export async function getFailedJobs(): Promise<FailedJobSummary[]> {
+  return fetchJSON('/jobs/failed')
 }
 
 // --- Results / Timeseries ---

@@ -45,6 +45,7 @@ class JobResultOut(BaseModel):
     final_mass_fg: Optional[float]
     growth_rate: Optional[float]
     doubling_time_min: Optional[float]
+    divided: bool = True
     created_at: str
 
 
@@ -133,6 +134,54 @@ def list_jobs(
     return [JobOut.model_validate(j, from_attributes=True) for j in jobs]
 
 
+# ── GET /api/jobs/failed ──────────────────────────────────────────────
+
+class FailedJobSummary(BaseModel):
+    id: int
+    experiment_id: int
+    experiment_name: str
+    gene_symbol: str
+    variant_type: str
+    variant_index: int
+    condition: str
+    seed: int
+    phase: str
+    error_message: str
+    started_at: str
+    finished_at: str
+    created_at: str
+
+
+@router.get("/jobs/failed", response_model=list[FailedJobSummary])
+def list_failed_jobs(session: Session = Depends(get_session)):
+    """List all failed jobs with structured error info for triage."""
+    jobs = session.exec(
+        select(SimulationJob)
+        .where(SimulationJob.status == "failed")
+        .order_by(col(SimulationJob.finished_at).desc())
+    ).all()
+
+    results = []
+    for job in jobs:
+        experiment = session.get(Experiment, job.experiment_id)
+        results.append(FailedJobSummary(
+            id=job.id,
+            experiment_id=job.experiment_id,
+            experiment_name=experiment.name if experiment else f"Experiment #{job.experiment_id}",
+            gene_symbol=experiment.gene_symbol if experiment else "",
+            variant_type=job.variant_type,
+            variant_index=job.variant_index,
+            condition=job.condition,
+            seed=job.seed,
+            phase=job.phase,
+            error_message=job.error_message,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            created_at=job.created_at,
+        ))
+    return results
+
+
 # ── GET /api/jobs/{id} ───────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
@@ -196,6 +245,71 @@ def cancel_job(job_id: int, session: Session = Depends(get_session)):
     session.commit()
 
 
+# ── POST /api/jobs/{id}/retry ─────────────────────────────────────────
+
+@router.post("/jobs/{job_id}/retry", response_model=JobOut)
+def retry_job(job_id: int, session: Session = Depends(get_session)):
+    """Retry a failed job by resetting it to pending.
+
+    Clears the error state and log tail so the worker picks it up again.
+    Only jobs in 'failed' status can be retried.
+    """
+    job = session.get(SimulationJob, job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+
+    if job.status != "failed":
+        raise HTTPException(409, f"Can only retry failed jobs (current: {job.status})")
+
+    job.status = "pending"
+    job.phase = "Queued (retry)"
+    job.error_message = ""
+    job.log_tail = ""
+    job.started_at = ""
+    job.finished_at = ""
+    job.sim_dir = ""
+    session.add(job)
+
+    # Also reset parent experiment to queued so it's tracked correctly
+    experiment = session.get(Experiment, job.experiment_id)
+    if experiment and experiment.status == "failed":
+        experiment.status = "queued"
+        experiment.updated_at = datetime.now(timezone.utc).isoformat()
+        session.add(experiment)
+
+    session.commit()
+    return JobOut.model_validate(job, from_attributes=True)
+
+
+# ── DELETE /api/jobs/{id}/permanent ──────────────────────────────────
+
+@router.delete("/jobs/{job_id}/permanent", status_code=204)
+def delete_job_permanent(job_id: int, session: Session = Depends(get_session)):
+    """Permanently delete a failed or cancelled job and its results.
+
+    Only jobs in 'failed' status can be permanently deleted.
+    Running or pending jobs must be cancelled first.
+    """
+    job = session.get(SimulationJob, job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+
+    if job.status not in ("failed",):
+        raise HTTPException(
+            409, f"Can only delete failed jobs (current: {job.status}). Cancel it first."
+        )
+
+    # Delete associated results
+    results = session.exec(
+        select(SimulationResult).where(SimulationResult.job_id == job_id)
+    ).all()
+    for r in results:
+        session.delete(r)
+
+    session.delete(job)
+    session.commit()
+
+
 # ── POST /api/jobs/{id}/reingest ──────────────────────────────────────
 
 @router.post("/jobs/{job_id}/reingest", response_model=list[JobResultOut])
@@ -242,6 +356,7 @@ def reingest_job(job_id: int, session: Session = Depends(get_session)):
                 "final_mass_fg": None,
                 "growth_rate": None,
                 "doubling_time_min": None,
+                "divided": False,
             }
 
         result = SimulationResult(
@@ -253,6 +368,7 @@ def reingest_job(job_id: int, session: Session = Depends(get_session)):
             final_mass_fg=summary["final_mass_fg"],
             growth_rate=summary["growth_rate"],
             doubling_time_min=summary["doubling_time_min"],
+            divided=summary.get("divided", False),
             created_at=now,
         )
         session.add(result)

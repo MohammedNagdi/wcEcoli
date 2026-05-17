@@ -398,10 +398,20 @@ class ComparisonDelta(BaseModel):
     growth_rate_pct: Optional[float] = None
     doubling_time_pct: Optional[float] = None
 
+class WildtypeSuggestion(BaseModel):
+    """Suggested wildtype experiment when none exists for the comparison condition."""
+    condition: str
+    variant_type: str = "wildtype"
+    variant_index: int = 0
+    message: str
+    recommended_seeds: int = 4
+
+
 class ComparisonResponse(BaseModel):
     """Multi-experiment comparison with optional wildtype baseline."""
     experiments: list[ComparisonExperiment]
     wildtype: Optional[ComparisonExperiment] = None
+    wildtype_suggestion: Optional[WildtypeSuggestion] = None
     deltas: list[ComparisonDelta] = []
 
 
@@ -510,6 +520,7 @@ def compare_experiments(
 
     # Find wildtype baseline for the same condition
     wildtype_comp: Optional[ComparisonExperiment] = None
+    wildtype_suggestion: Optional[WildtypeSuggestion] = None
     deltas: list[ComparisonDelta] = []
 
     if include_wildtype and condition:
@@ -548,10 +559,33 @@ def compare_experiments(
                         wildtype_comp.doubling_time_min.mean
                     ),
                 ))
+        else:
+            # No completed wildtype for this condition — check if one is in progress
+            wt_pending = session.exec(
+                select(Experiment).where(
+                    Experiment.variant_type == "wildtype",
+                    Experiment.condition == condition,
+                    Experiment.status.in_(["draft", "queued", "running"]),
+                )
+            ).first()
+
+            if wt_pending:
+                wildtype_suggestion = WildtypeSuggestion(
+                    condition=condition,
+                    message=f"A wildtype simulation for '{condition}' is {wt_pending.status} (experiment #{wt_pending.id}). Deltas will appear once it completes.",
+                    recommended_seeds=4,
+                )
+            else:
+                wildtype_suggestion = WildtypeSuggestion(
+                    condition=condition,
+                    message=f"No wildtype baseline exists for condition '{condition}'. Create one to see relative fitness deltas.",
+                    recommended_seeds=4,
+                )
 
     return ComparisonResponse(
         experiments=experiments_out,
         wildtype=wildtype_comp,
+        wildtype_suggestion=wildtype_suggestion,
         deltas=deltas,
     )
 

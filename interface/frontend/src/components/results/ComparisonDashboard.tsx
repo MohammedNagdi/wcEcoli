@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { compareExperiments, compareBatch, getExperiments, getBatches } from '../../api/client'
-import type { ComparisonResponse, ComparisonExperiment, ComparisonDelta, Experiment, BatchSummary } from '../../types'
+import { compareExperiments, compareBatch, getExperiments, getBatches, createExperiment } from '../../api/client'
+import type { ComparisonResponse, ComparisonExperiment, ComparisonDelta, Experiment, BatchSummary, WildtypeSuggestion } from '../../types'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -361,6 +361,49 @@ function DeltaSummaryCards({ deltas }: { deltas: ComparisonDelta[] }) {
 }
 
 
+// ── Wildtype suggestion banner ───────────────────────────────────────
+
+function WildtypeSuggestionBanner({
+  suggestion,
+  onCreateWildtype,
+  creating,
+}: {
+  suggestion: WildtypeSuggestion
+  onCreateWildtype: () => void
+  creating: boolean
+}) {
+  const isInProgress = suggestion.message.includes('is queued') || suggestion.message.includes('is running') || suggestion.message.includes('is draft')
+
+  return (
+    <div className={`border rounded-lg px-4 py-3 flex items-start gap-3 ${
+      isInProgress ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'
+    }`}>
+      <span className="text-lg mt-0.5">{isInProgress ? '⏳' : '💡'}</span>
+      <div className="flex-1">
+        <p className={`text-sm font-medium ${isInProgress ? 'text-amber-800' : 'text-blue-800'}`}>
+          {suggestion.message}
+        </p>
+        {!isInProgress && (
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              onClick={onCreateWildtype}
+              disabled={creating}
+              className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700
+                         disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+            >
+              {creating ? 'Creating…' : `Create wildtype (${suggestion.condition}, ${suggestion.recommended_seeds} seeds)`}
+            </button>
+            <span className="text-[11px] text-blue-500">
+              variant: {suggestion.variant_type}, index: {suggestion.variant_index}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
 // ── Main page ────────────────────────────────────────────────────────
 
 export function ComparisonDashboard() {
@@ -373,6 +416,7 @@ export function ComparisonDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('gene')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [creatingWt, setCreatingWt] = useState(false)
 
   // Load experiments and batches for the selector
   useEffect(() => {
@@ -445,6 +489,32 @@ export function ComparisonDashboard() {
       .finally(() => setLoading(false))
   }
 
+  const handleCreateWildtype = async () => {
+    if (!data?.wildtype_suggestion) return
+    const s = data.wildtype_suggestion
+    setCreatingWt(true)
+    try {
+      await createExperiment({
+        name: `Wildtype (${s.condition})`,
+        description: `Auto-created wildtype baseline for condition: ${s.condition}`,
+        variant_type: s.variant_type,
+        variant_index: s.variant_index,
+        condition: s.condition,
+        sim_params: JSON.stringify({ seeds: s.recommended_seeds, generations: 1 }),
+      })
+      // Refresh comparison to reflect the new pending wildtype
+      const ids = [...selected]
+      if (ids.length >= 2) {
+        const resp = await compareExperiments(ids)
+        setData(resp)
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to create wildtype experiment')
+    } finally {
+      setCreatingWt(false)
+    }
+  }
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -514,6 +584,15 @@ export function ComparisonDashboard() {
       {/* Results */}
       {data && data.experiments.length > 0 && (
         <div className="mt-6 space-y-6">
+          {/* Wildtype suggestion when no baseline exists */}
+          {!data.wildtype && data.wildtype_suggestion && (
+            <WildtypeSuggestionBanner
+              suggestion={data.wildtype_suggestion}
+              onCreateWildtype={handleCreateWildtype}
+              creating={creatingWt}
+            />
+          )}
+
           {/* Wildtype delta summary */}
           {data.wildtype && data.deltas.length > 0 && (
             <DeltaSummaryCards deltas={data.deltas} />

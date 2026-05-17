@@ -15,7 +15,8 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import settings
 from app.db.models import (
-    AAPathway, Complex, Condition, Experiment, Gene, TFEdge, Timeline, Variant,
+    AAPathway, Complex, Condition, Experiment, Gene, SimulationJob,
+    SimulationResult, TFEdge, Timeline, Variant,
 )
 
 logger = logging.getLogger(__name__)
@@ -502,9 +503,29 @@ def _ingest_complexes(session: Session) -> int:
     return count
 
 
-# Bump this version whenever the schema or ingestion logic changes to
-# force a database rebuild even if the source TSV files haven't changed.
-_SCHEMA_VERSION = 3  # v3: added is_mechanistic flag, HTML-stripped gene symbols
+# ── Schema version ─────────────────────────────────────────────────────
+# Bump this integer whenever you:
+#   - Add/remove/rename a column in models.py
+#   - Change the ingestion logic (categorization, parsing, etc.)
+#   - Add a new table to models.py
+#
+# On startup, if the stored version < _SCHEMA_VERSION, the entire database
+# is deleted and rebuilt from reconstruction TSVs. This ensures every user
+# (new clone or existing install) gets a fresh, complete schema.
+#
+# The runtime migrations in main.py._run_migrations() handle the *live*
+# database (inside the Docker volume) where experiments/jobs/results exist
+# and a full rebuild would destroy user data. The two mechanisms are
+# complementary: schema version forces a clean slate for the seed DB,
+# migrations patch the live DB in place.
+#
+# History:
+#   v1: initial schema
+#   v2: added conditions, timelines, complexes tables
+#   v3: added is_mechanistic flag, HTML-stripped gene symbols
+#   v4: added divided (simulation_results), docker_container_id (simulation_jobs),
+#       imported all models so create_all() creates complete schema
+_SCHEMA_VERSION = 4
 
 
 def needs_rebuild() -> bool:

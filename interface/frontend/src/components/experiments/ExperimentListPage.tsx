@@ -4,6 +4,7 @@ import { getExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
 import { BatchDashboard } from './BatchDashboard'
+import { FailedJobsPanel } from './FailedJobsPanel'
 import type { Experiment } from '../../types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -21,7 +22,7 @@ export function ExperimentListPage() {
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [view, setView] = useState<'all' | 'batches'>('all')
+  const [view, setView] = useState<'all' | 'batches' | 'failed'>('all')
   const [searchParams] = useSearchParams()
   const justCreated = searchParams.get('created')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -140,9 +141,21 @@ export function ExperimentListPage() {
         >
           Batches
         </button>
+        <button
+          onClick={() => setView('failed')}
+          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            view === 'failed'
+              ? 'bg-red-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Failed jobs
+        </button>
       </div>
 
-      {view === 'batches' ? (
+      {view === 'failed' ? (
+        <FailedJobsPanel />
+      ) : view === 'batches' ? (
         <BatchDashboard />
       ) : loading ? (
         <div className="text-center py-12 text-gray-400">

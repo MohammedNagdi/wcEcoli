@@ -86,6 +86,37 @@ def _run_migrations(engine):
             cur.execute("ALTER TABLE experiments ADD COLUMN batch_id TEXT NOT NULL DEFAULT ''")
             conn.commit()
 
+        # Migration 3: Add 'divided' column to simulation_results
+        cur.execute("PRAGMA table_info(simulation_results)")
+        res_cols = {row[1] for row in cur.fetchall()}
+        if "divided" not in res_cols:
+            logger.info("Migration: adding 'divided' column to simulation_results")
+            cur.execute("ALTER TABLE simulation_results ADD COLUMN divided INTEGER NOT NULL DEFAULT 1")
+            # Back-fill: mark results with null division_time as not divided
+            cur.execute("""
+                UPDATE simulation_results
+                SET divided = 0
+                WHERE division_time_sec IS NULL
+            """)
+            conn.commit()
+            logger.info("Migration: back-filled divided=0 for %d result(s) with null division_time", cur.rowcount)
+
+        # Migration 4: Add 'is_mechanistic' column to genes
+        cur.execute("PRAGMA table_info(genes)")
+        gene_cols = {row[1] for row in cur.fetchall()}
+        if "is_mechanistic" not in gene_cols:
+            logger.info("Migration: adding 'is_mechanistic' column to genes")
+            cur.execute("ALTER TABLE genes ADD COLUMN is_mechanistic INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+
+        # Migration 5: Add 'docker_container_id' column to simulation_jobs
+        cur.execute("PRAGMA table_info(simulation_jobs)")
+        job_cols = {row[1] for row in cur.fetchall()}
+        if "docker_container_id" not in job_cols:
+            logger.info("Migration: adding 'docker_container_id' column to simulation_jobs")
+            cur.execute("ALTER TABLE simulation_jobs ADD COLUMN docker_container_id TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+
     except Exception as exc:
         logger.warning("Migration check failed: %s", exc)
     finally:
@@ -159,6 +190,7 @@ def _auto_reingest_stale_results(engine):
                                 "final_mass_fg": None,
                                 "growth_rate": None,
                                 "doubling_time_min": None,
+                                "divided": False,
                             }
 
                         new_result = SimulationResult(
@@ -170,6 +202,7 @@ def _auto_reingest_stale_results(engine):
                             final_mass_fg=summary["final_mass_fg"],
                             growth_rate=summary["growth_rate"],
                             doubling_time_min=summary["doubling_time_min"],
+                            divided=summary.get("divided", False),
                             created_at=now,
                         )
                         session.add(new_result)

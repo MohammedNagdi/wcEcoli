@@ -8,11 +8,12 @@ backend/app/**/__pycache__/
 # Build output
 frontend/dist/
 
-# Database (generated at runtime)
+# Database (generated at runtime from reconstruction TSVs)
 backend/*.db
 backend/*.sqlite
 backend/data/*.db
 backend/data/*.sqlite
+backend/.schema_version
 
 # IDE
 .idea/

@@ -138,8 +138,9 @@ class SimulationResult(SQLModel, table=True):
     experiment_id: int = Field(index=True)       # FK to experiments.id
     seed: int = 0
     generation: int = 0
-    division_time_sec: Optional[float] = None    # time to cell division
-    final_mass_fg: Optional[float] = None        # cell mass at division (fg)
-    growth_rate: Optional[float] = None          # average growth rate (1/hr)
-    doubling_time_min: Optional[float] = None    # observed doubling time (min)
+    division_time_sec: Optional[float] = None    # time to cell division (None = never divided)
+    final_mass_fg: Optional[float] = None        # cell mass at end of sim (fg)
+    growth_rate: Optional[float] = None          # average growth rate (1/s)
+    doubling_time_min: Optional[float] = None    # derived doubling time (min)
+    divided: bool = True                         # did the cell divide?
     created_at: str = ""                         # ISO timestamp

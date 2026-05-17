@@ -77,12 +77,27 @@ class SimOutReader:
     # -- Summary extraction --------------------------------------------------
 
     def extract_summary(self):
-        """Extract key summary metrics for the SimulationResult table."""
+        """Extract key summary metrics for the SimulationResult table.
+
+        Division detection strategy:
+        1. Look for a >30% mass drop between consecutive timesteps (clear
+           division event in the Mass listener).
+        2. If no mass drop, check whether final mass roughly doubled from
+           initial mass (≥1.8×) — this indicates division occurred at the end
+           of the simulation without a recorded post-division timestep.
+        3. If neither condition is met, the cell did NOT divide. We set
+           division_time_sec = None (not the total sim time), so downstream
+           code can distinguish essential-gene knockouts from slow growers.
+
+        The ``divided`` boolean flag is included so callers can unambiguously
+        test for division without guessing from None values.
+        """
         result = {
             "division_time_sec": None,
             "final_mass_fg": None,
             "growth_rate": None,
             "doubling_time_min": None,
+            "divided": False,
         }
 
         time = self._read_column("Mass", "time")
@@ -94,22 +109,35 @@ class SimOutReader:
                 cell_mass = cell_mass.sum(axis=1)
             result["final_mass_fg"] = float(cell_mass[-1])
 
+            initial_mass = float(cell_mass[0]) if len(cell_mass) > 0 else 0
+
+            # Strategy 1: detect division via sharp mass drop (>30%)
             if len(cell_mass) > 10:
                 diffs = np.diff(cell_mass)
                 big_drops = np.where(diffs < -cell_mass[:-1] * 0.3)[0]
                 if len(big_drops) > 0 and time is not None:
                     div_idx = big_drops[0]
                     result["division_time_sec"] = float(time[div_idx])
+                    result["divided"] = True
 
-        if time is not None and len(time) > 0:
-            total_sec = float(time[-1]) - float(time[0])
-            if result["division_time_sec"] is None:
-                result["division_time_sec"] = total_sec
+            # Strategy 2: if no mass drop detected, check mass-doubling ratio
+            # (division may have occurred at the very last timestep)
+            if not result["divided"] and initial_mass > 0:
+                mass_ratio = float(cell_mass[-1]) / initial_mass
+                if mass_ratio >= 1.8:
+                    # Cell reached ~2× initial mass — division likely occurred
+                    if time is not None and len(time) > 0:
+                        result["division_time_sec"] = float(time[-1]) - float(time[0])
+                    result["divided"] = True
+
+        # If cell never divided, division_time_sec stays None — this is
+        # intentional.  Do NOT fall back to total_sec for non-dividing cells.
 
         if growth_rate is not None and len(growth_rate) > 0:
             if growth_rate.ndim > 1:
                 growth_rate = growth_rate.mean(axis=1)
-            warmup = max(1, len(growth_rate) // 20)
+            # Skip first 10% as warmup (Parca initial-condition artifacts)
+            warmup = max(1, len(growth_rate) // 10)
             valid = growth_rate[warmup:]
             valid = valid[np.isfinite(valid) & (valid > 0)]
             if len(valid) > 0:

@@ -187,6 +187,22 @@ export interface SimulationJob {
   timeline: string
 }
 
+export interface FailedJobSummary {
+  id: number
+  experiment_id: number
+  experiment_name: string
+  gene_symbol: string
+  variant_type: string
+  variant_index: number
+  condition: string
+  seed: number
+  phase: string
+  error_message: string
+  started_at: string
+  finished_at: string
+  created_at: string
+}
+
 export interface SimulationResult {
   id: number
   job_id: number
@@ -197,6 +213,7 @@ export interface SimulationResult {
   final_mass_fg: number | null
   growth_rate: number | null
   doubling_time_min: number | null
+  divided: boolean
   created_at: string
 }
 
@@ -454,9 +471,18 @@ export interface ComparisonDelta {
   doubling_time_pct: number | null
 }
 
+export interface WildtypeSuggestion {
+  condition: string
+  variant_type: string
+  variant_index: number
+  message: string
+  recommended_seeds: number
+}
+
 export interface ComparisonResponse {
   experiments: ComparisonExperiment[]
   wildtype: ComparisonExperiment | null
+  wildtype_suggestion: WildtypeSuggestion | null
   deltas: ComparisonDelta[]
 }
 

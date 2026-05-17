@@ -327,11 +327,12 @@ def _ingest_results(
             reader = SimOutReader(sim_out_path)
             summary = reader.extract_summary()
             if summary['final_mass_fg']:
+                div_str = ("%.0fs" % summary['division_time_sec']) if summary['division_time_sec'] else "N/A"
+                gr_str = ("%.4f" % summary['growth_rate']) if summary['growth_rate'] else "N/A"
                 log_buffer.append(
-                    "  Mass: %.1f fg, div time: %.0fs, growth rate: %.4f" % (
-                        summary['final_mass_fg'],
-                        summary['division_time_sec'],
-                        summary['growth_rate'],
+                    "  Mass: %.1f fg, div time: %s, growth rate: %s, divided: %s" % (
+                        summary['final_mass_fg'], div_str, gr_str,
+                        summary.get('divided', '?'),
                     )
                 )
             else:
@@ -343,6 +344,7 @@ def _ingest_results(
                 "final_mass_fg": None,
                 "growth_rate": None,
                 "doubling_time_min": None,
+                "divided": False,
             }
 
         result = SimulationResult(
@@ -354,6 +356,7 @@ def _ingest_results(
             final_mass_fg=summary["final_mass_fg"],
             growth_rate=summary["growth_rate"],
             doubling_time_min=summary["doubling_time_min"],
+            divided=summary.get("divided", False),
             created_at=_now(),
         )
         session.add(result)
