@@ -189,17 +189,18 @@ Output goes to `out/<run_id>/<variant_dir>/<seed>/generation_000000/000000/simOu
 
 ## UI Pages
 
-The interface has 7 navigation tabs:
+The interface uses a three-stage workflow navigation — **Explore → Simulate → Analyze** — with a secondary sub-nav for stages that contain multiple pages:
 
-| Tab | Page | Description |
-|-----|------|-------------|
-| **Genes** | Gene catalog | Searchable/filterable table of all 1,592 genes with categories, mechanistic status, and links to TF regulation |
-| **TF Network** | Transcription factor network | Interactive Cytoscape.js graph of TF → target regulatory connections |
-| **Experiments** | Experiment designer | Create single or batch knockout experiments, configure conditions and timelines |
-| **Results** | Results browser | Time-series charts (mass, growth rate, RNA/DNA/protein), summary cards, molecule explorer with per-gene/mRNA/protein trajectories |
-| **ML** | Machine learning | Train surrogate classifiers (Random Forest, Gradient Boosting) on simulation features — essentiality prediction with cross-validation metrics |
-| **Design** | Genome design | Genome-wide essentiality overview with phenotype classification (essential / growth defect / neutral), stacked bar charts by category |
-| **Guide** | Documentation | In-platform reference for experiment configuration options, variant types, and conditions |
+| Stage | Page | Description |
+|-------|------|-------------|
+| **Explore** | Genes | Searchable/filterable table of all 1,592 genes with categories, mechanistic status, and links to TF regulation |
+| **Explore** | Network | Interactive Cytoscape.js graph of TF → target regulatory connections |
+| **Simulate** | Experiments | Create single or batch knockout experiments, configure conditions and timelines |
+| **Analyze** | Results | Time-series charts (mass, growth rate, RNA/DNA/protein), summary cards, molecule explorer with per-gene/mRNA/protein trajectories |
+| **Analyze** | ML | Train surrogate classifiers (Random Forest, Gradient Boosting) on simulation features — essentiality prediction with cross-validation metrics |
+| **Analyze** | Design | Genome-wide essentiality overview with phenotype classification (essential / growth defect / neutral), stacked bar charts by category |
+
+A **Guide** icon in the header provides in-platform reference for experiment configuration, variant types, and conditions.
 
 ---
 
@@ -310,6 +311,8 @@ interface/
 ├── docker-compose.yml                 # Backend + Worker + Frontend (all-in-one)
 ├── docker-compose.sim.yml             # Simulation image build only
 ├── start-worker.sh                    # Convenience script for native worker
+├── tests/
+│   └── smoke_test_fresh_clone.py      # Fresh-clone validation (schema, data, API)
 │
 ├── backend/
 │   ├── Dockerfile                     # Backend container image
@@ -422,7 +425,7 @@ interface/
 
 ## Troubleshooting
 
-**OneDrive sync conflicts:** If the repo lives inside a OneDrive-synced folder, you may see truncated files, git lock errors, and slow git operations. The fix is to either exclude the folder from OneDrive sync (right-click → "Free up space" or move the repo outside OneDrive) or use `git checkout -- <file>` to restore truncated files from the committed version.
+**OneDrive sync conflicts:** If the repo lives inside a OneDrive-synced folder, you may see truncated files, git lock errors, phantom "modified" files, and slow git operations. **Strongly recommended:** move the repo outside OneDrive entirely (e.g. `C:\dev\wcEcoli`). If already in OneDrive, use `robocopy /E` to copy the full repo out, verify with `git status`, then delete the OneDrive copy. For individual truncated files, `git checkout -- <file>` restores from the committed version.
 
 **Stale git lock files:** If git complains about `.lock` files after a crash or timeout, delete them manually:
 ```powershell
@@ -435,4 +438,11 @@ Remove-Item .git\refs\remotes\*.lock -Force -Recurse -ErrorAction SilentlyContin
 
 **Worker can't connect to Docker:** Ensure the Docker daemon is running and your user has socket access. On Linux: `sudo usermod -aG docker $USER` then re-login.
 
-**Database reingest:** If you change the backend schema or need to rebuild the gene database, delete `interface/backend/data/wcecoli.db` and restart the backend. It will re-parse all TSV files automatically.
+**Database reingest:** If you change the backend schema or need to rebuild the gene database, delete `interface/backend/data/wcecoli.db` and restart the backend. It will re-parse all TSV files automatically. Schema version bumps (in `init_db.py`) trigger automatic rebuilds — user data (experiments, jobs, results) is backed up before the rebuild and restored afterwards, so simulation history survives schema upgrades.
+
+**Smoke test:** To verify a fresh clone works end-to-end, run the smoke test from the `interface/` directory:
+```bash
+cd interface
+python -m pytest tests/smoke_test_fresh_clone.py -v
+```
+This validates that all 10 database tables are created, user-data tables are empty (no data leaks), the gene catalog is populated, API endpoints respond, and the schema version is tracked correctly.

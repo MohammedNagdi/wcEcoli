@@ -561,8 +561,117 @@ def needs_rebuild() -> bool:
     return False
 
 
+def _backup_user_tables(db_path: Path) -> dict[str, list[tuple]]:
+    """Back up user-data tables before a schema rebuild.
+
+    Returns {table_name: [(col_names,...), row1, row2, ...]} for each
+    non-empty user table.  Returns an empty dict if the DB doesn't exist
+    or has no user data.
+    """
+    import sqlite3
+
+    USER_TABLES = ["experiments", "simulation_jobs", "simulation_results"]
+    backup: dict[str, list[tuple]] = {}
+
+    if not db_path.exists():
+        return backup
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cur = conn.cursor()
+
+        # Which of the user tables actually exist?
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        existing = {row[0] for row in cur.fetchall()}
+
+        for table in USER_TABLES:
+            if table not in existing:
+                continue
+            cur.execute(f"SELECT COUNT(*) FROM {table}")
+            if cur.fetchone()[0] == 0:
+                continue
+            # Grab column names
+            cur.execute(f"PRAGMA table_info({table})")
+            col_names = tuple(row[1] for row in cur.fetchall())
+            # Grab all rows
+            cur.execute(f"SELECT * FROM {table}")
+            rows = cur.fetchall()
+            backup[table] = [col_names] + rows
+            logger.info("Backed up %d rows from '%s'", len(rows), table)
+
+        conn.close()
+    except Exception as exc:
+        logger.warning("Could not back up user tables: %s", exc)
+
+    return backup
+
+
+def _restore_user_tables(engine, backup: dict[str, list[tuple]]) -> None:
+    """Restore user-data rows after a schema rebuild.
+
+    Handles column mismatches gracefully: if the new schema added or
+    removed columns, only the columns present in BOTH the backup and
+    the new table are restored.  Missing columns get their defaults.
+    """
+    import sqlite3
+
+    if not backup:
+        return
+
+    db_url = str(engine.url).replace("sqlite:///", "")
+    conn = sqlite3.connect(db_url)
+    cur = conn.cursor()
+
+    try:
+        for table, data in backup.items():
+            if len(data) < 2:          # header-only, no rows
+                continue
+
+            backup_cols = data[0]       # tuple of column names from old schema
+            rows = data[1:]
+
+            # Get new schema's columns
+            cur.execute(f"PRAGMA table_info({table})")
+            new_cols = {row[1] for row in cur.fetchall()}
+
+            # Only restore columns that exist in BOTH old and new schemas
+            shared_cols = [c for c in backup_cols if c in new_cols]
+            if not shared_cols:
+                logger.warning("No shared columns for '%s' — skipping restore", table)
+                continue
+
+            # Build index mapping: which positions in old rows to keep
+            col_indices = [backup_cols.index(c) for c in shared_cols]
+            placeholders = ", ".join("?" for _ in shared_cols)
+            col_list = ", ".join(shared_cols)
+
+            insert_sql = f"INSERT OR IGNORE INTO {table} ({col_list}) VALUES ({placeholders})"
+
+            restored = 0
+            for row in rows:
+                values = tuple(row[i] for i in col_indices)
+                try:
+                    cur.execute(insert_sql, values)
+                    restored += 1
+                except Exception as exc:
+                    logger.warning("Failed to restore row in '%s': %s", table, exc)
+
+            logger.info("Restored %d/%d rows to '%s'", restored, len(rows), table)
+
+        conn.commit()
+    except Exception as exc:
+        logger.warning("User-table restore failed: %s", exc)
+    finally:
+        conn.close()
+
+
 def init_database() -> None:
-    """Initialize the database, ingesting all reconstruction data."""
+    """Initialize the database, ingesting all reconstruction data.
+
+    When a schema-version bump triggers a rebuild, user-data tables
+    (experiments, simulation_jobs, simulation_results) are backed up
+    before the old DB is deleted and restored after the new one is built.
+    """
     if not needs_rebuild():
         logger.info("Database is up to date, skipping rebuild")
         return
@@ -570,6 +679,14 @@ def init_database() -> None:
     logger.info("Building database from reconstruction data...")
     db_path = settings.database_path
     db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── Back up user data before destroying the old DB ──
+    user_backup = _backup_user_tables(db_path)
+    if user_backup:
+        logger.info(
+            "Preserved user data: %s",
+            ", ".join(f"{t} ({len(d)-1} rows)" for t, d in user_backup.items()),
+        )
 
     # Remove old database
     if db_path.exists():
@@ -590,6 +707,9 @@ def init_database() -> None:
     # Reset reconstruction category cache after ingestion
     global _recon_categories
     _recon_categories = None
+
+    # ── Restore user data that was backed up before rebuild ──
+    _restore_user_tables(engine, user_backup)
 
     # Write schema version marker
     version_path = db_path.parent / ".schema_version"
