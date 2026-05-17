@@ -101,6 +101,7 @@ class Experiment(SQLModel, table=True):
     created_at: str = ""                         # ISO timestamp
     updated_at: str = ""                         # ISO timestamp
     gene_symbol: str = ""                        # for gene_knockout: the target gene
+    batch_id: str = ""                           # UUID grouping batch-created experiments
 
 
 class SimulationJob(SQLModel, table=True):

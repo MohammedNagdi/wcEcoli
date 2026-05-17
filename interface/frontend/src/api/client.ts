@@ -7,13 +7,14 @@ import type {
   Gene, GeneDetail, GeneSearchResult, CategoryCount,
   TFNetwork, TFNode, AAPathway, Condition, Timeline, Variant,
   VariantDetail, Experiment, ExperimentCreate,
-  BatchRequest, BatchResponse,
+  BatchRequest, BatchResponse, BatchSummary, BatchDetail, BatchRunResponse,
   SimulationJob, SimulationResult, RunJobRequest, RunResponse, ResultsResponse,
   ExperimentAggregation,
   FeatureExtractionResponse,
   MoleculeListResponse, MoleculeIdsResponse, MoleculeTimeseriesResponse,
   TrainRequest, TrainResponse, DataSummary,
   DesignOverview, EssentialityStats,
+  ComparisonResponse,
 } from '../types'
 
 const BASE = '/api'
@@ -132,6 +133,18 @@ export async function createBatchExperiments(data: BatchRequest): Promise<BatchR
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
+}
+
+export async function getBatches(): Promise<BatchSummary[]> {
+  return fetchJSON('/experiments/batches')
+}
+
+export async function getBatchDetail(batchId: string): Promise<BatchDetail> {
+  return fetchJSON(`/experiments/batches/${batchId}`)
+}
+
+export async function runBatch(batchId: string): Promise<BatchRunResponse> {
+  return fetchJSON(`/experiments/batches/${batchId}/run`, { method: 'POST' })
 }
 
 // --- Simulation Jobs ---
@@ -279,6 +292,26 @@ export async function getEssentiality(
   if (condition) qs.set('condition', condition)
   const query = qs.toString()
   return fetchJSON(`/design/essentiality${query ? '?' + query : ''}`)
+}
+
+// --- Comparison ---
+
+export async function compareExperiments(
+  ids: number[],
+  includeWildtype = true
+): Promise<ComparisonResponse> {
+  const qs = new URLSearchParams()
+  qs.set('ids', ids.join(','))
+  if (!includeWildtype) qs.set('include_wildtype', 'false')
+  return fetchJSON(`/experiments/compare?${qs.toString()}`)
+}
+
+export async function compareBatch(
+  batchId: string,
+  includeWildtype = true
+): Promise<ComparisonResponse> {
+  const qs = includeWildtype ? '' : '?include_wildtype=false'
+  return fetchJSON(`/experiments/compare/batch/${batchId}${qs}`)
 }
 
 // --- Health ---

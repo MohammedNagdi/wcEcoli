@@ -1,8 +1,10 @@
 """Experiment configuration API endpoints."""
 
+import json
 import logging
 import math
 import statistics
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -61,6 +63,7 @@ class ExperimentOut(BaseModel):
     created_at: str
     updated_at: str
     gene_symbol: str
+    batch_id: str = ""
 
 
 class VariantDetailOut(BaseModel):
@@ -192,6 +195,390 @@ def create_experiment(
     session.refresh(experiment)
     return ExperimentOut.model_validate(experiment, from_attributes=True)
 
+
+# ── Batch list, detail, and run ────────────────────────────────────────
+# These MUST be defined before /{experiment_id} to avoid route conflicts.
+
+class BatchSummary(BaseModel):
+    batch_id: str
+    name: str
+    created_at: str
+    total: int
+    draft: int = 0
+    queued: int = 0
+    running: int = 0
+    done: int = 0
+    failed: int = 0
+
+
+class BatchDetail(BaseModel):
+    batch_id: str
+    name: str
+    created_at: str
+    total: int
+    draft: int = 0
+    queued: int = 0
+    running: int = 0
+    done: int = 0
+    failed: int = 0
+    experiments: list[ExperimentOut]
+
+
+class BatchRunResponse(BaseModel):
+    batch_id: str
+    queued: int
+    skipped: int
+    total_jobs: int
+    message: str
+
+
+@router.get("/batches", response_model=list[BatchSummary])
+def list_batches(session: Session = Depends(get_session)):
+    """List all batch groups with summary stats."""
+    experiments = session.exec(
+        select(Experiment).where(Experiment.batch_id != "")
+    ).all()
+
+    batches: dict[str, list[Experiment]] = {}
+    for exp in experiments:
+        batches.setdefault(exp.batch_id, []).append(exp)
+
+    result: list[BatchSummary] = []
+    for bid, exps in batches.items():
+        status_counts = {"draft": 0, "queued": 0, "running": 0, "done": 0, "failed": 0}
+        for e in exps:
+            bucket = e.status
+            if bucket in ("running_parca", "running_sim", "ingesting"):
+                bucket = "running"
+            if bucket in status_counts:
+                status_counts[bucket] += 1
+
+        # Derive batch name from first experiment's description or common prefix
+        first = min(exps, key=lambda e: e.created_at or "")
+        name = first.description or f"Batch ({len(exps)} experiments)"
+
+        result.append(BatchSummary(
+            batch_id=bid,
+            name=name,
+            created_at=first.created_at,
+            total=len(exps),
+            **status_counts,
+        ))
+
+    result.sort(key=lambda b: b.created_at, reverse=True)
+    return result
+
+
+@router.get("/batches/{batch_id}", response_model=BatchDetail)
+def get_batch_detail(batch_id: str, session: Session = Depends(get_session)):
+    """Get full detail for a single batch including all experiments."""
+    experiments = session.exec(
+        select(Experiment).where(Experiment.batch_id == batch_id)
+    ).all()
+
+    if not experiments:
+        raise HTTPException(404, f"Batch not found: {batch_id}")
+
+    status_counts = {"draft": 0, "queued": 0, "running": 0, "done": 0, "failed": 0}
+    for e in experiments:
+        bucket = e.status
+        if bucket in ("running_parca", "running_sim", "ingesting"):
+            bucket = "running"
+        if bucket in status_counts:
+            status_counts[bucket] += 1
+
+    first = min(experiments, key=lambda e: e.created_at or "")
+    name = first.description or f"Batch ({len(experiments)} experiments)"
+
+    exp_out = [
+        ExperimentOut(
+            id=e.id, name=e.name, description=e.description,
+            variant_type=e.variant_type, variant_index=e.variant_index,
+            condition=e.condition, timeline=e.timeline,
+            sim_params=e.sim_params, status=e.status,
+            created_at=e.created_at, updated_at=e.updated_at,
+            gene_symbol=e.gene_symbol, batch_id=e.batch_id,
+        )
+        for e in sorted(experiments, key=lambda e: e.name)
+    ]
+
+    return BatchDetail(
+        batch_id=batch_id,
+        name=name,
+        created_at=first.created_at,
+        total=len(experiments),
+        experiments=exp_out,
+        **status_counts,
+    )
+
+
+@router.post("/batches/{batch_id}/run", response_model=BatchRunResponse)
+def run_batch(batch_id: str, session: Session = Depends(get_session)):
+    """Submit all draft experiments in a batch for simulation.
+
+    Creates simulation jobs for each draft experiment using its sim_params.
+    Experiments already queued/running/done are skipped.
+    """
+    experiments = session.exec(
+        select(Experiment).where(Experiment.batch_id == batch_id)
+    ).all()
+
+    if not experiments:
+        raise HTTPException(404, f"Batch not found: {batch_id}")
+
+    queued_count = 0
+    skipped_count = 0
+    total_jobs = 0
+
+    for exp in experiments:
+        if exp.status != "draft":
+            skipped_count += 1
+            continue
+
+        # Parse sim_params for seeds/generations
+        try:
+            params = json.loads(exp.sim_params) if exp.sim_params else {}
+        except Exception:
+            params = {}
+
+        body = RunJobRequest(
+            seeds=params.get("seeds", 1),
+            generations=params.get("generations", 1),
+            condition=exp.condition,
+        )
+
+        try:
+            resp = create_simulation_jobs_for_experiment(exp, body, session)
+            total_jobs += len(resp.job_ids)
+            queued_count += 1
+        except HTTPException:
+            skipped_count += 1
+
+    return BatchRunResponse(
+        batch_id=batch_id,
+        queued=queued_count,
+        skipped=skipped_count,
+        total_jobs=total_jobs,
+        message=f"Queued {queued_count} experiments ({total_jobs} jobs), skipped {skipped_count}",
+    )
+
+
+# ── Multi-experiment comparison ────────────────────────────────────────
+# Must be defined before /{experiment_id} to avoid route conflicts.
+
+class ComparisonMetric(BaseModel):
+    """Aggregated metric for one experiment in a comparison."""
+    mean: Optional[float] = None
+    std: Optional[float] = None
+    n: int = 0
+
+class ComparisonExperiment(BaseModel):
+    """One experiment row in a comparison table."""
+    experiment_id: int
+    experiment_name: str
+    gene_symbol: str
+    variant_type: str
+    variant_index: int
+    condition: str
+    is_wildtype: bool = False
+    total_seeds: int = 0
+    completed_seeds: int = 0
+    divided_seeds: int = 0
+    division_time_min: ComparisonMetric
+    final_mass_fg: ComparisonMetric
+    growth_rate: ComparisonMetric
+    doubling_time_min: ComparisonMetric
+
+class ComparisonDelta(BaseModel):
+    """Delta between a knockout and the wildtype baseline."""
+    experiment_id: int
+    gene_symbol: str
+    division_time_pct: Optional[float] = None
+    final_mass_pct: Optional[float] = None
+    growth_rate_pct: Optional[float] = None
+    doubling_time_pct: Optional[float] = None
+
+class ComparisonResponse(BaseModel):
+    """Multi-experiment comparison with optional wildtype baseline."""
+    experiments: list[ComparisonExperiment]
+    wildtype: Optional[ComparisonExperiment] = None
+    deltas: list[ComparisonDelta] = []
+
+
+def _comparison_metric(values: list[Optional[float]]) -> ComparisonMetric:
+    clean = [v for v in values if v is not None]
+    n = len(clean)
+    if n == 0:
+        return ComparisonMetric(mean=None, std=None, n=0)
+    mean = statistics.mean(clean)
+    std = statistics.stdev(clean) if n > 1 else None
+    return ComparisonMetric(
+        mean=round(mean, 4),
+        std=round(std, 4) if std is not None else None,
+        n=n,
+    )
+
+
+def _build_comparison_experiment(
+    experiment: Experiment,
+    session: Session,
+    is_wildtype: bool = False,
+) -> ComparisonExperiment:
+    """Build a ComparisonExperiment from an Experiment + its jobs/results."""
+    jobs = session.exec(
+        select(SimulationJob)
+        .where(SimulationJob.experiment_id == experiment.id)
+    ).all()
+
+    completed = [j for j in jobs if j.status == "done"]
+
+    div_times: list[Optional[float]] = []
+    masses: list[Optional[float]] = []
+    growth_rates: list[Optional[float]] = []
+    doubling_times: list[Optional[float]] = []
+
+    for job in completed:
+        result = session.exec(
+            select(SimulationResult)
+            .where(SimulationResult.job_id == job.id)
+            .order_by(SimulationResult.generation)
+            .limit(1)
+        ).first()
+        if result:
+            div_t = result.division_time_sec
+            div_times.append(div_t / 60.0 if div_t is not None else None)
+            masses.append(result.final_mass_fg)
+            growth_rates.append(result.growth_rate)
+            doubling_times.append(result.doubling_time_min)
+
+    divided = sum(1 for d in div_times if d is not None)
+
+    return ComparisonExperiment(
+        experiment_id=experiment.id,
+        experiment_name=experiment.name,
+        gene_symbol=experiment.gene_symbol or ("wildtype" if is_wildtype else ""),
+        variant_type=experiment.variant_type,
+        variant_index=experiment.variant_index,
+        condition=experiment.condition,
+        is_wildtype=is_wildtype,
+        total_seeds=len(jobs),
+        completed_seeds=len(completed),
+        divided_seeds=divided,
+        division_time_min=_comparison_metric(div_times),
+        final_mass_fg=_comparison_metric(masses),
+        growth_rate=_comparison_metric(growth_rates),
+        doubling_time_min=_comparison_metric(doubling_times),
+    )
+
+
+def _pct_change(ko_val: Optional[float], wt_val: Optional[float]) -> Optional[float]:
+    """Percentage change from wildtype to knockout."""
+    if ko_val is None or wt_val is None or wt_val == 0:
+        return None
+    return round(((ko_val - wt_val) / abs(wt_val)) * 100, 2)
+
+
+@router.get("/compare", response_model=ComparisonResponse)
+def compare_experiments(
+    ids: str = Query(..., description="Comma-separated experiment IDs"),
+    include_wildtype: bool = Query(True, description="Include wildtype baseline"),
+    session: Session = Depends(get_session),
+):
+    """Compare multiple experiments side-by-side with optional wildtype baseline.
+
+    Returns aggregated metrics for each experiment plus percentage deltas
+    relative to a wildtype baseline (auto-detected or from the same condition).
+    """
+    exp_ids = [int(x.strip()) for x in ids.split(",") if x.strip()]
+    if not exp_ids:
+        raise HTTPException(400, "No experiment IDs provided")
+
+    experiments_out: list[ComparisonExperiment] = []
+    condition = None
+
+    for eid in exp_ids:
+        experiment = session.get(Experiment, eid)
+        if not experiment:
+            continue
+        comp = _build_comparison_experiment(experiment, session, is_wildtype=False)
+        experiments_out.append(comp)
+        if condition is None:
+            condition = experiment.condition
+
+    if not experiments_out:
+        raise HTTPException(404, "No valid experiments found")
+
+    # Find wildtype baseline for the same condition
+    wildtype_comp: Optional[ComparisonExperiment] = None
+    deltas: list[ComparisonDelta] = []
+
+    if include_wildtype and condition:
+        wt_experiment = session.exec(
+            select(Experiment).where(
+                Experiment.variant_type == "wildtype",
+                Experiment.condition == condition,
+                Experiment.status == "done",
+            ).order_by(Experiment.created_at.desc())
+        ).first()
+
+        if wt_experiment:
+            wildtype_comp = _build_comparison_experiment(
+                wt_experiment, session, is_wildtype=True
+            )
+
+            # Compute deltas
+            for comp in experiments_out:
+                deltas.append(ComparisonDelta(
+                    experiment_id=comp.experiment_id,
+                    gene_symbol=comp.gene_symbol,
+                    division_time_pct=_pct_change(
+                        comp.division_time_min.mean,
+                        wildtype_comp.division_time_min.mean
+                    ),
+                    final_mass_pct=_pct_change(
+                        comp.final_mass_fg.mean,
+                        wildtype_comp.final_mass_fg.mean
+                    ),
+                    growth_rate_pct=_pct_change(
+                        comp.growth_rate.mean,
+                        wildtype_comp.growth_rate.mean
+                    ),
+                    doubling_time_pct=_pct_change(
+                        comp.doubling_time_min.mean,
+                        wildtype_comp.doubling_time_min.mean
+                    ),
+                ))
+
+    return ComparisonResponse(
+        experiments=experiments_out,
+        wildtype=wildtype_comp,
+        deltas=deltas,
+    )
+
+
+@router.get("/compare/batch/{batch_id}", response_model=ComparisonResponse)
+def compare_batch(
+    batch_id: str,
+    include_wildtype: bool = Query(True),
+    session: Session = Depends(get_session),
+):
+    """Compare all completed experiments in a batch."""
+    experiments = session.exec(
+        select(Experiment).where(Experiment.batch_id == batch_id)
+    ).all()
+
+    if not experiments:
+        raise HTTPException(404, f"Batch not found: {batch_id}")
+
+    completed = [e for e in experiments if e.status == "done"]
+    if not completed:
+        raise HTTPException(404, "No completed experiments in this batch")
+
+    ids_str = ",".join(str(e.id) for e in completed)
+    return compare_experiments(ids=ids_str, include_wildtype=include_wildtype, session=session)
+
+
+# ── Single experiment CRUD (parameterized — must come after static paths) ──
 
 @router.get("/{experiment_id}", response_model=ExperimentOut)
 def get_experiment(experiment_id: int, session: Session = Depends(get_session)):
@@ -439,6 +826,7 @@ class BatchRequest(BaseModel):
 
 
 class BatchResponse(BaseModel):
+    batch_id: str
     created: int
     experiment_ids: list[int]
     skipped: int = 0
@@ -462,6 +850,8 @@ def create_batch_experiments(
 
     if len(items) > 5000:
         raise HTTPException(400, f"Batch too large: {len(items)} items (max 5000)")
+
+    batch_id = str(uuid.uuid4())
 
     variant_cache: dict[str, Variant] = {}
     for item in items:
@@ -527,15 +917,17 @@ def create_batch_experiments(
             created_at=now,
             updated_at=now,
             gene_symbol=gene_symbol,
+            batch_id=batch_id,
         )
         session.add(experiment)
         session.flush()
         created_ids.append(experiment.id)
 
     session.commit()
-    logger.info("Batch created %d experiments (%d skipped)", len(created_ids), len(skipped_genes))
+    logger.info("Batch %s created %d experiments (%d skipped)", batch_id, len(created_ids), len(skipped_genes))
 
     return BatchResponse(
+        batch_id=batch_id,
         created=len(created_ids),
         experiment_ids=created_ids,
         skipped=len(skipped_genes),
@@ -581,3 +973,5 @@ def _expand_screen(body: BatchRequest, session: Session) -> list[BatchExperiment
 
     else:
         raise HTTPException(400, f"Unknown screen preset: '{body.screen}'")
+
+

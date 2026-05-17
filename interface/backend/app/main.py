@@ -78,6 +78,14 @@ def _run_migrations(engine):
             """)
             conn.commit()
             logger.info("Migration: back-filled condition for %d job(s)", cur.rowcount)
+        # Migration 2: Add 'batch_id' column to experiments
+        cur.execute("PRAGMA table_info(experiments)")
+        exp_cols = {row[1] for row in cur.fetchall()}
+        if "batch_id" not in exp_cols:
+            logger.info("Migration: adding 'batch_id' column to experiments")
+            cur.execute("ALTER TABLE experiments ADD COLUMN batch_id TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+
     except Exception as exc:
         logger.warning("Migration check failed: %s", exc)
     finally:

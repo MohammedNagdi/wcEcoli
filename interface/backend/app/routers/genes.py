@@ -49,7 +49,7 @@ def list_genes(
     category: Optional[str] = Query(None, description="Filter by functional category"),
     mechanistic: Optional[bool] = Query(None, description="Filter by mechanistic status"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=5000),
     session: Session = Depends(get_session),
 ):
     """List genes with optional search, category, and mechanistic filter."""

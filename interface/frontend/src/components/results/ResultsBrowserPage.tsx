@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { getJobs, getExperiments, getExperimentResults } from '../../api/client'
+import { getJobs, getExperiments, getExperimentResults, compareExperiments } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
 import { HelpTip } from '../common/HelpTip'
-import type { SimulationJob, Experiment, ExperimentAggregation } from '../../types'
+import type { SimulationJob, Experiment, ExperimentAggregation, ComparisonDelta } from '../../types'
 
 const JOB_STATUS_COLORS: Record<string, string> = {
   pending:       'bg-yellow-50 text-yellow-700',
@@ -46,8 +46,27 @@ function MetricWithCI({ label, metric, unit, decimals = 1, transform }: {
 
 // -- Experiment card for aggregated view --
 
+function DeltaIndicator({ pct, label }: { pct: number | null; label: string }) {
+  if (pct == null) return null
+  const isNeutral = Math.abs(pct) < 2
+  const isPositive = pct > 0
+  const color = isNeutral
+    ? 'text-gray-500'
+    : isPositive
+      ? 'text-amber-600'
+      : 'text-blue-600'
+  const arrow = isNeutral ? '~' : isPositive ? '↑' : '↓'
+  return (
+    <span className={`text-xs font-medium ${color}`} title={`${label}: ${pct > 0 ? '+' : ''}${pct.toFixed(1)}% vs wildtype`}>
+      {arrow}{Math.abs(pct).toFixed(1)}%
+    </span>
+  )
+}
+
+
 function ExperimentCard({ exp, jobs }: { exp: Experiment; jobs: SimulationJob[] }) {
   const [agg, setAgg] = useState<ExperimentAggregation | null>(null)
+  const [wtDelta, setWtDelta] = useState<ComparisonDelta | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -64,6 +83,15 @@ function ExperimentCard({ exp, jobs }: { exp: Experiment; jobs: SimulationJob[] 
       .then(setAgg)
       .catch(() => {})
       .finally(() => setLoading(false))
+
+    // Fetch wildtype comparison for knockout experiments
+    if (exp.variant_type === 'gene_knockout') {
+      compareExperiments([exp.id], true)
+        .then((resp) => {
+          if (resp.deltas.length > 0) setWtDelta(resp.deltas[0])
+        })
+        .catch(() => {})
+    }
   }, [exp.id, doneJobs.length])
 
   return (
@@ -176,6 +204,17 @@ function ExperimentCard({ exp, jobs }: { exp: Experiment; jobs: SimulationJob[] 
               <span className="font-mono">{agg.seeds[0].doubling_time_min != null ? agg.seeds[0].doubling_time_min.toFixed(1) + ' min' : '—'}</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Wildtype comparison strip */}
+      {wtDelta && agg && (
+        <div className="px-5 pb-2 pt-2 border-t border-gray-100 flex items-center gap-4 text-xs">
+          <span className="text-gray-400 font-medium">vs wildtype:</span>
+          <DeltaIndicator pct={wtDelta.division_time_pct} label="Division time" />
+          <DeltaIndicator pct={wtDelta.final_mass_pct} label="Final mass" />
+          <DeltaIndicator pct={wtDelta.growth_rate_pct} label="Growth rate" />
+          <DeltaIndicator pct={wtDelta.doubling_time_pct} label="Doubling time" />
         </div>
       )}
 
@@ -324,6 +363,14 @@ export function ResultsBrowserPage() {
             }
           </p>
         </div>
+        <div className="flex items-center gap-3">
+          <Link
+            to="/results/compare"
+            className="px-4 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100
+                       border border-brand-200 rounded-lg transition-colors"
+          >
+            Compare experiments
+          </Link>
         <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
           <button
             onClick={() => setViewMode('experiments')}
@@ -345,6 +392,7 @@ export function ResultsBrowserPage() {
           >
             All jobs
           </button>
+        </div>
         </div>
       </div>
 

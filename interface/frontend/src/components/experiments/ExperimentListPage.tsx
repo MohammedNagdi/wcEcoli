@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
+import { BatchDashboard } from './BatchDashboard'
 import type { Experiment } from '../../types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -20,6 +21,7 @@ export function ExperimentListPage() {
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [view, setView] = useState<'all' | 'batches'>('all')
   const [searchParams] = useSearchParams()
   const justCreated = searchParams.get('created')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -66,6 +68,9 @@ export function ExperimentListPage() {
     setExperiments((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))
   }
 
+  // Hide batch-created experiments from the "All experiments" tab
+  const standaloneExperiments = experiments.filter((e) => !e.batch_id)
+
   // Derive selected experiment from list — auto-updates when polling refreshes
   const selectedExperiment = selectedId != null
     ? experiments.find((e) => e.id === selectedId) ?? null
@@ -89,13 +94,22 @@ export function ExperimentListPage() {
             Saved simulation configurations
           </p>
         </div>
-        <Link
-          to="/experiments/new"
-          className="px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700
-                     rounded-lg transition-colors"
-        >
-          + New experiment
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/experiments/batch"
+            className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100
+                       border border-brand-200 rounded-lg transition-colors"
+          >
+            + Batch
+          </Link>
+          <Link
+            to="/experiments/new"
+            className="px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700
+                       rounded-lg transition-colors"
+          >
+            + New experiment
+          </Link>
+        </div>
       </div>
 
       {justCreated && (
@@ -104,12 +118,38 @@ export function ExperimentListPage() {
         </div>
       )}
 
-      {loading ? (
+      {/* View toggle */}
+      <div className="flex items-center gap-1 mb-4">
+        <button
+          onClick={() => setView('all')}
+          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            view === 'all'
+              ? 'bg-brand-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          All experiments
+        </button>
+        <button
+          onClick={() => setView('batches')}
+          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            view === 'batches'
+              ? 'bg-brand-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Batches
+        </button>
+      </div>
+
+      {view === 'batches' ? (
+        <BatchDashboard />
+      ) : loading ? (
         <div className="text-center py-12 text-gray-400">
           <div className="inline-block w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mr-2" />
           Loading experiments...
         </div>
-      ) : experiments.length === 0 ? (
+      ) : standaloneExperiments.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
           <svg className="w-10 h-10 mx-auto mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
@@ -139,7 +179,7 @@ export function ExperimentListPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {experiments.map((exp) => (
+              {standaloneExperiments.map((exp) => (
                 <tr
                   key={exp.id}
                   onClick={() => setSelectedId(exp.id === selectedId ? null : exp.id)}

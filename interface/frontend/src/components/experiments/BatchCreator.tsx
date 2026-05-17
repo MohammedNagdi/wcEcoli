@@ -1,0 +1,425 @@
+import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { getGenes, getConditions, createBatchExperiments } from '../../api/client'
+import type { Gene, Condition, BatchRequest } from '../../types'
+
+const SCREEN_PRESETS = [
+  { value: '', label: 'Manual selection' },
+  { value: 'all_mechanistic', label: 'All mechanistic genes' },
+  { value: 'gene_knockout_category:Amino acid biosynthesis', label: 'Category: Amino acid biosynthesis' },
+  { value: 'gene_knockout_category:Transcription', label: 'Category: Transcription' },
+  { value: 'gene_knockout_category:Translation', label: 'Category: Translation' },
+  { value: 'gene_knockout_category:Cell division', label: 'Category: Cell division' },
+  { value: 'gene_knockout_category:DNA replication', label: 'Category: DNA replication' },
+  { value: 'gene_knockout_category:Metabolism', label: 'Category: Metabolism' },
+]
+
+export function BatchCreator() {
+  const navigate = useNavigate()
+
+  // Data state
+  const [genes, setGenes] = useState<Gene[]>([])
+  const [conditions, setConditions] = useState<Condition[]>([])
+  const [loading, setLoading] = useState(true)
+
+  // Selection state
+  const [selectedGenes, setSelectedGenes] = useState<Set<string>>(new Set())
+  const [screenPreset, setScreenPreset] = useState('')
+
+  // Filters
+  const [search, setSearch] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+
+  // Shared config
+  const [condition, setCondition] = useState('basal')
+  const [seeds, setSeeds] = useState(4)
+  const [generations, setGenerations] = useState(1)
+  const [description, setDescription] = useState('')
+
+  // Submit state
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<{ created: number; skipped: number; batch_id: string } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    Promise.all([
+      getGenes({ mechanistic: true, page_size: 5000 }),
+      getConditions(),
+    ]).then(([geneRes, conds]) => {
+      setGenes(geneRes.genes)
+      setConditions(conds)
+    }).catch((e) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Derive categories
+  const categories = useMemo(() => {
+    const cats = new Set(genes.map((g) => g.category))
+    return Array.from(cats).sort()
+  }, [genes])
+
+  // Filtered gene list
+  const filteredGenes = useMemo(() => {
+    let list = genes
+    if (categoryFilter) {
+      list = list.filter((g) => g.category === categoryFilter)
+    }
+    if (search) {
+      const term = search.toLowerCase()
+      list = list.filter((g) => g.symbol.toLowerCase().includes(term))
+    }
+    return list
+  }, [genes, categoryFilter, search])
+
+  // Toggle gene selection
+  function toggleGene(symbol: string) {
+    setSelectedGenes((prev) => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      return next
+    })
+  }
+
+  function selectAll() {
+    setSelectedGenes(new Set(filteredGenes.map((g) => g.symbol)))
+  }
+
+  function selectNone() {
+    setSelectedGenes(new Set())
+  }
+
+  function toggleFiltered() {
+    const allSelected = filteredGenes.every((g) => selectedGenes.has(g.symbol))
+    if (allSelected) {
+      // Deselect filtered
+      setSelectedGenes((prev) => {
+        const next = new Set(prev)
+        filteredGenes.forEach((g) => next.delete(g.symbol))
+        return next
+      })
+    } else {
+      // Select all filtered
+      setSelectedGenes((prev) => {
+        const next = new Set(prev)
+        filteredGenes.forEach((g) => next.add(g.symbol))
+        return next
+      })
+    }
+  }
+
+  // Submit batch
+  async function handleSubmit() {
+    setSubmitting(true)
+    setError(null)
+    setResult(null)
+
+    const simParams = JSON.stringify({ seeds, generations, duration: 10800 })
+
+    const request: BatchRequest = {
+      condition,
+      sim_params: simParams,
+      description,
+    }
+
+    if (screenPreset) {
+      request.screen = screenPreset
+    } else {
+      request.experiments = Array.from(selectedGenes).map((symbol) => ({
+        variant_type: 'gene_knockout',
+        gene_symbol: symbol,
+      }))
+    }
+
+    try {
+      const resp = await createBatchExperiments(request)
+      setResult({ created: resp.created, skipped: resp.skipped, batch_id: resp.batch_id })
+    } catch (e: any) {
+      setError(e.message || 'Batch creation failed')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const usingPreset = screenPreset !== ''
+  const canSubmit = usingPreset || selectedGenes.size > 0
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
+      </div>
+    )
+  }
+
+  if (result) {
+    return (
+      <div className="max-w-2xl mx-auto space-y-4">
+        <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+          <div className="text-green-800 text-lg font-semibold mb-2">
+            Batch created successfully
+          </div>
+          <p className="text-green-700">
+            {result.created} experiment{result.created !== 1 ? 's' : ''} created
+            {result.skipped > 0 && ` (${result.skipped} skipped as duplicates)`}
+          </p>
+          <p className="text-xs text-green-600 mt-1 font-mono">
+            Batch ID: {result.batch_id}
+          </p>
+        </div>
+        <div className="flex gap-3 justify-center">
+          <button
+            onClick={() => navigate('/experiments?created=batch')}
+            className="px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg"
+          >
+            View experiments
+          </button>
+          <button
+            onClick={() => { setResult(null); setSelectedGenes(new Set()); setScreenPreset('') }}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+          >
+            Create another batch
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-xl font-semibold text-gray-900">Batch experiment creation</h1>
+        <p className="text-sm text-gray-400 mt-1">
+          Select genes for knockout screening and configure shared simulation parameters.
+        </p>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left: Gene selector */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Preset or manual */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-gray-700">Mode:</label>
+            <select
+              value={screenPreset}
+              onChange={(e) => setScreenPreset(e.target.value)}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              {SCREEN_PRESETS.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {usingPreset ? (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-700">
+              <span className="font-medium">Screen preset active:</span>{' '}
+              {SCREEN_PRESETS.find((p) => p.value === screenPreset)?.label}.
+              All matching genes will be included automatically. The manual gene table below is disabled.
+            </div>
+          ) : (
+            <>
+              {/* Filters */}
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  type="text"
+                  placeholder="Search gene…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="border border-gray-300 rounded-md px-3 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">All categories</option>
+                  {categories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={toggleFiltered}
+                  className="text-xs text-brand-600 hover:text-brand-800 font-medium"
+                >
+                  {filteredGenes.every((g) => selectedGenes.has(g.symbol))
+                    ? 'Deselect shown'
+                    : 'Select all shown'}
+                </button>
+                <button
+                  onClick={selectNone}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  Clear all
+                </button>
+                <span className="text-xs text-gray-400 ml-auto">
+                  {selectedGenes.size} selected · {filteredGenes.length} shown
+                </span>
+              </div>
+
+              {/* Gene table */}
+              <div className="border border-gray-200 rounded-lg overflow-hidden max-h-[420px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
+                    <tr>
+                      <th className="w-10 px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={filteredGenes.length > 0 && filteredGenes.every((g) => selectedGenes.has(g.symbol))}
+                          onChange={toggleFiltered}
+                          className="rounded border-gray-300"
+                        />
+                      </th>
+                      <th className="text-left px-3 py-2 font-medium text-gray-600">Gene</th>
+                      <th className="text-left px-3 py-2 font-medium text-gray-600">Category</th>
+                      <th className="text-left px-3 py-2 font-medium text-gray-600 w-20">KO idx</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredGenes.map((g) => (
+                      <tr
+                        key={g.symbol}
+                        className={`cursor-pointer transition-colors ${
+                          selectedGenes.has(g.symbol) ? 'bg-brand-50' : 'hover:bg-gray-50'
+                        }`}
+                        onClick={() => toggleGene(g.symbol)}
+                      >
+                        <td className="px-3 py-1.5">
+                          <input
+                            type="checkbox"
+                            checked={selectedGenes.has(g.symbol)}
+                            onChange={() => toggleGene(g.symbol)}
+                            className="rounded border-gray-300"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-brand-700 text-xs">
+                          {g.symbol}
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-600 text-xs truncate max-w-[180px]">
+                          {g.category}
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-400 text-xs tabular-nums">
+                          {g.ko_index}
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredGenes.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="text-center py-6 text-gray-400">
+                          No mechanistic genes match filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Right: Config panel */}
+        <div className="space-y-4">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-gray-900">Shared configuration</h3>
+
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Growth condition</label>
+              <select
+                value={condition}
+                onChange={(e) => setCondition(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              >
+                {conditions.map((c) => (
+                  <option key={c.name} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Seeds</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={32}
+                  value={seeds}
+                  onChange={(e) => setSeeds(Number(e.target.value))}
+                  className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Generations</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={generations}
+                  onChange={(e) => setGenerations(Number(e.target.value))}
+                  className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Batch description</label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="e.g. Full KO screen — basal condition"
+                className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+            </div>
+          </div>
+
+          {/* Summary + submit */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-900">Summary</h3>
+            <div className="text-sm text-gray-600 space-y-1">
+              <p>
+                <span className="font-medium">Genes:</span>{' '}
+                {usingPreset
+                  ? `Screen preset (${SCREEN_PRESETS.find((p) => p.value === screenPreset)?.label})`
+                  : `${selectedGenes.size} selected`}
+              </p>
+              <p><span className="font-medium">Condition:</span> {condition}</p>
+              <p><span className="font-medium">Seeds per gene:</span> {seeds}</p>
+              <p><span className="font-medium">Generations:</span> {generations}</p>
+              {!usingPreset && selectedGenes.size > 0 && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Total simulation runs: {selectedGenes.size} × {seeds} = {selectedGenes.size * seeds}
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={handleSubmit}
+              disabled={!canSubmit || submitting}
+              className={`w-full py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                canSubmit && !submitting
+                  ? 'bg-brand-600 hover:bg-brand-700 text-white'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {submitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Creating…
+                </span>
+              ) : (
+                `Create batch experiments`
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -98,6 +98,7 @@ export interface Experiment {
   created_at: string
   updated_at: string
   gene_symbol: string
+  batch_id: string
 }
 
 export interface ExperimentCreate {
@@ -134,10 +135,35 @@ export interface BatchRequest {
 }
 
 export interface BatchResponse {
+  batch_id: string
   created: number
   experiment_ids: number[]
   skipped: number
   skipped_genes: string[]
+}
+
+export interface BatchSummary {
+  batch_id: string
+  name: string
+  created_at: string
+  total: number
+  draft: number
+  queued: number
+  running: number
+  done: number
+  failed: number
+}
+
+export interface BatchDetail extends BatchSummary {
+  experiments: Experiment[]
+}
+
+export interface BatchRunResponse {
+  batch_id: string
+  queued: number
+  skipped: number
+  total_jobs: number
+  message: string
 }
 
 // --- Simulation jobs ---
@@ -392,6 +418,46 @@ export interface EssentialityStats {
   neutral: number
   unknown: number
   essential_pct: number
+}
+
+// --- Multi-experiment comparison ---
+
+export interface ComparisonMetric {
+  mean: number | null
+  std: number | null
+  n: number
+}
+
+export interface ComparisonExperiment {
+  experiment_id: number
+  experiment_name: string
+  gene_symbol: string
+  variant_type: string
+  variant_index: number
+  condition: string
+  is_wildtype: boolean
+  total_seeds: number
+  completed_seeds: number
+  divided_seeds: number
+  division_time_min: ComparisonMetric
+  final_mass_fg: ComparisonMetric
+  growth_rate: ComparisonMetric
+  doubling_time_min: ComparisonMetric
+}
+
+export interface ComparisonDelta {
+  experiment_id: number
+  gene_symbol: string
+  division_time_pct: number | null
+  final_mass_pct: number | null
+  growth_rate_pct: number | null
+  doubling_time_pct: number | null
+}
+
+export interface ComparisonResponse {
+  experiments: ComparisonExperiment[]
+  wildtype: ComparisonExperiment | null
+  deltas: ComparisonDelta[]
 }
 
 // --- Molecule explorer ---
