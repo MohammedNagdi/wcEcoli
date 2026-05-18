@@ -17,9 +17,11 @@ Run with '-h' for command line help.
 Set PYTHONPATH when running this.
 """
 
+import logging
 import re
 import os
 import sys
+import traceback
 from typing import Tuple
 
 from models.ecoli.sim.variants.new_gene_internal_shift import (NEW_GENE_EXPRESSION_FACTORS,
@@ -119,62 +121,78 @@ class RunSimulation(scriptBase.ScriptBase):
 
 
 		# args.sim_path is called INDIV_OUT_DIRECTORY in fw_queue.
+		failed_variants = []
 		for i, subdir in fp.iter_variants(*variant_spec):
-			variant_directory = os.path.join(args.sim_path, subdir)
-			variant_sim_data_directory = os.path.join(variant_directory,
-				constants.VKB_DIR)
+			try:
+				variant_directory = os.path.join(args.sim_path, subdir)
+				variant_sim_data_directory = os.path.join(variant_directory,
+					constants.VKB_DIR)
 
-			variant_sim_data_modified_file = os.path.join(
-				variant_sim_data_directory, constants.SERIALIZED_SIM_DATA_MODIFIED)
+				variant_sim_data_modified_file = os.path.join(
+					variant_sim_data_directory, constants.SERIALIZED_SIM_DATA_MODIFIED)
 
-			if args.require_variants:
-				fp.verify_file_exists(
-					variant_sim_data_modified_file, 'Run makeVariants?')
-			else:
-				variant_metadata_directory = os.path.join(variant_directory,
-					constants.METADATA_DIR)
-				task = VariantSimDataTask(
-					variant_function=variant_type,
-					variant_index=i,
-					input_sim_data=sim_data_file,
-					output_sim_data=variant_sim_data_modified_file,
-					variant_metadata_directory=variant_metadata_directory,
-					)
-				task.run_task({})
-
-			for j in range(args.seed, args.seed + args.init_sims):  # init sim seeds
-				seed_directory = fp.makedirs(variant_directory, "%06d" % j)
-
-				for k in range(args.generations):  # generation number k
-					gen_directory = fp.makedirs(seed_directory, "generation_%06d" % k)
-
-					# l is the daughter number among all of this generation's cells,
-					# which is 0 for single-daughters but would span range(2**k) if
-					# each parent had 2 daughters.
-					l = 0
-					cell_directory = fp.makedirs(gen_directory, "%06d" % l)
-					cell_sim_out_directory = fp.makedirs(cell_directory, "simOut")
-
-					options = dict(cli_sim_args,
-						input_sim_data=variant_sim_data_modified_file,
-						output_directory=cell_sim_out_directory,
+				if args.require_variants:
+					fp.verify_file_exists(
+						variant_sim_data_modified_file, 'Run makeVariants?')
+				else:
+					variant_metadata_directory = os.path.join(variant_directory,
+						constants.METADATA_DIR)
+					task = VariantSimDataTask(
+						variant_function=variant_type,
+						variant_index=i,
+						input_sim_data=sim_data_file,
+						output_sim_data=variant_sim_data_modified_file,
+						variant_metadata_directory=variant_metadata_directory,
 						)
-
-					if k == 0:
-						task = SimulationTask(seed=j, **options)
-					else:
-						parent_gen_directory = os.path.join(seed_directory, "generation_%06d" % (k - 1))
-						parent_cell_directory = os.path.join(parent_gen_directory, "%06d" % (l // 2))
-						parent_cell_sim_out_directory = os.path.join(parent_cell_directory, "simOut")
-						daughter_state_path = os.path.join(
-							parent_cell_sim_out_directory,
-							constants.SERIALIZED_INHERITED_STATE % (l % 2 + 1))
-						task = SimulationDaughterTask(
-							seed=(j + 1) * ((2 ** k - 1) + l),
-							inherited_state_path=daughter_state_path,
-							**options
-							)
 					task.run_task({})
+
+				for j in range(args.seed, args.seed + args.init_sims):  # init sim seeds
+					seed_directory = fp.makedirs(variant_directory, "%06d" % j)
+
+					for k in range(args.generations):  # generation number k
+						gen_directory = fp.makedirs(seed_directory, "generation_%06d" % k)
+
+						# l is the daughter number among all of this generation's cells,
+						# which is 0 for single-daughters but would span range(2**k) if
+						# each parent had 2 daughters.
+						l = 0
+						cell_directory = fp.makedirs(gen_directory, "%06d" % l)
+						cell_sim_out_directory = fp.makedirs(cell_directory, "simOut")
+
+						options = dict(cli_sim_args,
+							input_sim_data=variant_sim_data_modified_file,
+							output_directory=cell_sim_out_directory,
+							)
+
+						if k == 0:
+							task = SimulationTask(seed=j, **options)
+						else:
+							parent_gen_directory = os.path.join(seed_directory, "generation_%06d" % (k - 1))
+							parent_cell_directory = os.path.join(parent_gen_directory, "%06d" % (l // 2))
+							parent_cell_sim_out_directory = os.path.join(parent_cell_directory, "simOut")
+							daughter_state_path = os.path.join(
+								parent_cell_sim_out_directory,
+								constants.SERIALIZED_INHERITED_STATE % (l % 2 + 1))
+							task = SimulationDaughterTask(
+								seed=(j + 1) * ((2 ** k - 1) + l),
+								inherited_state_path=daughter_state_path,
+								**options
+								)
+						task.run_task({})
+
+			except Exception:
+				print("\n" + "=" * 60, file=sys.stderr)
+				print("VARIANT {} ({}) FAILED — skipping to next variant".format(i, subdir), file=sys.stderr)
+				traceback.print_exc(file=sys.stderr)
+				print("=" * 60 + "\n", file=sys.stderr)
+				failed_variants.append((i, subdir))
+
+		if failed_variants:
+			print("\n" + "=" * 60, file=sys.stderr)
+			print("SUMMARY: {} variant(s) failed:".format(len(failed_variants)), file=sys.stderr)
+			for idx, name in failed_variants:
+				print("  Variant {}: {}".format(idx, name), file=sys.stderr)
+			print("=" * 60, file=sys.stderr)
 
 
 if __name__ == '__main__':

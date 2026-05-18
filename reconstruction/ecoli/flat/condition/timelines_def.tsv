@@ -17,7 +17,7 @@
 "000014_nitrite_present"	"0 minimal_plus_nitrite"
 "000015_calcium_absent"	"0 minimal_minus_calcium"
 "000016_magnesium_absent"	"0 minimal_minus_magnesium"
-"000017_phosphate_absent"	"0 minimal_minus_phosphate"
+"000017_phosphate_absent"	"0 minimal, 2400 minimal_minus_phosphate"
 "000018_cut_oxygen"	"0 minimal, 1200 minimal_minus_oxygen"
 "000019_add_arabinose"	"0 minimal, 1200 minimal_plus_arabinose"
 "000020_add_oxygen"	"0 minimal_minus_oxygen, 1200 minimal"
