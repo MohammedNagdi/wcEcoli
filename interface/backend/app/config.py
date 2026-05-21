@@ -46,6 +46,14 @@ class Settings(BaseSettings):
         return self.reconstruction_path / "ecoli" / "flat" / "complexation_reactions.tsv"
 
     @property
+    def rnas_tsv(self) -> Path:
+        return self.reconstruction_path / "ecoli" / "flat" / "rnas.tsv"
+
+    @property
+    def transcription_units_tsv(self) -> Path:
+        return self.reconstruction_path / "ecoli" / "flat" / "transcription_units.tsv"
+
+    @property
     def variants_dir(self) -> Path:
         return self.models_path / "ecoli" / "sim" / "variants"
 

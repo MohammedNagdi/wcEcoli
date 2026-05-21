@@ -308,13 +308,97 @@ def _read_tsv_rows(path: Path) -> list[list[str]]:
     return rows
 
 
+def _build_ko_index_map() -> dict[str, int]:
+    """Build gene_symbol → variant_index mapping from the model's rna_data ordering.
+
+    The gene_knockout variant indexes into sim_data.process.transcription.rna_data,
+    which is ordered as: transcription units first, then uncovered cistrons.
+    Variant index 0 = control; variant index N+1 targets rna_data[N].
+
+    When operons are ON (the default), many genes share multi-gene TUs.
+    For each gene we pick the best TU: prefer a single-gene TU, otherwise
+    the smallest multi-gene TU that contains the target gene.
+    """
+    import ast as _ast
+
+    # 1. Parse gene_id → symbol and gene_id → rna_id from genes.tsv
+    gene_rows = _read_tsv_rows(settings.genes_tsv)
+    gid_to_symbol: dict[str, str] = {}
+    gid_to_rna: dict[str, str] = {}
+    for row in gene_rows[1:]:
+        gid = _strip_quotes(row[0])
+        sym = _strip_html(_strip_quotes(row[1]))
+        gid_to_symbol[gid] = sym
+        if len(row) > 6:
+            try:
+                rids = _ast.literal_eval(row[6].strip())
+                if rids:
+                    gid_to_rna[gid] = _strip_quotes(rids[0])
+            except Exception:
+                pass
+
+    # 2. Parse transcription units → ordered TU IDs and gene membership
+    tu_rows = _read_tsv_rows(settings.transcription_units_tsv)
+    tu_ids: list[str] = []
+    tu_gene_ids: dict[str, list[str]] = {}
+    for row in tu_rows[1:]:
+        tu_id = _strip_quotes(row[0])
+        tu_ids.append(tu_id)
+        try:
+            gids = _ast.literal_eval(row[2].strip())
+            tu_gene_ids[tu_id] = [_strip_quotes(g) for g in gids]
+        except Exception:
+            tu_gene_ids[tu_id] = []
+
+    # 3. Find cistrons covered by TUs
+    covered: set[str] = set()
+    for gids in tu_gene_ids.values():
+        for gid in gids:
+            rna = gid_to_rna.get(gid)
+            if rna:
+                covered.add(rna)
+
+    # 4. Identify uncovered cistrons (order matches rnas.tsv)
+    rna_rows = _read_tsv_rows(settings.rnas_tsv)
+    all_cistron_ids = [_strip_quotes(r[0]) for r in rna_rows[1:]]
+    uncovered = [c for c in all_cistron_ids if c not in covered]
+
+    # 5. Model rna_data ordering: TU IDs then uncovered cistrons
+    model_ids = tu_ids + uncovered
+
+    # 6. For each gene, find the best TU (prefer single-gene TUs)
+    best: dict[str, tuple[int, int]] = {}  # symbol → (variant_index, n_genes_in_tu)
+    for tu_idx, tu_id in enumerate(tu_ids):
+        gids = tu_gene_ids.get(tu_id, [])
+        n_genes = len(gids)
+        for gid in gids:
+            sym = gid_to_symbol.get(gid)
+            if not sym:
+                continue
+            variant_idx = tu_idx + 1  # +1 because variant 0 = control
+            if sym not in best or n_genes < best[sym][1]:
+                best[sym] = (variant_idx, n_genes)
+
+    # Add uncovered cistrons
+    for i, cid in enumerate(uncovered):
+        gid = cid.replace("_RNA", "")
+        sym = gid_to_symbol.get(gid)
+        if sym and sym not in best:
+            best[sym] = (len(tu_ids) + i + 1, 1)
+
+    result = {sym: vi for sym, (vi, _) in best.items()}
+    logger.info("Built ko_index map: %d genes, rna_data size %d", len(result), len(model_ids))
+    return result
+
+
 def _ingest_genes(session: Session) -> int:
-    """Parse genes.tsv → genes table."""
+    """Parse genes.tsv → genes table with correct knockout variant indices."""
     rows = _read_tsv_rows(settings.genes_tsv)
     if not rows:
         return 0
-    # First row is header
-    header = rows[0]
+
+    ko_map = _build_ko_index_map()
+
     count = 0
     for idx, row in enumerate(rows[1:]):
         symbol = _strip_html(_strip_quotes(row[1]))
@@ -322,7 +406,7 @@ def _ingest_genes(session: Session) -> int:
         right = _safe_int(row[4])
         cat = _categorize_gene(symbol)
         gene = Gene(
-            id=idx,  # 0-based index = knockout variant index
+            id=idx,
             ecoli_id=_strip_quotes(row[0]),
             symbol=symbol,
             synonyms=row[2] if len(row) > 2 else "",
@@ -331,13 +415,14 @@ def _ingest_genes(session: Session) -> int:
             direction=_strip_quotes(row[5]) if len(row) > 5 else None,
             rna_ids=row[6] if len(row) > 6 else "",
             category=cat,
-            ko_index=idx,
+            ko_index=ko_map.get(symbol, -1),  # -1 = no valid KO target
             is_mechanistic=(cat in MECHANISTIC_CATEGORIES),
         )
         session.add(gene)
         count += 1
     session.commit()
-    logger.info("Ingested %d genes", count)
+    logger.info("Ingested %d genes (%d with valid ko_index)", count,
+                sum(1 for row in rows[1:] if ko_map.get(_strip_html(_strip_quotes(row[1])), -1) > 0))
     return count
 
 
@@ -525,7 +610,7 @@ def _ingest_complexes(session: Session) -> int:
 #   v3: added is_mechanistic flag, HTML-stripped gene symbols
 #   v4: added divided (simulation_results), docker_container_id (simulation_jobs),
 #       imported all models so create_all() creates complete schema
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5  # v5: fix ko_index to use TU-based rna_data ordering (not genes.tsv row)
 
 
 def needs_rebuild() -> bool:

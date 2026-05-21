@@ -233,10 +233,12 @@ export function ResultsPage() {
           <div className="flex items-center gap-2 mb-1">
             <Link to="/results" className="text-gray-400 hover:text-gray-600 text-sm">&larr; All results</Link>
             <span className="text-gray-300">/</span>
-            <h1 className="text-xl font-semibold text-gray-900">Job #{job.id} Results</h1>
+            <h1 className="text-xl font-semibold text-gray-900">
+              {experiment?.name || (resolvedGeneSymbol ? `${resolvedGeneSymbol} knockout` : `Job #${job.id}`)} Results
+            </h1>
           </div>
           <p className="text-sm text-gray-400">
-            {job.variant_type} &middot; seed {job.seed} &middot; {job.generations} generation(s)
+            {experiment?.name ? `Job #${job.id} · ` : ''}{job.variant_type} &middot; seed {job.seed} &middot; {job.generations} generation(s)
             {isMock && (
               <span className="ml-2 px-1.5 py-0.5 bg-amber-50 text-amber-700 text-xs rounded font-medium">
                 Mock data
