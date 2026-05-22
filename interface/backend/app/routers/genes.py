@@ -27,6 +27,9 @@ class GeneOut(BaseModel):
 
 class GeneDetail(GeneOut):
     rna_ids: str
+    monomer_id: Optional[str] = None
+    monomer_name: Optional[str] = None
+    complex_ids: str = ""         # JSON array of complex IDs
     regulated_by: list[dict]     # TFs that regulate this gene
     regulates: list[dict]        # genes this gene regulates (if it's a TF)
 

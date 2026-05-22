@@ -15,6 +15,7 @@ import type {
   TrainRequest, TrainResponse, DataSummary,
   DesignOverview, EssentialityStats,
   ComparisonResponse, FailedJobSummary,
+  WildtypeDelta,
 } from '../types'
 
 const BASE = '/api'
@@ -304,6 +305,12 @@ export async function getEssentiality(
   if (condition) qs.set('condition', condition)
   const query = qs.toString()
   return fetchJSON(`/design/essentiality${query ? '?' + query : ''}`)
+}
+
+// --- Wildtype delta ---
+
+export async function getWtDelta(experimentId: number): Promise<WildtypeDelta> {
+  return fetchJSON(`/experiments/wt-delta/${experimentId}`)
 }
 
 // --- Comparison ---

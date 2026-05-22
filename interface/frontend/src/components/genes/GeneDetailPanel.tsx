@@ -77,19 +77,61 @@ export function GeneDetailPanel({ gene, onClose }: Props) {
           </div>
         )}
 
-        {/* RNA IDs */}
-        {gene.rna_ids && (
-          <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">RNA product(s)</p>
-            <div className="flex flex-wrap gap-1">
-              {gene.rna_ids.split(',').map((id) => (
-                <span key={id} className="px-1.5 py-0.5 bg-gray-50 text-gray-600 rounded text-xs font-mono border border-gray-100">
-                  {id.trim()}
-                </span>
-              ))}
-            </div>
+        {/* Molecular products */}
+        <div>
+          <p className="text-xs text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+            Molecular products
+            <HelpTip text="The model IDs for this gene's RNA, protein, and complex products. Use these IDs to search in the Molecule Explorer on the Results page." position="right" />
+          </p>
+          <div className="space-y-2">
+            {/* mRNA */}
+            {gene.rna_ids && (
+              <div className="flex items-start gap-2">
+                <span className="text-xs text-gray-400 w-14 flex-shrink-0 pt-0.5">mRNA</span>
+                <div className="flex flex-wrap gap-1">
+                  {gene.rna_ids.split(',').map((id) => (
+                    <span key={id} className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-mono border border-blue-100">
+                      {id.trim()}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Protein monomer */}
+            {gene.monomer_id && (
+              <div className="flex items-start gap-2">
+                <span className="text-xs text-gray-400 w-14 flex-shrink-0 pt-0.5">Protein</span>
+                <div>
+                  <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-xs font-mono border border-emerald-100">
+                    {gene.monomer_id}
+                  </span>
+                  {gene.monomer_name && (
+                    <p className="text-xs text-gray-400 mt-0.5 ml-0.5">{gene.monomer_name}</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* Complexes */}
+            {gene.complex_ids && gene.complex_ids !== '[]' && (() => {
+              try {
+                const ids: string[] = JSON.parse(gene.complex_ids)
+                if (ids.length === 0) return null
+                return (
+                  <div className="flex items-start gap-2">
+                    <span className="text-xs text-gray-400 w-14 flex-shrink-0 pt-0.5">Complex</span>
+                    <div className="flex flex-wrap gap-1">
+                      {ids.map((id) => (
+                        <span key={id} className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded text-xs font-mono border border-amber-100">
+                          {id}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )
+              } catch { return null }
+            })()}
           </div>
-        )}
+        </div>
 
         {/* Regulated by */}
         {gene.regulated_by.length > 0 && (

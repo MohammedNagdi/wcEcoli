@@ -5,11 +5,13 @@ import {
   getMoleculeIds,
   getMoleculeTimeseries,
   searchMolecules,
+  getGene,
 } from '../../api/client'
 import { HelpTip } from '../common/HelpTip'
 import type {
   MoleculeTypeInfo,
   MoleculeTimeseries,
+  GeneDetail,
 } from '../../types'
 
 // Constants
@@ -112,7 +114,35 @@ function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
   )
 }
 
-// Experiment Focus Panel
+// Collapsible section for molecule charts
+function FocusSection({
+  title,
+  badge,
+  defaultOpen = true,
+  children,
+}: {
+  title: string
+  badge?: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="border-b border-gray-100 last:border-0">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-gray-50 transition-colors"
+      >
+        <span className={'text-gray-400 text-xs transition-transform ' + (open ? 'rotate-90' : '')}>&#9654;</span>
+        <span className="text-xs font-medium text-gray-600">{title}</span>
+        {badge && <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{badge}</span>}
+      </button>
+      {open && <div className="px-4 pb-3">{children}</div>}
+    </div>
+  )
+}
+
+// Experiment Focus Panel — enriched with gene detail (complexes, downstream targets)
 function ExperimentFocusPanel({
   jobId,
   geneSymbol,
@@ -124,18 +154,41 @@ function ExperimentFocusPanel({
 }) {
   const [proteinTs, setProteinTs] = useState<MoleculeTimeseries[]>([])
   const [mrnaTs, setMrnaTs] = useState<MoleculeTimeseries[]>([])
+  const [complexTs, setComplexTs] = useState<MoleculeTimeseries[]>([])
   const [loading, setLoading] = useState(true)
-  const [matchInfo, setMatchInfo] = useState<{ protein: string[]; mRNA: string[] }>({ protein: [], mRNA: [] })
+  const [matchInfo, setMatchInfo] = useState<{ protein: string[]; mRNA: string[]; complex: string[] }>({
+    protein: [], mRNA: [], complex: [],
+  })
+  const [geneDetail, setGeneDetail] = useState<GeneDetail | null>(null)
 
   useEffect(() => {
     if (!geneSymbol) return
     setLoading(true)
 
-    searchMolecules(jobId, geneSymbol)
-      .then(async (res) => {
-        const proteinIds = (res.results.protein ?? []).slice(0, 3)
-        const mrnaIds = (res.results.mRNA ?? []).slice(0, 3)
-        setMatchInfo({ protein: proteinIds, mRNA: mrnaIds })
+    // Fetch gene detail + molecule search in parallel
+    Promise.all([
+      getGene(geneSymbol).catch(() => null),
+      searchMolecules(jobId, geneSymbol),
+    ])
+      .then(async ([detail, searchRes]) => {
+        setGeneDetail(detail)
+
+        const proteinIds = (searchRes.results.protein ?? []).slice(0, 3)
+        const mrnaIds = (searchRes.results.mRNA ?? []).slice(0, 3)
+
+        // Extract complex IDs from gene detail
+        let complexIds: string[] = []
+        if (detail?.complex_ids) {
+          try {
+            const parsed = JSON.parse(detail.complex_ids)
+            if (Array.isArray(parsed)) {
+              // Complex IDs in the model have a [c] compartment tag
+              complexIds = parsed.map((id: string) => id.includes('[') ? id : id + '[c]').slice(0, 5)
+            }
+          } catch {}
+        }
+
+        setMatchInfo({ protein: proteinIds, mRNA: mrnaIds, complex: complexIds })
 
         const promises: Promise<any>[] = []
 
@@ -151,6 +204,13 @@ function ExperimentFocusPanel({
             getMoleculeTimeseries(jobId, 'mRNA', mrnaIds)
               .then((r) => setMrnaTs(r.molecules))
               .catch(() => {})
+          )
+        }
+        if (complexIds.length > 0) {
+          promises.push(
+            getMoleculeTimeseries(jobId, 'protein', complexIds)
+              .then((r) => setComplexTs(r.molecules))
+              .catch(() => setComplexTs([]))
           )
         }
 
@@ -175,9 +235,15 @@ function ExperimentFocusPanel({
 
   const proteinDatasets = buildChartData(proteinTs)
   const mrnaDatasets = buildChartData(mrnaTs)
+  const complexDatasets = buildChartData(complexTs)
 
   const isKnockout = variantType === 'gene_knockout'
   const label = isKnockout ? 'Knockout target' : 'Experiment focus'
+
+  // Downstream targets (genes this TF regulates)
+  const targets = geneDetail?.regulates ?? []
+  // Upstream regulators
+  const regulators = geneDetail?.regulated_by ?? []
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
@@ -186,33 +252,127 @@ function ExperimentFocusPanel({
           <span className="text-sm">&#9888;&#65039;</span>
           <h3 className="text-sm font-semibold text-amber-900">
             {label}: <span className="font-mono">{geneSymbol}</span>
+            {geneDetail?.monomer_name && (
+              <span className="font-normal text-amber-700 ml-1">({geneDetail.monomer_name})</span>
+            )}
           </h3>
         </div>
         <p className="text-xs text-amber-700 mt-0.5">
           {isKnockout
-            ? 'Expression of ' + geneSymbol + ' was knocked out in this experiment. These plots show the protein and mRNA levels of the targeted gene across all generations.'
+            ? 'Expression of ' + geneSymbol + ' was knocked out. Showing protein, mRNA' + (complexDatasets.length > 0 ? ', complex' : '') + ' trajectories across all generations.'
             : 'Molecule trajectories related to this experiment\'s gene of interest.'}
         </p>
+        {/* Gene product summary badges */}
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {geneDetail?.monomer_id && (
+            <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-mono">
+              {geneDetail.monomer_id}
+            </span>
+          )}
+          {matchInfo.mRNA.map((id) => (
+            <span key={id} className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-mono">
+              {id.replace(/\[.*\]$/, '')}
+            </span>
+          ))}
+          {matchInfo.complex.length > 0 && (
+            <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+              {matchInfo.complex.length} complex{matchInfo.complex.length > 1 ? 'es' : ''}
+            </span>
+          )}
+          {targets.length > 0 && (
+            <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
+              TF &#8594; {targets.length} target{targets.length > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
       </div>
 
-      <div className="p-4">
+      <div>
+        {/* Protein */}
         {proteinDatasets.length > 0 && (
-          <div className="mb-4">
-            <h4 className="text-xs font-medium text-gray-500 mb-2">
-              Protein count &mdash; {matchInfo.protein.map((id) => id.replace(/\[.*\]$/, '')).join(', ')}
-              <span className="ml-1 text-gray-400 font-normal">(molecules)</span>
-            </h4>
+          <FocusSection
+            title={'Protein — ' + matchInfo.protein.map((id) => id.replace(/\[.*\]$/, '')).join(', ')}
+            badge="molecules"
+          >
             <MoleculeChart datasets={proteinDatasets} unit="molecules" />
-          </div>
+          </FocusSection>
         )}
+
+        {/* mRNA */}
         {mrnaDatasets.length > 0 && (
-          <div>
-            <h4 className="text-xs font-medium text-gray-500 mb-2">
-              mRNA count &mdash; {matchInfo.mRNA.map((id) => id.replace(/\[.*\]$/, '')).join(', ')}
-              <span className="ml-1 text-gray-400 font-normal">(molecules)</span>
-            </h4>
+          <FocusSection
+            title={'mRNA — ' + matchInfo.mRNA.map((id) => id.replace(/\[.*\]$/, '')).join(', ')}
+            badge="molecules"
+          >
             <MoleculeChart datasets={mrnaDatasets} unit="molecules" />
-          </div>
+          </FocusSection>
+        )}
+
+        {/* Complexes */}
+        {complexDatasets.length > 0 && (
+          <FocusSection
+            title={'Complexes — ' + matchInfo.complex.map((id) => id.replace(/\[.*\]$/, '')).join(', ')}
+            badge="molecules"
+            defaultOpen={false}
+          >
+            <MoleculeChart datasets={complexDatasets} unit="molecules" />
+          </FocusSection>
+        )}
+
+        {/* Downstream TF targets */}
+        {targets.length > 0 && (
+          <FocusSection
+            title={'Downstream targets (' + targets.length + ' genes regulated by ' + geneSymbol + ')'}
+            defaultOpen={false}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
+              {targets.slice(0, 20).map((t: any, i: number) => (
+                <div key={i} className="flex items-center gap-1.5 text-xs px-2 py-1 rounded bg-gray-50">
+                  <span className="font-mono font-medium text-bio-gene">{t.target}</span>
+                  <span className={'text-[10px] px-1 rounded ' + (
+                    t.type === 'activator' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                  )}>
+                    {t.type === 'activator' ? '+' : '−'}
+                  </span>
+                  <span className="text-gray-400 font-mono text-[10px] ml-auto">
+                    {t.log2fc > 0 ? '+' : ''}{t.log2fc.toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {targets.length > 20 && (
+              <p className="text-xs text-gray-400 mt-1.5">
+                and {targets.length - 20} more target{targets.length - 20 > 1 ? 's' : ''}...
+              </p>
+            )}
+            {isKnockout && (
+              <p className="text-xs text-amber-600 mt-2 bg-amber-50 rounded px-2 py-1.5">
+                &#9888; Knocking out {geneSymbol} affects expression of these {targets.length} downstream gene{targets.length > 1 ? 's' : ''}.
+                Consider checking their protein levels in the explorer below.
+              </p>
+            )}
+          </FocusSection>
+        )}
+
+        {/* Upstream regulators */}
+        {regulators.length > 0 && (
+          <FocusSection
+            title={'Regulated by (' + regulators.length + ' TF' + (regulators.length > 1 ? 's' : '') + ')'}
+            defaultOpen={false}
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {regulators.map((r: any, i: number) => (
+                <span key={i} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-50">
+                  <span className="font-mono font-medium text-bio-gene">{r.tf}</span>
+                  <span className={'text-[10px] px-1 rounded ' + (
+                    r.type === 'activator' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                  )}>
+                    {r.type === 'activator' ? '+' : '−'}
+                  </span>
+                </span>
+              ))}
+            </div>
+          </FocusSection>
         )}
       </div>
     </div>
@@ -238,7 +398,7 @@ export function MoleculeExplorer({
   const [timeseries, setTimeseries] = useState<MoleculeTimeseries[]>([])
   const [loadingTs, setLoadingTs] = useState(false)
   const [typesLoading, setTypesLoading] = useState(true)
-  const [explorerOpen, setExplorerOpen] = useState(false)
+  const [explorerOpen, setExplorerOpen] = useState(variantType === 'gene_knockout')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {

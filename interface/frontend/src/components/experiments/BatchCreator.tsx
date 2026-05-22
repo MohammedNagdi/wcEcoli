@@ -38,6 +38,7 @@ export function BatchCreator() {
   const [generations, setGenerations] = useState(1)
   const [lengthSec, setLengthSec] = useState(10800)
   const [description, setDescription] = useState('')
+  const [includeWildtype, setIncludeWildtype] = useState(true)
 
   // Submit state
   const [submitting, setSubmitting] = useState(false)
@@ -126,6 +127,7 @@ export function BatchCreator() {
       timeline,
       sim_params: simParams,
       description,
+      include_wildtype: includeWildtype,
     }
 
     if (screenPreset) {
@@ -416,6 +418,22 @@ export function BatchCreator() {
                 className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
             </div>
+
+            <div className="flex items-start gap-2.5 pt-1 border-t border-gray-100">
+              <input
+                type="checkbox"
+                id="batch-wt"
+                checked={includeWildtype}
+                onChange={(e) => setIncludeWildtype(e.target.checked)}
+                className="mt-0.5 rounded border-gray-300"
+              />
+              <label htmlFor="batch-wt" className="cursor-pointer">
+                <span className="text-xs font-medium text-gray-700">Include wildtype control</span>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  One WT simulation for {condition} media — required for comparison deltas.
+                </p>
+              </label>
+            </div>
           </div>
 
           {/* Summary + submit */}
@@ -440,6 +458,29 @@ export function BatchCreator() {
                   Total simulation runs: {selectedGenes.size} × {seeds} = {selectedGenes.size * seeds}
                 </p>
               )}
+
+              {/* Cost estimator */}
+              {(() => {
+                const geneCount = usingPreset ? 50 : selectedGenes.size  // estimate 50 for presets
+                const totalRuns = geneCount * seeds + (includeWildtype ? seeds : 0)
+                const estMinPerGen = 20
+                const estTotal = totalRuns * generations * estMinPerGen
+                const estHrs = estTotal / 60
+                if (geneCount === 0) return null
+                return (
+                  <div className="mt-3 pt-3 border-t border-gray-200 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-xs text-gray-500">
+                      Est. compute: ~{estHrs < 1 ? `${estTotal} min` : `${estHrs.toFixed(1)} hr`}
+                      <span className="text-gray-400 ml-1">
+                        ({totalRuns} run{totalRuns > 1 ? 's' : ''} &times; ~{estMinPerGen} min/gen)
+                      </span>
+                    </span>
+                  </div>
+                )
+              })()}
             </div>
 
             <button
@@ -454,7 +495,7 @@ export function BatchCreator() {
               {submitting ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Creating…
+                  Creating\u2026
                 </span>
               ) : (
                 `Create batch experiments`

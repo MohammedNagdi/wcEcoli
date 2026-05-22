@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   getVariants, getVariantDetail, getConditions, getTimelines,
-  createExperiment, searchGenes,
+  createExperiment, searchGenes, getGene,
 } from '../../api/client'
 import type {
-  Variant, VariantDetail, Condition, Timeline, Gene, ExperimentCreate,
+  Variant, VariantDetail, Condition, Timeline, Gene, GeneDetail, ExperimentCreate,
 } from '../../types'
 import { SearchInput } from '../common/SearchInput'
 import { HelpTip, HelpNote } from '../common/HelpTip'
@@ -36,11 +36,15 @@ export function ExperimentDesigner() {
   const [seeds, setSeeds] = useState(1)
   const [generations, setGenerations] = useState(1)
   const [lengthSec, setLengthSec] = useState(10800)
+  const [includeWildtype, setIncludeWildtype] = useState(!!prefillVariant)
 
   // Gene search
   const [geneQuery, setGeneQuery] = useState(prefillGene)
   const [geneResults, setGeneResults] = useState<Gene[]>([])
   const [showGenePicker, setShowGenePicker] = useState(false)
+
+  // Gene impact preview
+  const [geneDetail, setGeneDetail] = useState<GeneDetail | null>(null)
 
   // UI state
   const [saving, setSaving] = useState(false)
@@ -90,6 +94,12 @@ export function ExperimentDesigner() {
     })
   }, [prefillGene])
 
+  // Fetch gene detail for impact preview
+  useEffect(() => {
+    if (!geneSymbol) { setGeneDetail(null); return }
+    getGene(geneSymbol).then(setGeneDetail).catch(() => setGeneDetail(null))
+  }, [geneSymbol])
+
   // Gene search
   useEffect(() => {
     if (geneQuery.length < 1) { setGeneResults([]); return }
@@ -122,6 +132,7 @@ export function ExperimentDesigner() {
         timeline,
         gene_symbol: geneSymbol,
         sim_params: JSON.stringify({ seeds, generations, length_sec: lengthSec }),
+        include_wildtype: includeWildtype,
       }
       const experiment = await createExperiment(data)
       navigate(`/experiments?created=${experiment.id}`)
@@ -160,6 +171,7 @@ export function ExperimentDesigner() {
               setVariantIndex(0)
               setGeneSymbol('')
               setGeneQuery('')
+              setIncludeWildtype(e.target.value === 'gene_knockout')
             }}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
                        focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
@@ -221,6 +233,79 @@ export function ExperimentDesigner() {
                 Selected: <span className="font-mono font-medium text-bio-gene">{geneSymbol}</span>
                 {' '}&rarr; KO index <span className="font-mono">{variantIndex}</span>
               </p>
+            )}
+
+            {/* Gene Impact Preview */}
+            {geneDetail && geneSymbol && (
+              <div className="mt-4 bg-gray-50 rounded-lg p-4 border border-gray-100">
+                <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Knockout impact preview</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                    <span className="text-gray-500">Protein:</span>
+                    <span className="font-mono text-xs">{geneDetail.monomer_id ? geneDetail.monomer_name || geneDetail.monomer_id : 'none'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-green-500" />
+                    <span className="text-gray-500">mRNA:</span>
+                    <span className="font-mono text-xs">
+                      {(() => {
+                        try { const ids = JSON.parse(geneDetail.rna_ids); return Array.isArray(ids) ? ids.length + ' transcript' + (ids.length > 1 ? 's' : '') : '1 transcript' }
+                        catch { return geneDetail.rna_ids ? '1 transcript' : 'none' }
+                      })()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-purple-500" />
+                    <span className="text-gray-500">Complexes:</span>
+                    <span className="font-mono text-xs">
+                      {(() => {
+                        try { const ids = JSON.parse(geneDetail.complex_ids); return Array.isArray(ids) ? ids.length : 0 }
+                        catch { return 0 }
+                      })()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-orange-500" />
+                    <span className="text-gray-500">TF targets:</span>
+                    <span className="font-mono text-xs">{geneDetail.regulates.length || 'none'}</span>
+                  </div>
+                </div>
+
+                {/* Multi-TU warning */}
+                {(() => {
+                  try {
+                    const rnaIds = JSON.parse(geneDetail.rna_ids)
+                    if (Array.isArray(rnaIds) && rnaIds.length > 1) {
+                      return (
+                        <div className="mt-3 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-800">
+                          <span className="font-semibold">&#9888; Multi-TU gene:</span>{' '}
+                          {geneSymbol} has {rnaIds.length} transcription units. The knockout zeros all of them,
+                          which may affect co-transcribed genes on the same operon.
+                        </div>
+                      )
+                    }
+                  } catch {}
+                  return null
+                })()}
+
+                {/* High-impact TF warning */}
+                {geneDetail.regulates.length > 10 && (
+                  <div className="mt-3 bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-xs text-blue-800">
+                    <span className="font-semibold">&#9889; Hub TF:</span>{' '}
+                    {geneSymbol} regulates {geneDetail.regulates.length} downstream genes.
+                    This knockout will have broad transcriptional effects.
+                  </div>
+                )}
+
+                {!geneDetail.is_mechanistic && (
+                  <div className="mt-3 bg-gray-100 border border-gray-200 rounded-md px-3 py-2 text-xs text-gray-600">
+                    <span className="font-semibold">Note:</span>{' '}
+                    {geneSymbol} is not a mechanistic gene. Its protein will drop to zero, but
+                    the model may not capture downstream metabolic effects.
+                  </div>
+                )}
+              </div>
             )}
           </section>
         )}
@@ -353,34 +438,29 @@ export function ExperimentDesigner() {
           </div>
         </section>
 
-        {/* --- Name & description --- */}
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
-          <h2 className="text-sm font-medium text-gray-700 mb-3">Experiment details</h2>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Name</label>
+        {/* --- Wildtype control --- */}
+        {variantType && (
+          <section className="bg-white rounded-lg border border-gray-200 p-5">
+            <div className="flex items-start gap-3">
               <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. rpoB knockout in minimal media"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                type="checkbox"
+                id="include-wt"
+                checked={includeWildtype}
+                onChange={(e) => setIncludeWildtype(e.target.checked)}
+                className="mt-0.5 rounded border-gray-300"
               />
+              <div>
+                <label htmlFor="include-wt" className="text-sm font-medium text-gray-700 flex items-center gap-1.5 cursor-pointer">
+                  Include wildtype control
+                  <HelpTip text="Automatically creates (or reuses) a wildtype baseline experiment with the same growth condition. This lets you compare KO results against a matched control on the results page." />
+                </label>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  A matched wildtype run for <span className="font-mono">{condition}</span> will be created automatically.
+                </p>
+              </div>
             </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Description (optional)</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={2}
-                placeholder="What do you expect to observe?"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none
-                           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
-              />
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* --- Summary + save --- */}
         <section className="bg-brand-50 rounded-lg border border-brand-200 p-5">
@@ -406,7 +486,30 @@ export function ExperimentDesigner() {
             <span>{seeds} seed{seeds > 1 ? 's' : ''} &times; {generations} gen</span>
             <span className="text-brand-500">Max duration:</span>
             <span>{lengthSec}s ({(lengthSec / 3600).toFixed(1)} hr)</span>
+            <span className="text-brand-500">WT control:</span>
+            <span>{includeWildtype ? 'Yes — matched baseline' : 'No'}</span>
           </div>
+
+          {/* Cost estimator */}
+          {(() => {
+            const totalRuns = seeds * (includeWildtype ? 2 : 1)
+            const estMinPerGen = 20  // ~20 min/gen typical
+            const estTotal = totalRuns * generations * estMinPerGen
+            const estHrs = estTotal / 60
+            return (
+              <div className="mt-3 pt-3 border-t border-brand-200 flex items-center gap-2">
+                <svg className="w-4 h-4 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-xs text-brand-600">
+                  Est. compute: ~{estHrs < 1 ? `${estTotal} min` : `${estHrs.toFixed(1)} hr`}
+                  <span className="text-brand-400 ml-1">
+                    ({totalRuns} run{totalRuns > 1 ? 's' : ''} &times; {generations} gen &times; ~{estMinPerGen} min/gen)
+                  </span>
+                </span>
+              </div>
+            )
+          })()}
         </section>
 
         <div className="flex gap-3 justify-end pb-8">

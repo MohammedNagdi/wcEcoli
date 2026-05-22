@@ -12,10 +12,10 @@ import {
   Legend,
   Filler,
 } from 'chart.js'
-import { getJob, getJobTimeseries, getExperiment, getGeneByKoIndex } from '../../api/client'
+import { getJob, getJobTimeseries, getExperiment, getGeneByKoIndex, getWtDelta } from '../../api/client'
 import { MoleculeExplorer } from './MoleculeExplorer'
 import { HelpTip, HelpNote } from '../common/HelpTip'
-import type { SimulationJob, ResultsResponse, TimeseriesData, Experiment } from '../../types'
+import type { SimulationJob, ResultsResponse, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -155,6 +155,7 @@ export function ResultsPage() {
   const [experiment, setExperiment] = useState<Experiment | null>(null)
   const [resolvedGeneSymbol, setResolvedGeneSymbol] = useState<string | undefined>()
   const [results, setResults] = useState<ResultsResponse | null>(null)
+  const [wtDelta, setWtDelta] = useState<WildtypeDelta | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeChannels, setActiveChannels] = useState<Set<string>>(new Set(DEFAULT_ACTIVE))
@@ -171,10 +172,12 @@ export function ResultsPage() {
         setResults(tsData)
 
         let geneSymbol: string | undefined
+        let experimentId: number | undefined
         if (jobData.experiment_id) {
           try {
             const exp = await getExperiment(jobData.experiment_id)
             setExperiment(exp)
+            experimentId = exp.id
             geneSymbol = exp.gene_symbol || undefined
           } catch { /* experiment context is optional */ }
         }
@@ -187,6 +190,13 @@ export function ResultsPage() {
         }
 
         setResolvedGeneSymbol(geneSymbol)
+
+        // Fetch WT delta for comparison cards
+        if (experimentId && jobData.status === 'done') {
+          getWtDelta(experimentId)
+            .then(setWtDelta)
+            .catch(() => {}) // optional — no delta if no WT
+        }
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
@@ -259,21 +269,25 @@ export function ResultsPage() {
                   label="Division time"
                   value={s.division_time_sec != null ? (s.division_time_sec / 60).toFixed(1) + ' min' : '\u2014'}
                   help="Time from cell birth to division in the simulation. E. coli typically divides every 20-60 min depending on growth conditions."
+                  deltaPct={wtDelta?.has_wildtype ? wtDelta.division_time_pct : undefined}
                 />
                 <SummaryCard
                   label="Final mass"
                   value={s.final_mass_fg != null ? s.final_mass_fg.toFixed(1) + ' fg' : '\u2014'}
                   help="Dry mass of the cell at division, in femtograms. A typical E. coli cell is ~1,000 fg wet mass (~300 fg dry)."
+                  deltaPct={wtDelta?.has_wildtype ? wtDelta.final_mass_pct : undefined}
                 />
                 <SummaryCard
                   label="Growth rate"
                   value={s.growth_rate != null ? (s.growth_rate * 1000).toFixed(2) + ' \u00d710\u207b\u00b3 /s' : '\u2014'}
                   help="Instantaneous specific growth rate at the end of the simulation (1/s). Calculated from the rate of mass increase."
+                  deltaPct={wtDelta?.has_wildtype ? wtDelta.growth_rate_pct : undefined}
                 />
                 <SummaryCard
                   label="Doubling time"
                   value={s.doubling_time_min != null ? s.doubling_time_min.toFixed(1) + ' min' : '\u2014'}
                   help="Time for the cell to double its mass at the current growth rate: ln(2)/growth_rate. Compare to the observed division time."
+                  deltaPct={wtDelta?.has_wildtype ? wtDelta.doubling_time_pct : undefined}
                 />
               </>
             )
@@ -368,10 +382,10 @@ export function ResultsPage() {
                     {s.final_mass_fg != null ? s.final_mass_fg.toFixed(1) + ' fg' : '\u2014'}
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {s.growth_rate != null ? (s.growth_rate * 1000).toFixed(3) : '\u2014'}
+                    {s.growth_rate != null ? (s.growth_rate * 1000).toFixed(3) : '—'}
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {s.doubling_time_min != null ? s.doubling_time_min.toFixed(1) + ' min' : '\u2014'}
+                    {s.doubling_time_min != null ? s.doubling_time_min.toFixed(1) + ' min' : '—'}
                   </td>
                 </tr>
               ))}
@@ -383,7 +397,9 @@ export function ResultsPage() {
   )
 }
 
-function SummaryCard({ label, value, help }: { label: string; value: string; help?: string }) {
+function SummaryCard({ label, value, help, deltaPct }: {
+  label: string; value: string; help?: string; deltaPct?: number | null
+}) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
       <p className="text-xs text-gray-400 mb-0.5 flex items-center gap-1">
@@ -391,6 +407,14 @@ function SummaryCard({ label, value, help }: { label: string; value: string; hel
         {help && <HelpTip text={help} position="bottom" />}
       </p>
       <p className="text-lg font-semibold text-gray-900">{value}</p>
+      {deltaPct != null && (
+        <p className={'text-xs font-medium mt-0.5 ' + (
+          deltaPct > 5 ? 'text-red-600' : deltaPct < -5 ? 'text-emerald-600' : 'text-gray-400'
+        )}>
+          {deltaPct > 0 ? '↑' : deltaPct < 0 ? '↓' : '↔'}{' '}
+          {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% vs WT
+        </p>
+      )}
     </div>
   )
 }
