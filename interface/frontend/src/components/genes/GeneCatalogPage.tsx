@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useGeneDetail, useCategories } from '../../hooks/useGenes'
 import { getGenes } from '../../api/client'
 import { SearchInput } from '../common/SearchInput'
@@ -15,7 +16,8 @@ type SortDir = 'asc' | 'desc'
 const PAGE_SIZE = 100
 
 export function GeneCatalogPage() {
-  const [query, setQuery] = useState('')
+  const [searchParams] = useSearchParams()
+  const [query, setQuery] = useState(() => searchParams.get('q') ?? '')
   const [category, setCategory] = useState<string | undefined>()
   const [mechanisticFilter, setMechanisticFilter] = useState<boolean | undefined>()
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
@@ -33,6 +35,12 @@ export function GeneCatalogPage() {
 
   const { gene: selectedGene, loading: detailLoading } = useGeneDetail(selectedSymbol)
   const categories = useCategories()
+
+  useEffect(() => {
+    const urlQuery = searchParams.get('q') ?? ''
+    setQuery(urlQuery)
+    setSelectedSymbol(urlQuery || null)
+  }, [searchParams])
 
   // Reset and fetch page 1 when filters change
   useEffect(() => {
@@ -367,6 +375,7 @@ export function GeneCatalogPage() {
           gene={selectedGene}
           onClose={() => setSelectedSymbol(null)}
         />
+      )}
       )}
       {detailLoading && selectedSymbol && (
         <div className="border-l border-gray-200 bg-white w-[420px] flex-shrink-0 flex items-center justify-center">

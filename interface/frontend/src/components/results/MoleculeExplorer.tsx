@@ -162,31 +162,97 @@ function ExperimentFocusPanel({
   const [geneDetail, setGeneDetail] = useState<GeneDetail | null>(null)
 
   useEffect(() => {
-    if (!geneSymbol) return
-    setLoading(true)
+    if (!geneSymbol) {
+      setProteinTs([])
+      setMrnaTs([])
+      setComplexTs([])
+      setGeneDetail(null)
+      setLoading(false)
+      return
+    }
 
-    // Fetch gene detail + molecule search in parallel
-    Promise.all([
-      getGene(geneSymbol).catch(() => null),
-      searchMolecules(jobId, geneSymbol),
-    ])
-      .then(async ([detail, searchRes]) => {
+    let cancelled = false
+    setLoading(true)
+    setProteinTs([])
+    setMrnaTs([])
+    setComplexTs([])
+    setMatchInfo({ protein: [], mRNA: [], complex: [] })
+
+    getGene(geneSymbol).catch(() => null)
+      .then(async (detail) => {
+        if (cancelled) return
         setGeneDetail(detail)
 
-        const proteinIds = (searchRes.results.protein ?? []).slice(0, 3)
-        const mrnaIds = (searchRes.results.mRNA ?? []).slice(0, 3)
+        const queries: string[] = []
+        const addQuery = (value: string | null | undefined) => {
+          const trimmed = value?.trim()
+          if (!trimmed) return
+          if (!queries.some((query) => query.toLowerCase() === trimmed.toLowerCase())) {
+            queries.push(trimmed)
+          }
+        }
 
-        // Extract complex IDs from gene detail
+        addQuery(geneSymbol)
+        if (detail?.monomer_id) {
+          addQuery(detail.monomer_id.replace(/\[.*\]$/, ''))
+        }
+        addQuery(detail?.ecoli_id)
+        if (detail?.rna_ids) {
+          try {
+            const parsed = JSON.parse(detail.rna_ids)
+            if (Array.isArray(parsed)) {
+              for (const id of parsed) {
+                if (typeof id === 'string') addQuery(id.replace(/\[.*\]$/, ''))
+              }
+            }
+          } catch {}
+        }
+
         let complexIds: string[] = []
         if (detail?.complex_ids) {
           try {
             const parsed = JSON.parse(detail.complex_ids)
             if (Array.isArray(parsed)) {
-              // Complex IDs in the model have a [c] compartment tag
-              complexIds = parsed.map((id: string) => id.includes('[') ? id : id + '[c]').slice(0, 5)
+              complexIds = parsed
+                .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+                .map((id) => id.trim())
+                .map((id) => id.includes('[') ? id : id + '[c]')
+                .slice(0, 5)
+              for (const id of complexIds) {
+                addQuery(id.replace(/\[.*\]$/, ''))
+              }
             }
           } catch {}
         }
+
+        const searchResponses = await Promise.all(
+          queries.map((query) =>
+            searchMolecules(jobId, query).catch(() => ({
+              query,
+              results: {} as Record<string, string[]>,
+              total_matches: 0,
+            }))
+          )
+        )
+        if (cancelled) return
+
+        const allResults: Record<string, string[]> = {}
+        for (const res of searchResponses) {
+          for (const [mtype, ids] of Object.entries(res.results)) {
+            if (!allResults[mtype]) allResults[mtype] = []
+            for (const id of ids) {
+              if (!allResults[mtype].includes(id)) allResults[mtype].push(id)
+            }
+          }
+        }
+
+        const proteinIds = (allResults.protein ?? []).slice(0, 3)
+        const directMrnaIds = (allResults.mRNA ?? []).slice(0, 3)
+        const cistronMrnaIds = (allResults.mRNA_cistron ?? []).slice(
+          0,
+          Math.max(0, 3 - directMrnaIds.length)
+        )
+        const mrnaIds = [...directMrnaIds, ...cistronMrnaIds]
 
         setMatchInfo({ protein: proteinIds, mRNA: mrnaIds, complex: complexIds })
 
@@ -195,29 +261,51 @@ function ExperimentFocusPanel({
         if (proteinIds.length > 0) {
           promises.push(
             getMoleculeTimeseries(jobId, 'protein', proteinIds)
-              .then((r) => setProteinTs(r.molecules))
-              .catch(() => {})
+              .then((r) => { if (!cancelled) setProteinTs(r.molecules) })
+              .catch(() => { if (!cancelled) setProteinTs([]) })
           )
         }
         if (mrnaIds.length > 0) {
+          const mrnaFetches: Promise<MoleculeTimeseries[]>[] = []
+          if (directMrnaIds.length > 0) {
+            mrnaFetches.push(
+              getMoleculeTimeseries(jobId, 'mRNA', directMrnaIds)
+                .then((r) => r.molecules)
+                .catch(() => [])
+            )
+          }
+          if (cistronMrnaIds.length > 0) {
+            mrnaFetches.push(
+              getMoleculeTimeseries(jobId, 'mRNA_cistron', cistronMrnaIds)
+                .then((r) => r.molecules)
+                .catch(() => [])
+            )
+          }
           promises.push(
-            getMoleculeTimeseries(jobId, 'mRNA', mrnaIds)
-              .then((r) => setMrnaTs(r.molecules))
-              .catch(() => {})
+            Promise.all(mrnaFetches)
+              .then((responses) => {
+                if (!cancelled) setMrnaTs(responses.flat())
+              })
           )
         }
         if (complexIds.length > 0) {
           promises.push(
             getMoleculeTimeseries(jobId, 'protein', complexIds)
-              .then((r) => setComplexTs(r.molecules))
-              .catch(() => setComplexTs([]))
+              .then((r) => { if (!cancelled) setComplexTs(r.molecules) })
+              .catch(() => { if (!cancelled) setComplexTs([]) })
           )
         }
 
         await Promise.all(promises)
       })
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [jobId, geneSymbol])
 
   if (loading) {
@@ -231,7 +319,7 @@ function ExperimentFocusPanel({
     )
   }
 
-  if (proteinTs.length === 0 && mrnaTs.length === 0) return null
+  if (proteinTs.length === 0 && mrnaTs.length === 0 && complexTs.length === 0) return null
 
   const proteinDatasets = buildChartData(proteinTs)
   const mrnaDatasets = buildChartData(mrnaTs)

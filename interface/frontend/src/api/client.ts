@@ -125,7 +125,10 @@ export async function updateExperiment(id: number, data: Partial<ExperimentCreat
 }
 
 export async function deleteExperiment(id: number): Promise<void> {
-  await fetch(`${BASE}/experiments/${id}`, { method: 'DELETE' })
+  const res = await fetch(`${BASE}/experiments/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    throw new Error(`Delete failed: ${res.status}`)
+  }
 }
 
 export async function createBatchExperiments(data: BatchRequest): Promise<BatchResponse> {
@@ -334,6 +337,7 @@ export async function compareBatch(
 }
 
 // --- Health ---
+
 
 export async function getHealth(): Promise<{ status: string; version: string }> {
   return fetchJSON('/health')

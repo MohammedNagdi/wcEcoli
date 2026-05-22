@@ -59,10 +59,14 @@ export function ExperimentListPage() {
   }, [experiments])
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Delete this experiment? This cannot be undone.')) return
-    await deleteExperiment(id)
-    setExperiments((prev) => prev.filter((e) => e.id !== id))
-    if (selectedId === id) setSelectedId(null)
+    if (!window.confirm('Delete this experiment and all its jobs/results? This cannot be undone.')) return
+    try {
+      await deleteExperiment(id)
+      setExperiments((prev) => prev.filter((e) => e.id !== id))
+      if (selectedId === id) setSelectedId(null)
+    } catch (e: unknown) {
+      alert('Failed to delete: ' + (e instanceof Error ? e.message : 'unknown error'))
+    }
   }
 
   const handleUpdated = (updated: Experiment) => {

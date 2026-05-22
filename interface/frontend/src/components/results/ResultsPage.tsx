@@ -182,7 +182,7 @@ export function ResultsPage() {
           } catch { /* experiment context is optional */ }
         }
 
-        if (!geneSymbol && jobData.variant_type === 'gene_knockout' && jobData.variant_index != null) {
+        if (!geneSymbol && jobData.variant_type === 'gene_knockout' && jobData.variant_index != null && jobData.variant_index > 0) {
           try {
             const gene = await getGeneByKoIndex(jobData.variant_index)
             geneSymbol = gene.symbol
@@ -412,6 +412,7 @@ function SummaryCard({ label, value, help, deltaPct }: {
           deltaPct > 5 ? 'text-red-600' : deltaPct < -5 ? 'text-emerald-600' : 'text-gray-400'
         )}>
           {deltaPct > 0 ? '↑' : deltaPct < 0 ? '↓' : '↔'}{' '}
+          {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% vs WT
           {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% vs WT
         </p>
       )}

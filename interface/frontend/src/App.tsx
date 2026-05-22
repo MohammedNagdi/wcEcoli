@@ -11,6 +11,8 @@ import { ResultsBrowserPage } from './components/results/ResultsBrowserPage'
 import { ComparisonDashboard } from './components/results/ComparisonDashboard'
 import { MLPage } from './components/ml/MLPage'
 import { DesignPage } from './components/design/DesignPage'
+import { GenomeViewerPage } from './components/genome/GenomeViewerPage'
+import { PathwaysPage } from './components/pathways/PathwaysPage'
 
 export default function App() {
   return (
@@ -18,6 +20,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<GeneCatalogPage />} />
         <Route path="/network" element={<TFNetworkPage />} />
+        <Route path="/genome" element={<GenomeViewerPage />} />
+        <Route path="/pathways" element={<PathwaysPage />} />
         <Route path="/experiments" element={<ExperimentListPage />} />
         <Route path="/experiments/new" element={<ExperimentDesigner />} />
         <Route path="/experiments/batch" element={<BatchCreator />} />

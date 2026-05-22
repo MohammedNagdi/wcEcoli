@@ -801,6 +801,18 @@ def delete_experiment(experiment_id: int, session: Session = Depends(get_session
     experiment = session.get(Experiment, experiment_id)
     if not experiment:
         raise HTTPException(404, f"Experiment {experiment_id} not found")
+
+    jobs = session.exec(
+        select(SimulationJob).where(SimulationJob.experiment_id == experiment_id)
+    ).all()
+    for job in jobs:
+        results = session.exec(
+            select(SimulationResult).where(SimulationResult.job_id == job.id)
+        ).all()
+        for result in results:
+            session.delete(result)
+        session.delete(job)
+
     session.delete(experiment)
     session.commit()
 
@@ -1157,6 +1169,7 @@ def _expand_screen(body: BatchRequest, session: Session) -> list[BatchExperiment
                 col(Gene.category).ilike(f"%{category}%"),
             ).order_by(Gene.symbol)
         ).all()
+        if not genes:
         if not genes:
             raise HTTPException(400, f"No mechanistic genes in category matching '{category}'")
         return [
