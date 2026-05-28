@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
 import type { MouseEvent, PointerEvent, WheelEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import type { Gene } from '../../types'
 import {
   CATEGORY_FILL,
@@ -11,6 +10,7 @@ import {
   polarToCartesian,
 } from '../../utils/genome'
 import { categoryLabel } from '../../utils/labels'
+import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 
 const VIEW_SIZE = 800
 const CENTER = 400
@@ -26,6 +26,8 @@ interface Props {
   genes: Gene[]
   searchTerm: string
   dimmedCategories: Set<string>
+  compact?: boolean
+  darkMode?: boolean
 }
 
 interface TooltipState {
@@ -41,14 +43,39 @@ interface DragState {
   panY: number
 }
 
-export function CircularGenomeMap({ genes, searchTerm, dimmedCategories }: Props) {
-  const navigate = useNavigate()
+export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact = false, darkMode = true }: Props) {
+  const { setWorkspaceUrlState } = useUrlWorkspaceState()
   const containerRef = useRef<HTMLDivElement>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [drag, setDrag] = useState<DragState | null>(null)
+  const palette = darkMode
+    ? {
+        bg: '#111827',
+        wrapperCls: 'bg-gray-900 border border-gray-800',
+        ring: '#374151',
+        tooltipCls: 'border border-gray-700 bg-gray-950/95 text-gray-200',
+        tooltipTitle: 'text-white',
+        tooltipMuted: 'text-gray-400',
+        tooltipLabel: 'text-gray-500',
+        posText: '#9ca3af',
+        centerTitle: '#e5e7eb',
+        centerSubtitle: '#9ca3af',
+      }
+    : {
+        bg: '#ffffff',
+        wrapperCls: 'bg-white border border-gray-200',
+        ring: '#e5e7eb',
+        tooltipCls: 'border border-gray-200 bg-white text-gray-900 shadow',
+        tooltipTitle: 'text-gray-900',
+        tooltipMuted: 'text-gray-500',
+        tooltipLabel: 'text-gray-400',
+        posText: '#6b7280',
+        centerTitle: '#111827',
+        centerSubtitle: '#6b7280',
+      }
 
   const positionedGenes = useMemo(() => {
     return genes.filter(hasGenomePosition).map((gene) => {
@@ -110,10 +137,10 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories }: Props
 
   return (
     <div ref={containerRef} className="relative">
-      <div className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800">
+      <div className={`relative mx-auto aspect-square w-full overflow-hidden rounded-xl ${compact ? 'max-h-[520px]' : 'max-h-[760px]'} ${palette.wrapperCls}`}>
         <svg
           viewBox={`0 0 ${VIEW_SIZE} ${VIEW_SIZE}`}
-          className={`w-full max-h-[760px] select-none ${zoom > 1 ? 'cursor-grab' : ''} ${
+          className={`h-full w-full select-none ${zoom > 1 ? 'cursor-grab' : ''} ${
             drag ? 'cursor-grabbing' : ''
           }`}
           onWheel={handleWheel}
@@ -122,7 +149,7 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories }: Props
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
         >
-          <rect width={VIEW_SIZE} height={VIEW_SIZE} fill="#111827" />
+          <rect width={VIEW_SIZE} height={VIEW_SIZE} fill={palette.bg} />
           <g
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
@@ -130,10 +157,10 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories }: Props
               transition: drag ? 'none' : 'transform 120ms ease-out',
             }}
           >
-            <GenomeTicks />
-            <circle cx={CENTER} cy={CENTER} r={250} fill="#111827" stroke="#374151" strokeWidth="1" />
-            <circle cx={CENTER} cy={CENTER} r={298} fill="none" stroke="#1f2937" strokeWidth="1" />
-            <circle cx={CENTER} cy={CENTER} r={342} fill="none" stroke="#1f2937" strokeWidth="1" />
+            <GenomeTicks posText={palette.posText} />
+            <circle cx={CENTER} cy={CENTER} r={250} fill={palette.bg} stroke={palette.ring} strokeWidth="1" />
+            <circle cx={CENTER} cy={CENTER} r={298} fill="none" stroke={palette.ring} strokeWidth="1" />
+            <circle cx={CENTER} cy={CENTER} r={342} fill="none" stroke={palette.ring} strokeWidth="1" />
 
             {positionedGenes.map(({ gene, left, right, startAngle, endAngle }) => {
               const isForward = gene.direction === '+'
@@ -178,19 +205,22 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories }: Props
                   }}
                   onClick={(event) => {
                     event.stopPropagation()
-                    navigate(`/?q=${encodeURIComponent(gene.symbol)}`)
+                    setWorkspaceUrlState(
+                      { selectedGene: gene.symbol, exploreView: 'genes' },
+                      { pathname: '/', replace: false }
+                    )
                   }}
                 />
               )
             })}
 
-            <GenomeMarker bp={ORIC_BP} label="oriC" fill="#facc15" />
-            <GenomeMarker bp={TER_BP} label="ter" fill="#60a5fa" />
+            <GenomeMarker bp={ORIC_BP} label="oriC" fill="#facc15" stroke={palette.bg} textFill={palette.centerTitle} />
+            <GenomeMarker bp={TER_BP} label="ter" fill="#60a5fa" stroke={palette.bg} textFill={palette.centerTitle} />
 
-            <text x={CENTER} y={CENTER - 8} textAnchor="middle" className="fill-gray-200 text-lg font-semibold">
+            <text x={CENTER} y={CENTER - 8} textAnchor="middle" fill={palette.centerTitle} className="text-lg font-semibold">
               E. coli K-12
             </text>
-            <text x={CENTER} y={CENTER + 20} textAnchor="middle" className="fill-gray-400 text-sm">
+            <text x={CENTER} y={CENTER + 20} textAnchor="middle" fill={palette.centerSubtitle} className="text-sm">
               4.64 Mbp
             </text>
           </g>
@@ -214,17 +244,17 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories }: Props
 
       {tooltip && (
         <div
-          className="pointer-events-none absolute z-20 w-60 rounded-lg border border-gray-700 bg-gray-950/95 p-3 text-xs text-gray-200 shadow-xl"
+          className={`pointer-events-none absolute z-20 w-60 rounded-lg p-3 text-xs shadow-xl ${palette.tooltipCls}`}
           style={{ left: tooltip.x, top: tooltip.y }}
         >
-          <div className="font-mono text-sm font-semibold text-white">{tooltip.gene.symbol}</div>
-          <div className="mt-1 text-gray-400">{categoryLabel(tooltip.gene.category)}</div>
+          <div className={`font-mono text-sm font-semibold ${palette.tooltipTitle}`}>{tooltip.gene.symbol}</div>
+          <div className={`mt-1 ${palette.tooltipMuted}`}>{categoryLabel(tooltip.gene.category)}</div>
           <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <span className="text-gray-500">Position</span>
+            <span className={palette.tooltipLabel}>Position</span>
             <span className="font-mono">
               {tooltip.gene.left_end_pos?.toLocaleString()}-{tooltip.gene.right_end_pos?.toLocaleString()}
             </span>
-            <span className="text-gray-500">Strand</span>
+            <span className={palette.tooltipLabel}>Strand</span>
             <span>{tooltip.gene.direction === '+' ? 'Forward' : tooltip.gene.direction === '-' ? 'Reverse' : 'Unknown'}</span>
           </div>
         </div>
@@ -233,7 +263,7 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories }: Props
   )
 }
 
-function GenomeTicks() {
+function GenomeTicks({ posText }: { posText: string }) {
   const ticks = Array.from({ length: 9 }, (_, index) => (index + 1) * 500_000).filter(
     (bp) => bp < GENOME_LENGTH
   )
@@ -252,7 +282,7 @@ function GenomeTicks() {
               y1={inner.y}
               x2={outer.x}
               y2={outer.y}
-              stroke="#9ca3af"
+              stroke={posText}
               strokeWidth="1"
               opacity="0.7"
             />
@@ -261,7 +291,8 @@ function GenomeTicks() {
               y={label.y}
               textAnchor="middle"
               dominantBaseline="middle"
-              className="fill-gray-400 text-[11px]"
+              fill={posText}
+              className="text-[11px]"
             >
               {(bp / 1_000_000).toFixed(1)}
             </text>
@@ -272,7 +303,7 @@ function GenomeTicks() {
   )
 }
 
-function GenomeMarker({ bp, label, fill }: { bp: number; label: string; fill: string }) {
+function GenomeMarker({ bp, label, fill, stroke, textFill }: { bp: number; label: string; fill: string; stroke: string; textFill: string }) {
   const angle = bpToAngle(bp)
   const tip = polarToCartesian(CENTER, CENTER, 356, angle)
   const left = polarToCartesian(CENTER, CENTER, 338, angle - 0.025)
@@ -284,7 +315,7 @@ function GenomeMarker({ bp, label, fill }: { bp: number; label: string; fill: st
       <polygon
         points={`${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`}
         fill={fill}
-        stroke="#111827"
+        stroke={stroke}
         strokeWidth="1"
       />
       <text
@@ -292,7 +323,8 @@ function GenomeMarker({ bp, label, fill }: { bp: number; label: string; fill: st
         y={text.y}
         textAnchor="middle"
         dominantBaseline="middle"
-        className="fill-gray-200 text-[11px] font-medium"
+        fill={textFill}
+        className="text-[11px] font-medium"
       >
         {label}
       </text>

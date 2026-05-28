@@ -20,6 +20,7 @@ interface GeneCatalogPageProps {
   embedded?: boolean
   hideDetailPanel?: boolean
   heightClass?: string
+  showEssentiality?: boolean
 }
 
 function FilterChip({ label, active, dotColor, onClick }: {
@@ -80,6 +81,7 @@ export function GeneCatalogPage({
   embedded = false,
   hideDetailPanel = false,
   heightClass,
+  showEssentiality = true,
 }: GeneCatalogPageProps) {
   const [searchParams] = useSearchParams()
   const {
@@ -103,6 +105,7 @@ export function GeneCatalogPage({
   const [error, setError] = useState<string | null>(null)
   const [phenotypeMap, setPhenotypeMap] = useState<Map<string, GeneKOSummary>>(new Map())
   const scrollRef = useRef<HTMLDivElement>(null)
+  const tableColCount = showEssentiality ? 6 : 5
 
   const { gene: selectedGeneDetail, loading: detailLoading } = useGeneDetail(selectedSymbol)
   const categories = useCategories()
@@ -121,10 +124,10 @@ export function GeneCatalogPage({
     const urlGene = searchParams.get('gene') ?? ''
     const urlQuery = searchParams.get('q') ?? ''
     const urlCategory = searchParams.get('category') ?? ''
-    setQuery(urlQuery || urlGene)
+    setQuery(urlQuery || (embedded ? '' : urlGene))
     setSelectedSymbol(urlGene || urlQuery || null)
     setCategory(urlCategory || undefined)
-  }, [searchParams])
+  }, [embedded, searchParams])
 
   useEffect(() => {
     if (selectedGeneSymbol && selectedGeneSymbol !== selectedSymbol) {
@@ -332,9 +335,11 @@ export function GeneCatalogPage({
                 <SortHeader sortKey="left_end_pos" activeKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="w-36 text-right">
                   Position
                 </SortHeader>
-                <th className="px-4 py-2.5 font-medium text-gray-500 w-24 text-left">
-                  Essentiality
-                </th>
+                {showEssentiality && (
+                  <th className="px-4 py-2.5 font-medium text-gray-500 w-24 text-left">
+                    Essentiality
+                  </th>
+                )}
                 <SortHeader sortKey="ko_index" activeKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="w-16 text-right">
                   KO #
                 </SortHeader>
@@ -343,10 +348,10 @@ export function GeneCatalogPage({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <SkeletonTableRows rows={20} cols={6} />
+                <SkeletonTableRows rows={20} cols={tableColCount} />
               ) : sortedGenes.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12 text-gray-400">
+                  <td colSpan={tableColCount} className="text-center py-12 text-gray-400">
                     No genes match your search.
                   </td>
                 </tr>
@@ -386,9 +391,11 @@ export function GeneCatalogPage({
                           </p>
                         )}
                       </td>
-                      <td className="px-4 py-2">
-                        <PhenotypeBadge symbol={gene.symbol} phenotypeMap={phenotypeMap} />
-                      </td>
+                      {showEssentiality && (
+                        <td className="px-4 py-2">
+                          <PhenotypeBadge symbol={gene.symbol} phenotypeMap={phenotypeMap} />
+                        </td>
+                      )}
                       <td className="px-4 py-2 text-right font-mono text-xs text-gray-500">
                         {gene.ko_index}
                       </td>
@@ -399,7 +406,7 @@ export function GeneCatalogPage({
               )}
               {loadingMore && (
                 <tr>
-                  <td colSpan={6} className="text-center py-4">
+                  <td colSpan={tableColCount} className="text-center py-4">
                     <div className="inline-flex items-center gap-2 text-sm text-gray-400">
                       <div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
                       Loading more...
@@ -409,7 +416,7 @@ export function GeneCatalogPage({
               )}
               {!loading && !loadingMore && allGenes.length < total && (
                 <tr>
-                  <td colSpan={6} className="text-center py-3 text-xs text-gray-400">
+                  <td colSpan={tableColCount} className="text-center py-3 text-xs text-gray-400">
                     {'Showing ' + allGenes.length.toLocaleString() + ' of ' + total.toLocaleString() + ' - scroll for more'}
                   </td>
                 </tr>
