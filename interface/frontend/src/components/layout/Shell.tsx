@@ -12,7 +12,6 @@ interface NavGroup {
   id: string
   label: string
   items: NavItem[]
-  secondary?: NavItem[]
 }
 
 const ICON_EXPLORE = 'M10 2v2m0 12v2M4 10h2m8 0h2m-1.5-5.5L13 6m-5.5 8.5L6 16m9.5.5L14 15M7.5 4.5L6 6m8 8l-1.5 1.5'
@@ -34,11 +33,9 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Explore',
     items: [
       { path: '/', label: 'Workspace', icon: ICON_EXPLORE },
+      { path: '/genome', label: 'Genome', icon: ICON_GENOME },
       { path: '/network', label: 'Network', icon: ICON_NETWORK },
       { path: '/pathways', label: 'Pathways', icon: ICON_PATHWAYS },
-    ],
-    secondary: [
-      { path: '/genome', label: 'Genome map', icon: ICON_GENOME },
     ],
   },
   {
@@ -154,28 +151,6 @@ export function Shell({ children }: { children: ReactNode }) {
                   )
                 })}
               </div>
-              {group.secondary && group.secondary.length > 0 && (
-                <div className="mt-1 space-y-0.5">
-                  {group.secondary.map((item) => {
-                    const active = isActive(item.path)
-                    return (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        title={collapsed ? item.label : undefined}
-                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
-                          active
-                            ? 'bg-brand-50 text-brand-600'
-                            : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                        } ${collapsed ? 'justify-center' : ''}`}
-                      >
-                        <NavIcon d={item.icon} className="h-3.5 w-3.5" />
-                        {!collapsed && <span className="truncate">{item.label}</span>}
-                      </Link>
-                    )
-                  })}
-                </div>
-              )}
             </div>
           ))}
         </nav>

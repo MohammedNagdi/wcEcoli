@@ -3,7 +3,8 @@ import { useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import { GeneCatalogPage } from '../genes/GeneCatalogPage'
 import { GenomeContextRail } from '../genes/GenomeContextRail'
-import { CategoryBadge, DirectionBadge, RegTypeBadge } from '../common/Badge'
+import { TFNetworkMini } from '../genes/TFNetworkMini'
+import { CategoryBadge, DirectionBadge } from '../common/Badge'
 import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import type { GeneDetail } from '../../types'
@@ -57,10 +58,10 @@ export function ExploreWorkspacePage() {
           </Link>
           {selectedGene && (
             <Link
-              to={`/experiments/new?variant=gene_knockout&gene=${encodeURIComponent(selectedGene)}`}
-              className="rounded-md bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+              to={`/genome?gene=${encodeURIComponent(selectedGene)}`}
+              className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-300 hover:text-gray-900"
             >
-              Design KO
+              Genome Map
             </Link>
           )}
         </div>
@@ -154,12 +155,20 @@ function SelectedGeneSummary({
           <h2 className="font-mono text-lg font-semibold text-gray-900">{gene.symbol}</h2>
           <p className="text-xs text-gray-400">{gene.ecoli_id}</p>
         </div>
-        <Link
-          to={`/experiments/new?variant=gene_knockout&gene=${encodeURIComponent(gene.symbol)}`}
-          className="rounded-md bg-bio-gene px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90"
-        >
-          Design KO
-        </Link>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <Link
+            to={`/genome?gene=${encodeURIComponent(gene.symbol)}`}
+            className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Genome Map
+          </Link>
+          <Link
+            to={`/experiments/new?variant=gene_knockout&gene=${encodeURIComponent(gene.symbol)}`}
+            className="rounded-md bg-bio-gene px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90"
+          >
+            Design KO
+          </Link>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
@@ -205,17 +214,19 @@ function SelectedGeneSummary({
           </div>
         )}
 
-        {gene.regulated_by.length > 0 && (
-          <div className="mt-2">
-            <p className="text-xs uppercase tracking-wide text-gray-400">Regulated by</p>
-            <div className="mt-0.5 flex flex-wrap gap-1">
-              {gene.regulated_by.slice(0, 8).map((edge, index) => (
-                <span key={`${edge.tf}-${index}`} className="inline-flex items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5">
-                  <span className="font-mono text-xs text-bio-tf">{edge.tf}</span>
-                  <RegTypeBadge type={edge.type} />
-                </span>
-              ))}
-            </div>
+        {(gene.regulated_by.length > 0 || gene.regulates.length > 0) && (
+          <div className="mt-3">
+            <TFNetworkMini
+              symbol={gene.symbol}
+              focalCategory={gene.category}
+              regulatedBy={gene.regulated_by.flatMap((edge) =>
+                edge.tf ? [{ symbol: edge.tf, log2fc: edge.log2fc, type: edge.type }] : []
+              )}
+              regulates={gene.regulates.flatMap((edge) =>
+                edge.target ? [{ symbol: edge.target, log2fc: edge.log2fc, type: edge.type }] : []
+              )}
+              onSelectGene={onSelectGene}
+            />
           </div>
         )}
       </div>
