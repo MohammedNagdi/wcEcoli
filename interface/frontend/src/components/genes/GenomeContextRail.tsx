@@ -15,7 +15,7 @@ const LABEL_HEIGHT = 14
 const AXIS_Y = LABEL_HEIGHT + TRACK_HEIGHT + 4
 const FWD_LANE_TOP = LABEL_HEIGHT
 const REV_LANE_TOP = AXIS_Y + 4 + 1
-const SVG_HEIGHT = REV_LANE_TOP + TRACK_HEIGHT + LABEL_HEIGHT + 20
+const SVG_HEIGHT = REV_LANE_TOP + TRACK_HEIGHT + LABEL_HEIGHT + 30
 const TRACK_PAD = 16
 const LABEL_CHAR_W = 5.8
 const LABEL_MIN_GAP = 5
@@ -107,31 +107,48 @@ function buildVisibleLabels(
 
   for (const strandDir of ['+', '-'] as const) {
     const strand = genes
-      .filter((gene) => gene.direction === strandDir)
+      .filter((g) => g.direction === strandDir)
       .sort((a, b) => (a.x + a.width / 2) - (b.x + b.width / 2))
 
     let lastRightEdge = -Infinity
 
-    for (const gene of strand) {
-      const symbol = gene.gene.symbol.slice(0, 8)
-      const halfWidth = (symbol.length * LABEL_CHAR_W) / 2
-      const centerX = gene.x + gene.width / 2
-      const labelLeft = centerX - halfWidth
-      const labelRight = centerX + halfWidth
-      const selected = gene.gene.symbol === selectedSymbol
+    for (const g of strand) {
+      const sym = g.gene.symbol.slice(0, 8)
+      const halfW = (sym.length * LABEL_CHAR_W) / 2
+      const cx = g.x + g.width / 2
+      const labelLeft = cx - halfW
+      const labelRight = cx + halfW
+      const isSelected = g.gene.symbol === selectedSymbol
 
-      if (selected) {
-        visible.add(gene.gene.symbol)
+      if (isSelected) {
+        visible.add(g.gene.symbol)
         if (labelRight > lastRightEdge) lastRightEdge = labelRight
       } else if (labelLeft >= lastRightEdge + LABEL_MIN_GAP) {
-        visible.add(gene.gene.symbol)
+        visible.add(g.gene.symbol)
         lastRightEdge = labelRight
       }
     }
-  }
 
-  for (const gene of genes) {
-    if (gene.gene.symbol === selectedSymbol) visible.add(gene.gene.symbol)
+    const selectedGene = strand.find((g) => g.gene.symbol === selectedSymbol)
+    if (selectedGene && visible.has(selectedSymbol)) {
+      const selectedSym = selectedSymbol.slice(0, 8)
+      const selectedCx = selectedGene.x + selectedGene.width / 2
+      const selectedHalfW = (selectedSym.length * LABEL_CHAR_W) / 2
+      const selectedLeft = selectedCx - selectedHalfW - LABEL_MIN_GAP
+      const selectedRight = selectedCx + selectedHalfW + LABEL_MIN_GAP
+
+      for (const sym of [...visible]) {
+        if (sym === selectedSymbol) continue
+        const gene = strand.find((g) => g.gene.symbol === sym)
+        if (!gene) continue
+        const otherSym = sym.slice(0, 8)
+        const otherCx = gene.x + gene.width / 2
+        const otherHalfW = (otherSym.length * LABEL_CHAR_W) / 2
+        if (otherCx + otherHalfW > selectedLeft && otherCx - otherHalfW < selectedRight) {
+          visible.delete(sym)
+        }
+      }
+    }
   }
 
   return visible
@@ -227,7 +244,7 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
   )
   const scaleBp = bounds ? niceScale(bounds.span) : 0
   const scaleWidth = bounds ? (scaleBp / bounds.span) * (trackWidth - TRACK_PAD * 2) : 0
-  const scaleY = SVG_HEIGHT - 8
+  const scaleY = SVG_HEIGHT - 20
 
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
@@ -340,6 +357,12 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
               />
               <text x={TRACK_PAD + scaleWidth / 2} y={scaleY - 4} textAnchor="middle" fontSize={10} fill="#9ca3af">
                 {scaleLabel(scaleBp)}
+              </text>
+              <text x={TRACK_PAD} y={scaleY + 12} textAnchor="start" fontSize={9} fill="#c4c9d0">
+                {bounds.min.toLocaleString()} bp
+              </text>
+              <text x={trackWidth - TRACK_PAD} y={scaleY + 12} textAnchor="end" fontSize={9} fill="#c4c9d0">
+                {bounds.max.toLocaleString()} bp
               </text>
             </g>
             </svg>

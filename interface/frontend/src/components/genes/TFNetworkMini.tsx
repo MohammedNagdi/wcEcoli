@@ -28,6 +28,7 @@ const LABEL_FONT = 9
 const MAX_REG = 7
 const MAX_TARGET = 11
 const CONTEXT_FILL = '#64748b'
+const NODE_IDEAL_SPACING = 64
 
 function edgeProps(log2fc: number, type: string): {
   stroke: string
@@ -45,8 +46,11 @@ function edgeProps(log2fc: number, type: string): {
 
 function rowNodeX(index: number, total: number, svgWidth: number): number {
   if (total === 1) return svgWidth / 2
-  const usable = svgWidth - PAD_SIDE * 2
-  return PAD_SIDE + (index / (total - 1)) * usable
+  const naturalSpread = (total - 1) * NODE_IDEAL_SPACING
+  const maxSpread = svgWidth - PAD_SIDE * 2
+  const spread = Math.min(naturalSpread, maxSpread)
+  const startX = svgWidth / 2 - spread / 2
+  return startX + (index / (total - 1)) * spread
 }
 
 function clipLabel(symbol: string): string {
