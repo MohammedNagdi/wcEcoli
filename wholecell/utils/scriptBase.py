@@ -45,6 +45,7 @@ METADATA_KEYS = (
 	'mechanistic_aa_transport',
 	'trna_attenuation',
 	'adjust_timestep_for_charging',
+	'initial_condition',
 	)
 
 PARCA_KEYS = (
@@ -63,6 +64,7 @@ PARCA_KEYS = (
 
 SIM_KEYS = (
 	'timeline',
+	'initial_condition',
 	'length_sec',
 	'timestep_safety_frac',
 	'timestep_max',
@@ -488,6 +490,9 @@ class ScriptBase(metaclass=abc.ABCMeta):
 			default_key='timeline',
 			help='The media timeline. See wholecell/utils/make_media.py,'
 				 ' make_timeline() for timeline formatting details')
+		self.define_option(parser, 'initial_condition', str, default='',
+			help='Optional initial model condition to use for cell physiology.'
+				 ' The timeline still controls external media changes.')
 		add_option('length_sec', 'lengthSec', int,
 			help='The maximum simulation time, in seconds. Useful for short'
 				 ' simulations; not so useful for multiple generations.'

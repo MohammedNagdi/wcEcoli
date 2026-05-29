@@ -39,9 +39,10 @@ def tf_activity(sim_data, index):
 
 	sim_data.condition = tf + "__" + tfStatus
 
-	sim_data.external_state.current_timeline_id = tf + "__" + tfStatus
-	sim_data.external_state.saved_timelines[sim_data.external_state.environment.current_timeline_id] = []
-	sim_data.external_state.saved_timelines[sim_data.external_state.environment.current_timeline_id].append((
+	timeline_id = tf + "__" + tfStatus
+	sim_data.external_state.current_timeline_id = timeline_id
+	sim_data.external_state.saved_timelines[timeline_id] = []
+	sim_data.external_state.saved_timelines[timeline_id].append((
 		0.0,
 		sim_data.tf_to_active_inactive_conditions[tf][tfStatus + " nutrients"]
 		))

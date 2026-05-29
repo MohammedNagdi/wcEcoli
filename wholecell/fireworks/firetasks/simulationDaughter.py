@@ -17,6 +17,7 @@ class SimulationDaughterTask(FiretaskBase):
 	optional_params = [
 		"seed",
 		"timeline",
+		"initial_condition",
 		"length_sec",
 		"timestep_safety_frac",
 		"timestep_max",
@@ -52,6 +53,12 @@ class SimulationDaughterTask(FiretaskBase):
 		# TODO(spanglry): make the parca output JSON and this load from JSON instead
 		with open(self["input_sim_data"], "rb") as input_sim_data:
 			sim_data = pickle.load(input_sim_data)
+
+		initial_condition = self.get("initial_condition", "")
+		if initial_condition:
+			if initial_condition not in sim_data.conditions:
+				raise ValueError("Unknown initial condition: {}".format(initial_condition))
+			sim_data.condition = initial_condition
 
 		options = {}
 
