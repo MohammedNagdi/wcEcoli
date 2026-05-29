@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import { GeneCatalogPage } from '../genes/GeneCatalogPage'
+import { GenomeContextRail } from '../genes/GenomeContextRail'
 import { GenomeViewerPage } from '../genome/GenomeViewerPage'
 import { CategoryBadge, DirectionBadge, RegTypeBadge } from '../common/Badge'
 import { useGeneDetail } from '../../hooks/useGenes'
@@ -101,22 +102,29 @@ export function ExploreWorkspacePage() {
         </div>
 
         <div
-          className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(190px,260px)] gap-3"
+          className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(260px,340px)] gap-3"
           style={{ flex: 1, minWidth: 0 }}
         >
-          <section className="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white p-3">
-            <div className="mb-2 flex items-center justify-between">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white p-3">
+            <div className="mb-2 flex flex-shrink-0 items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">Genome</h2>
                 <p className="text-xs text-gray-400">Chromosome position and category context.</p>
               </div>
               <span className="text-xs text-gray-400">map</span>
             </div>
-            <GenomeViewerPage embedded compact />
+            <div className="min-h-0 flex-1">
+              <GenomeViewerPage embedded compact />
+            </div>
           </section>
 
           <section className="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white">
-            <SelectedGeneSummary gene={selectedGeneDetail} loading={detailLoading} selectedGene={selectedGene} />
+            <SelectedGeneSummary
+              gene={selectedGeneDetail}
+              loading={detailLoading}
+              selectedGene={selectedGene}
+              onSelectGene={(symbol) => setSelectedGene(symbol, { replace: false })}
+            />
           </section>
         </div>
       </div>
@@ -128,10 +136,12 @@ function SelectedGeneSummary({
   gene,
   loading,
   selectedGene,
+  onSelectGene,
 }: {
   gene: GeneDetail | null
   loading: boolean
   selectedGene: string | null
+  onSelectGene: (symbol: string) => void
 }) {
   if (loading && selectedGene) {
     return (
@@ -168,8 +178,8 @@ function SelectedGeneSummary({
         </Link>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
           <Fact label="Category">
             <CategoryBadge label={gene.category} />
           </Fact>
@@ -186,35 +196,44 @@ function SelectedGeneSummary({
               <span>{length.toLocaleString()} bp</span>
             </Fact>
           )}
+          {gene.left_end_pos && gene.right_end_pos && (
+            <Fact label="Position">
+              <span className="font-mono text-[11px] text-gray-600">
+                {gene.left_end_pos.toLocaleString()}-{gene.right_end_pos.toLocaleString()}
+              </span>
+            </Fact>
+          )}
         </div>
 
-        {gene.left_end_pos && gene.right_end_pos && (
-          <div className="mt-3">
-            <p className="text-xs uppercase tracking-wide text-gray-400">Position</p>
-            <p className="font-mono text-sm text-gray-600">
-              {gene.left_end_pos.toLocaleString()} - {gene.right_end_pos.toLocaleString()}
-            </p>
-          </div>
-        )}
-
-        <div className="mt-3 grid gap-2 text-sm">
+        <div className="mt-2 grid gap-2 text-sm">
           {gene.monomer_id && (
             <ProductRow label="Protein" value={gene.monomer_id} detail={gene.monomer_name ?? undefined} />
           )}
-          {gene.regulated_by.length > 0 && (
-            <div>
-              <p className="text-xs uppercase tracking-wide text-gray-400">Regulated by</p>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {gene.regulated_by.slice(0, 8).map((edge, index) => (
-                  <span key={`${edge.tf}-${index}`} className="inline-flex items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5">
-                    <span className="font-mono text-xs text-bio-tf">{edge.tf}</span>
-                    <RegTypeBadge type={edge.type} />
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
+
+        {gene.left_end_pos != null && (
+          <div className="mt-2">
+            <GenomeContextRail
+              symbol={gene.symbol}
+              window={5000}
+              onSelectGene={onSelectGene}
+            />
+          </div>
+        )}
+
+        {gene.regulated_by.length > 0 && (
+          <div className="mt-2">
+            <p className="text-xs uppercase tracking-wide text-gray-400">Regulated by</p>
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {gene.regulated_by.slice(0, 8).map((edge, index) => (
+                <span key={`${edge.tf}-${index}`} className="inline-flex items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5">
+                  <span className="font-mono text-xs text-bio-tf">{edge.tf}</span>
+                  <RegTypeBadge type={edge.type} />
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -258,7 +277,7 @@ function ContextChip({
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <p className="mb-1 text-xs uppercase tracking-wide text-gray-400">{label}</p>
+      <p className="mb-0.5 text-xs uppercase tracking-wide text-gray-400">{label}</p>
       {children}
     </div>
   )

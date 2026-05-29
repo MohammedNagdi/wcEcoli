@@ -105,7 +105,7 @@ export function GenomeViewerPage({ embedded = false, compact = false }: GenomeVi
 
   return (
     <>
-      <div className={`mx-auto max-w-7xl ${compact ? 'h-full min-h-0 space-y-3 overflow-y-auto pr-1' : 'space-y-5'}`}>
+      <div className={`mx-auto max-w-7xl ${compact ? 'flex h-full min-h-0 flex-col gap-3 overflow-hidden pr-1' : 'space-y-5'}`}>
         {!embedded && (
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
@@ -123,11 +123,15 @@ export function GenomeViewerPage({ embedded = false, compact = false }: GenomeVi
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <StatBadge label="Mapped" value={mappedGenes.length.toLocaleString()} />
-          <StatBadge label="Forward" value={forwardCount.toLocaleString()} />
-          <StatBadge label="Reverse" value={reverseCount.toLocaleString()} />
-          <StatBadge label="Unmapped" value={(genes.length - mappedGenes.length).toLocaleString()} />
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 text-xs">
+          {!embedded && (
+            <>
+              <StatBadge label="Mapped" value={mappedGenes.length.toLocaleString()} />
+              <StatBadge label="Forward" value={forwardCount.toLocaleString()} />
+              <StatBadge label="Reverse" value={reverseCount.toLocaleString()} />
+              <StatBadge label="Unmapped" value={(genes.length - mappedGenes.length).toLocaleString()} />
+            </>
+          )}
           <button
             onClick={() => setDarkMode((current) => !current)}
             className="ml-auto flex-shrink-0 rounded-md border border-gray-200 bg-white p-1.5 text-gray-500 hover:bg-gray-50"
@@ -164,28 +168,30 @@ export function GenomeViewerPage({ embedded = false, compact = false }: GenomeVi
           darkMode={darkMode}
         />
 
-        <div className={`flex flex-wrap gap-2 ${compact ? 'max-h-24 overflow-y-auto pr-1' : ''}`}>
-          {categorySummary.map((item) => {
-            const fill = CATEGORY_FILL[item.category] ?? CATEGORY_FILL.other
-            const isDimmed = dimmedCategories.has(item.category)
-            return (
-              <button
-                key={item.category}
-                onClick={() => toggleCategory(item.category)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                  isDimmed
-                    ? 'border-gray-200 bg-gray-50 text-gray-400 opacity-60'
-                    : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-                }`}
-                title={isDimmed ? 'Click to restore category opacity' : 'Click to dim category'}
-              >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: fill }} />
-                {categoryLabel(item.category)}
-                <span className="font-mono text-gray-400">{item.count}</span>
-              </button>
-            )
-          })}
-        </div>
+        {!embedded && (
+          <div className={`flex flex-wrap gap-2 ${compact ? 'max-h-24 overflow-y-auto pr-1' : ''}`}>
+            {categorySummary.map((item) => {
+              const fill = CATEGORY_FILL[item.category] ?? CATEGORY_FILL.other
+              const isDimmed = dimmedCategories.has(item.category)
+              return (
+                <button
+                  key={item.category}
+                  onClick={() => toggleCategory(item.category)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                    isDimmed
+                      ? 'border-gray-200 bg-gray-50 text-gray-400 opacity-60'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                  }`}
+                  title={isDimmed ? 'Click to restore category opacity' : 'Click to dim category'}
+                >
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: fill }} />
+                  {categoryLabel(item.category)}
+                  <span className="font-mono text-gray-400">{item.count}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {fullscreen && (

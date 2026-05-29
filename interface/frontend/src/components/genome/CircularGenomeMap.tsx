@@ -136,8 +136,8 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact
   }
 
   return (
-    <div ref={containerRef} className="relative">
-      <div className={`relative mx-auto aspect-square w-full overflow-hidden rounded-xl ${compact ? 'max-h-[520px]' : 'max-h-[760px]'} ${palette.wrapperCls}`}>
+    <div ref={containerRef} className={`relative ${compact ? 'flex min-h-0 flex-1 items-center justify-center' : ''}`}>
+      <div className={`relative mx-auto aspect-square overflow-hidden rounded-xl ${compact ? 'h-full max-h-[420px] max-w-full' : 'w-full max-h-[760px]'} ${palette.wrapperCls}`}>
         <svg
           viewBox={`0 0 ${VIEW_SIZE} ${VIEW_SIZE}`}
           className={`h-full w-full select-none ${zoom > 1 ? 'cursor-grab' : ''} ${
