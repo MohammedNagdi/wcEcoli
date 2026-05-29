@@ -10,6 +10,8 @@
     "lint": "eslint src --ext ts,tsx"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@xyflow/react": "^12.10.2",
     "chart.js": "^4.5.1",
     "cytoscape": "^3.28.0",
     "react": "^18.3.1",
