@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { CATEGORY_FILL } from '../../utils/genome'
 
 interface RegEdge {
@@ -14,13 +16,15 @@ interface Props {
   onSelectGene?: (symbol: string) => void
 }
 
-const VW = 500
-const NODE_R = 15
+const NODE_R = 14
+const FOCAL_R = NODE_R + 3
+const ROW_SPACING = 72
+const PAD_TOP = 24
+const PAD_BOTTOM = 24
+const PAD_SIDE = 36
+const LABEL_BELOW_OFFSET = NODE_R + 13
+const LABEL_ABOVE_OFFSET = -(NODE_R + 4)
 const LABEL_FONT = 9
-const NODE_SPACING = 36
-const COL_REG = 70
-const COL_FOCAL = 250
-const COL_TARGET = 430
 const MAX_REG = 7
 const MAX_TARGET = 11
 const CONTEXT_FILL = '#64748b'
@@ -39,14 +43,23 @@ function edgeProps(log2fc: number, type: string): {
   return { stroke: '#dc2626', markerEnd: 'url(#tfnet-bar-rep)' }
 }
 
-function nodeY(index: number, total: number, centerY: number): number {
-  const totalHeight = (total - 1) * NODE_SPACING
-  const startY = centerY - totalHeight / 2
-  return startY + index * NODE_SPACING
+function rowNodeX(index: number, total: number, svgWidth: number): number {
+  if (total === 1) return svgWidth / 2
+  const usable = svgWidth - PAD_SIDE * 2
+  return PAD_SIDE + (index / (total - 1)) * usable
 }
 
-function clipSymbol(symbol: string): string {
-  return symbol.length > 5 ? `${symbol.slice(0, 4)}...` : symbol
+function clipLabel(symbol: string): string {
+  return symbol.length > 6 ? `${symbol.slice(0, 5)}...` : symbol
+}
+
+function withOverflow(edges: RegEdge[], maxNodes: number): Array<RegEdge | null> {
+  if (edges.length <= maxNodes) return edges
+  return [...edges.slice(0, maxNodes - 1), null]
+}
+
+function overflowCount(edges: RegEdge[], maxNodes: number): number {
+  return edges.length > maxNodes ? edges.length - (maxNodes - 1) : 0
 }
 
 function MarkerDefs() {
@@ -72,7 +85,6 @@ function Node({
   fill,
   stroke,
   r = NODE_R,
-  bold = false,
   onClick,
 }: {
   x: number
@@ -81,7 +93,6 @@ function Node({
   fill: string
   stroke?: string
   r?: number
-  bold?: boolean
   onClick?: () => void
 }) {
   return (
@@ -108,20 +119,34 @@ function Node({
         strokeWidth={stroke ? 2 : 0}
         opacity={0.9}
       />
-      <text
-        x={x}
-        y={y}
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={LABEL_FONT}
-        fontWeight={bold ? '700' : '500'}
-        fill="#ffffff"
-        style={{ pointerEvents: 'none' }}
-      >
-        {clipSymbol(symbol)}
-      </text>
       <title>{symbol}</title>
     </g>
+  )
+}
+
+function NodeLabel({
+  x,
+  y,
+  label,
+  focal = false,
+}: {
+  x: number
+  y: number
+  label: string
+  focal?: boolean
+}) {
+  return (
+    <text
+      x={x}
+      y={y}
+      textAnchor="middle"
+      fontSize={focal ? 11 : LABEL_FONT}
+      fontWeight={focal ? '700' : '400'}
+      fill={focal ? '#1d4ed8' : '#6b7280'}
+      style={{ pointerEvents: 'none' }}
+    >
+      {focal ? label : clipLabel(label)}
+    </text>
   )
 }
 
@@ -139,7 +164,7 @@ function OverflowNode({ x, y, count, label }: { x: number; y: number; count: num
 
 function Legend() {
   return (
-    <div className="mt-1.5 flex items-center gap-3 text-[10px] text-gray-400">
+    <div className="flex items-center gap-3 text-[10px] text-gray-400">
       <span className="flex items-center gap-1">
         <svg width="20" height="8" viewBox="0 0 20 8">
           <line x1="0" y1="4" x2="13" y2="4" stroke="#16a34a" strokeWidth="1.5" />
@@ -159,38 +184,46 @@ function Legend() {
 }
 
 export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, onSelectGene }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [svgWidth, setSvgWidth] = useState(360)
+
+  useEffect(() => {
+    const element = containerRef.current
+    if (!element) return
+
+    const observer = new ResizeObserver(([entry]) => {
+      setSvgWidth(Math.max(260, Math.floor(entry.contentRect.width)))
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
   if (regulatedBy.length === 0 && regulates.length === 0) return null
 
   const hasReg = regulatedBy.length > 0
   const hasTarget = regulates.length > 0
-  const focalX = hasReg && hasTarget ? COL_FOCAL : hasReg ? 300 : 100
-  const regX = COL_REG
-  const targetX = hasReg && hasTarget ? COL_TARGET : 380
+  const focalRowIndex = hasReg ? 1 : 0
+  const targetRowIndex = hasTarget ? focalRowIndex + 1 : null
+  const numRows = focalRowIndex + (hasTarget ? 2 : 1)
+  const svgHeight = PAD_TOP + numRows * ROW_SPACING + PAD_BOTTOM
+  const rowY = (rowIndex: number) => PAD_TOP + rowIndex * ROW_SPACING + NODE_R
 
-  const shownReg = regulatedBy.slice(0, MAX_REG)
-  const overflowReg = regulatedBy.length > MAX_REG ? regulatedBy.length - MAX_REG : 0
-  const regNodes: Array<RegEdge | null> = overflowReg > 0 ? [...shownReg, null] : shownReg
-
-  const shownTarget = regulates.slice(0, MAX_TARGET)
-  const overflowTarget = regulates.length > MAX_TARGET ? regulates.length - MAX_TARGET : 0
-  const targetNodes: Array<RegEdge | null> = overflowTarget > 0 ? [...shownTarget, null] : shownTarget
-
-  const rows = Math.max(regNodes.length, targetNodes.length, 1)
-  const svgHeight = rows * NODE_SPACING + 40
-  const focalY = svgHeight / 2
-  const focalR = NODE_R + 3
+  const regNodes = withOverflow(regulatedBy, MAX_REG)
+  const targetNodes = withOverflow(regulates, MAX_TARGET)
+  const overflowReg = overflowCount(regulatedBy, MAX_REG)
+  const overflowTarget = overflowCount(regulates, MAX_TARGET)
+  const focalX = svgWidth / 2
+  const focalY = rowY(focalRowIndex)
   const focalFill = CATEGORY_FILL[focalCategory] ?? CATEGORY_FILL.other
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+    <div ref={containerRef} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
         Local regulation
       </p>
       <svg
-        viewBox={`0 0 ${VW} ${svgHeight}`}
-        width="100%"
+        width={svgWidth}
         height={svgHeight}
-        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label={`Local regulation network for ${symbol}`}
       >
@@ -198,15 +231,16 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
 
         {hasReg && regNodes.map((edge, index) => {
           if (!edge) return null
+          const regX = rowNodeX(index, regNodes.length, svgWidth)
+          const regY = rowY(0)
           const ep = edgeProps(edge.log2fc, edge.type)
-          const ry = nodeY(index, regNodes.length, focalY)
           return (
             <line
               key={`reg-edge-${edge.symbol}-${index}`}
-              x1={regX + NODE_R}
-              y1={ry}
-              x2={focalX - focalR}
-              y2={focalY}
+              x1={regX}
+              y1={regY + NODE_R}
+              x2={focalX}
+              y2={focalY - FOCAL_R}
               stroke={ep.stroke}
               strokeWidth={1.5}
               markerEnd={ep.markerEnd}
@@ -214,17 +248,18 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
           )
         })}
 
-        {hasTarget && targetNodes.map((edge, index) => {
+        {hasTarget && targetRowIndex != null && targetNodes.map((edge, index) => {
           if (!edge) return null
+          const targetX = rowNodeX(index, targetNodes.length, svgWidth)
+          const targetY = rowY(targetRowIndex)
           const ep = edgeProps(edge.log2fc, edge.type)
-          const ty = nodeY(index, targetNodes.length, focalY)
           return (
             <line
               key={`target-edge-${edge.symbol}-${index}`}
-              x1={focalX + focalR}
-              y1={focalY}
-              x2={targetX - NODE_R}
-              y2={ty}
+              x1={focalX}
+              y1={focalY + FOCAL_R}
+              x2={targetX}
+              y2={targetY - NODE_R}
               stroke={ep.stroke}
               strokeWidth={1.5}
               markerEnd={ep.markerEnd}
@@ -233,27 +268,30 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
         })}
 
         {hasReg && regNodes.map((edge, index) => {
-          const ry = nodeY(index, regNodes.length, focalY)
+          const regX = rowNodeX(index, regNodes.length, svgWidth)
+          const regY = rowY(0)
           if (!edge) {
             return (
               <OverflowNode
                 key="overflow-reg"
                 x={regX}
-                y={ry}
+                y={regY}
                 count={overflowReg}
                 label={`${overflowReg} more regulators`}
               />
             )
           }
           return (
-            <Node
-              key={`reg-node-${edge.symbol}-${index}`}
-              x={regX}
-              y={ry}
-              symbol={edge.symbol}
-              fill={CONTEXT_FILL}
-              onClick={() => onSelectGene?.(edge.symbol)}
-            />
+            <g key={`reg-node-${edge.symbol}-${index}`}>
+              <Node
+                x={regX}
+                y={regY}
+                symbol={edge.symbol}
+                fill={CONTEXT_FILL}
+                onClick={() => onSelectGene?.(edge.symbol)}
+              />
+              <NodeLabel x={regX} y={regY + LABEL_BELOW_OFFSET} label={edge.symbol} />
+            </g>
           )
         })}
 
@@ -263,48 +301,60 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
           symbol={symbol}
           fill={focalFill}
           stroke="#1e40af"
-          r={focalR}
-          bold
+          r={FOCAL_R}
           onClick={() => onSelectGene?.(symbol)}
         />
+        <NodeLabel x={focalX} y={focalY + LABEL_ABOVE_OFFSET} label={symbol} focal />
 
-        {hasTarget && targetNodes.map((edge, index) => {
-          const ty = nodeY(index, targetNodes.length, focalY)
+        {hasTarget && targetRowIndex != null && targetNodes.map((edge, index) => {
+          const targetX = rowNodeX(index, targetNodes.length, svgWidth)
+          const targetY = rowY(targetRowIndex)
           if (!edge) {
             return (
               <OverflowNode
                 key="overflow-target"
                 x={targetX}
-                y={ty}
+                y={targetY}
                 count={overflowTarget}
                 label={`${overflowTarget} more targets`}
               />
             )
           }
           return (
-            <Node
-              key={`target-node-${edge.symbol}-${index}`}
-              x={targetX}
-              y={ty}
-              symbol={edge.symbol}
-              fill={CONTEXT_FILL}
-              onClick={() => onSelectGene?.(edge.symbol)}
-            />
+            <g key={`target-node-${edge.symbol}-${index}`}>
+              <Node
+                x={targetX}
+                y={targetY}
+                symbol={edge.symbol}
+                fill={CONTEXT_FILL}
+                onClick={() => onSelectGene?.(edge.symbol)}
+              />
+              <NodeLabel x={targetX} y={targetY + LABEL_BELOW_OFFSET} label={edge.symbol} />
+            </g>
           )
         })}
 
         {hasReg && (
-          <text x={regX} y={8} textAnchor="middle" fontSize={7} fill="#9ca3af">
+          <text x={focalX} y={10} textAnchor="middle" fontSize={7} fill="#9ca3af">
             regulators
           </text>
         )}
-        {hasTarget && (
-          <text x={targetX} y={8} textAnchor="middle" fontSize={7} fill="#9ca3af">
+        {hasTarget && targetRowIndex != null && (
+          <text x={focalX} y={rowY(targetRowIndex) - 30} textAnchor="middle" fontSize={7} fill="#9ca3af">
             targets
           </text>
         )}
       </svg>
-      <Legend />
+      <div className="mt-2 flex items-center justify-between">
+        <Legend />
+        {/* TODO: NetworkPage should auto-open a gene detail panel when ?gene= is present in URL */}
+        <Link
+          to={`/network?gene=${encodeURIComponent(symbol)}`}
+          className="flex-shrink-0 text-[11px] text-brand-600 hover:underline"
+        >
+          Full network -&gt;
+        </Link>
+      </div>
     </div>
   )
 }
