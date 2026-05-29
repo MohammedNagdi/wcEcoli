@@ -18,9 +18,6 @@ class Gene(SQLModel, table=True):
     category: str = "other"                      # functional category
     ko_index: int = 0                            # index for gene_knockout variant
     is_mechanistic: bool = False                 # True if gene has downstream mechanistic effects
-    monomer_id: Optional[str] = None             # protein monomer ID, e.g. "6PFK-1-MONOMER"
-    monomer_name: Optional[str] = None           # protein common name, e.g. "6-phosphofructokinase 1"
-    complex_ids: str = ""                        # JSON array of complex IDs this monomer participates in
 
 
 class TFEdge(SQLModel, table=True):
@@ -142,4 +139,8 @@ class SimulationResult(SQLModel, table=True):
     seed: int = 0
     generation: int = 0
     division_time_sec: Optional[float] = None    # time to cell division (None = never divided)
-    final_mass_fg: Optional[float] = None        # cell mass at end of 
+    final_mass_fg: Optional[float] = None        # cell mass at end of sim (fg)
+    growth_rate: Optional[float] = None          # average growth rate (1/s)
+    doubling_time_min: Optional[float] = None    # derived doubling time (min)
+    divided: bool = True                         # did the cell divide?
+    created_at: str = ""                         # ISO timestamp

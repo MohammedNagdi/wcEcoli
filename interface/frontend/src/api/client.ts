@@ -15,7 +15,6 @@ import type {
   TrainRequest, TrainResponse, DataSummary,
   DesignOverview, EssentialityStats,
   ComparisonResponse, FailedJobSummary,
-  WildtypeDelta,
 } from '../types'
 
 const BASE = '/api'
@@ -125,10 +124,7 @@ export async function updateExperiment(id: number, data: Partial<ExperimentCreat
 }
 
 export async function deleteExperiment(id: number): Promise<void> {
-  const res = await fetch(`${BASE}/experiments/${id}`, { method: 'DELETE' })
-  if (!res.ok) {
-    throw new Error(`Delete failed: ${res.status}`)
-  }
+  await fetch(`${BASE}/experiments/${id}`, { method: 'DELETE' })
 }
 
 export async function createBatchExperiments(data: BatchRequest): Promise<BatchResponse> {
@@ -310,12 +306,6 @@ export async function getEssentiality(
   return fetchJSON(`/design/essentiality${query ? '?' + query : ''}`)
 }
 
-// --- Wildtype delta ---
-
-export async function getWtDelta(experimentId: number): Promise<WildtypeDelta> {
-  return fetchJSON(`/experiments/wt-delta/${experimentId}`)
-}
-
 // --- Comparison ---
 
 export async function compareExperiments(
@@ -337,7 +327,6 @@ export async function compareBatch(
 }
 
 // --- Health ---
-
 
 export async function getHealth(): Promise<{ status: string; version: string }> {
   return fetchJSON('/health')

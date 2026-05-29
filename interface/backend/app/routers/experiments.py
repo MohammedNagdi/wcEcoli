@@ -36,7 +36,6 @@ class ExperimentCreate(BaseModel):
     timeline: str = ""
     sim_params: str = "{}"
     gene_symbol: str = ""
-    include_wildtype: bool = False  # Auto-create a matching WT control
 
 
 class ExperimentUpdate(BaseModel):
@@ -65,7 +64,6 @@ class ExperimentOut(BaseModel):
     updated_at: str
     gene_symbol: str
     batch_id: str = ""
-    wildtype_experiment_id: int | None = None  # Set when WT was auto-created
 
 
 class VariantDetailOut(BaseModel):
@@ -142,57 +140,6 @@ def get_variant_detail(name: str, session: Session = Depends(get_session)):
     )
 
 
-# --- Wildtype helper ---
-
-def _find_or_create_wildtype(
-    session: Session,
-    condition: str,
-    timeline: str,
-    sim_params: str,
-    now: str,
-    batch_id: str = "",
-) -> int:
-    """Find an existing wildtype experiment for this condition, or create one.
-
-    Returns the experiment ID. Deduplicates across all statuses — a WT that's
-    queued, running, or done is reused rather than creating a duplicate.
-    """
-    existing_wt = session.exec(
-        select(Experiment).where(
-            Experiment.variant_type == "wildtype",
-            Experiment.condition == condition,
-        ).order_by(
-            # Prefer done > running > queued > draft
-            Experiment.status.desc(),
-            Experiment.created_at.desc(),
-        )
-    ).first()
-
-    if existing_wt:
-        logger.info("Reusing existing WT experiment #%d (%s) for condition '%s'",
-                     existing_wt.id, existing_wt.status, condition)
-        return existing_wt.id
-
-    wt = Experiment(
-        name=f"Wildtype control ({condition})",
-        description=f"Auto-created wildtype baseline for condition '{condition}'",
-        variant_type="wildtype",
-        variant_index=0,
-        condition=condition,
-        timeline=timeline,
-        sim_params=sim_params,
-        status="draft",
-        created_at=now,
-        updated_at=now,
-        gene_symbol="",
-        batch_id=batch_id,
-    )
-    session.add(wt)
-    session.flush()
-    logger.info("Created WT experiment #%d for condition '%s'", wt.id, condition)
-    return wt.id
-
-
 # --- Experiment CRUD ---
 
 @router.get("", response_model=list[ExperimentOut])
@@ -244,23 +191,9 @@ def create_experiment(
         gene_symbol=body.gene_symbol,
     )
     session.add(experiment)
-    session.flush()  # get the ID before potential WT creation
-
-    # Auto-create wildtype control if requested
-    wt_id: int | None = None
-    if body.include_wildtype:
-        wt_id = _find_or_create_wildtype(
-            session, body.condition, body.timeline, body.sim_params, now,
-        )
-
     session.commit()
     session.refresh(experiment)
-
-    out = ExperimentOut.model_validate(experiment, from_attributes=True)
-    # Attach WT experiment ID in the response for the frontend
-    if wt_id is not None:
-        out.wildtype_experiment_id = wt_id
-    return out
+    return ExperimentOut.model_validate(experiment, from_attributes=True)
 
 
 # ── Batch list, detail, and run ────────────────────────────────────────
@@ -679,89 +612,6 @@ def compare_batch(
     return compare_experiments(ids=ids_str, include_wildtype=include_wildtype, session=session)
 
 
-# ── Wildtype delta for a single experiment ─────────────────────────────
-
-class WildtypeDelta(BaseModel):
-    """WT comparison metrics for a single experiment's results page."""
-    has_wildtype: bool = False
-    wt_experiment_id: int | None = None
-    wt_status: str | None = None  # status of WT experiment
-    division_time_pct: float | None = None
-    final_mass_pct: float | None = None
-    growth_rate_pct: float | None = None
-    doubling_time_pct: float | None = None
-    wt_division_time_min: float | None = None
-    wt_final_mass_fg: float | None = None
-    wt_growth_rate: float | None = None
-    wt_doubling_time_min: float | None = None
-
-
-@router.get("/wt-delta/{experiment_id}", response_model=WildtypeDelta)
-def get_wt_delta(experiment_id: int, session: Session = Depends(get_session)):
-    """Get wildtype comparison delta for a single experiment.
-
-    Used by the results page to show % change vs WT on summary cards.
-    """
-    experiment = session.get(Experiment, experiment_id)
-    if not experiment:
-        raise HTTPException(404, f"Experiment {experiment_id} not found")
-
-    condition = experiment.condition or "basal"
-
-    # Find a completed wildtype for this condition
-    wt_exp = session.exec(
-        select(Experiment).where(
-            Experiment.variant_type == "wildtype",
-            Experiment.condition == condition,
-            Experiment.status == "done",
-        ).order_by(Experiment.created_at.desc())
-    ).first()
-
-    if not wt_exp:
-        # Check for in-progress WT
-        wt_pending = session.exec(
-            select(Experiment).where(
-                Experiment.variant_type == "wildtype",
-                Experiment.condition == condition,
-                Experiment.status.in_(["draft", "queued", "running",
-                                       "running_parca", "running_sim", "ingesting"]),
-            )
-        ).first()
-        return WildtypeDelta(
-            has_wildtype=False,
-            wt_experiment_id=wt_pending.id if wt_pending else None,
-            wt_status=wt_pending.status if wt_pending else None,
-        )
-
-    # Build WT metrics
-    wt_comp = _build_comparison_experiment(wt_exp, session, is_wildtype=True)
-
-    # Build KO metrics
-    ko_comp = _build_comparison_experiment(experiment, session, is_wildtype=False)
-
-    return WildtypeDelta(
-        has_wildtype=True,
-        wt_experiment_id=wt_exp.id,
-        wt_status="done",
-        division_time_pct=_pct_change(
-            ko_comp.division_time_min.mean, wt_comp.division_time_min.mean
-        ),
-        final_mass_pct=_pct_change(
-            ko_comp.final_mass_fg.mean, wt_comp.final_mass_fg.mean
-        ),
-        growth_rate_pct=_pct_change(
-            ko_comp.growth_rate.mean, wt_comp.growth_rate.mean
-        ),
-        doubling_time_pct=_pct_change(
-            ko_comp.doubling_time_min.mean, wt_comp.doubling_time_min.mean
-        ),
-        wt_division_time_min=wt_comp.division_time_min.mean,
-        wt_final_mass_fg=wt_comp.final_mass_fg.mean,
-        wt_growth_rate=wt_comp.growth_rate.mean,
-        wt_doubling_time_min=wt_comp.doubling_time_min.mean,
-    )
-
-
 # ── Single experiment CRUD (parameterized — must come after static paths) ──
 
 @router.get("/{experiment_id}", response_model=ExperimentOut)
@@ -801,18 +651,6 @@ def delete_experiment(experiment_id: int, session: Session = Depends(get_session
     experiment = session.get(Experiment, experiment_id)
     if not experiment:
         raise HTTPException(404, f"Experiment {experiment_id} not found")
-
-    jobs = session.exec(
-        select(SimulationJob).where(SimulationJob.experiment_id == experiment_id)
-    ).all()
-    for job in jobs:
-        results = session.exec(
-            select(SimulationResult).where(SimulationResult.job_id == job.id)
-        ).all()
-        for result in results:
-            session.delete(result)
-        session.delete(job)
-
     session.delete(experiment)
     session.commit()
 
@@ -1019,7 +857,6 @@ class BatchRequest(BaseModel):
     timeline: str = ""
     sim_params: str = "{}"
     description: str = ""
-    include_wildtype: bool = False  # Auto-create one WT control per batch
 
 
 class BatchResponse(BaseModel):
@@ -1120,17 +957,6 @@ def create_batch_experiments(
         session.flush()
         created_ids.append(experiment.id)
 
-    # Auto-create wildtype control if requested (one per batch)
-    if body.include_wildtype:
-        wt_id = _find_or_create_wildtype(
-            session, body.condition, body.timeline, body.sim_params, now,
-            batch_id=batch_id,
-        )
-        # Only count it as created if it's a new experiment in this batch
-        wt_exp = session.get(Experiment, wt_id)
-        if wt_exp and wt_exp.batch_id == batch_id:
-            created_ids.append(wt_id)
-
     session.commit()
     logger.info("Batch %s created %d experiments (%d skipped)", batch_id, len(created_ids), len(skipped_genes))
 
@@ -1170,7 +996,6 @@ def _expand_screen(body: BatchRequest, session: Session) -> list[BatchExperiment
             ).order_by(Gene.symbol)
         ).all()
         if not genes:
-        if not genes:
             raise HTTPException(400, f"No mechanistic genes in category matching '{category}'")
         return [
             BatchExperimentItem(
@@ -1182,3 +1007,5 @@ def _expand_screen(body: BatchRequest, session: Session) -> list[BatchExperiment
 
     else:
         raise HTTPException(400, f"Unknown screen preset: '{body.screen}'")
+
+

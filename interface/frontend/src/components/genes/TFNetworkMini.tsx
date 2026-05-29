@@ -24,7 +24,6 @@ const PAD_BOTTOM = 24
 const PAD_SIDE = 36
 const REG_LABEL_ABOVE = -(NODE_R + 10)
 const TARGET_LABEL_BELOW = NODE_R + 14
-const FOCAL_LABEL_ABOVE = -(FOCAL_R + 10)
 const LABEL_FONT = 9
 const MAX_REG = 7
 const MAX_TARGET = 11
@@ -222,9 +221,12 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
 
   return (
     <div ref={containerRef} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        Local regulation
-      </p>
+      <div className="mb-2 flex items-baseline gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+          Local regulation
+        </p>
+        <span className="text-sm font-bold text-blue-700">{symbol}</span>
+      </div>
       <svg
         width={svgWidth}
         height={svgHeight}
@@ -308,7 +310,7 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
           r={FOCAL_R}
           onClick={() => onSelectGene?.(symbol)}
         />
-        <NodeLabel x={focalX} y={focalY + FOCAL_LABEL_ABOVE} label={symbol} focal />
+        {/* focal gene label is rendered in the HTML header above, not inside the SVG */}
 
         {hasTarget && targetRowIndex != null && targetNodes.map((edge, index) => {
           const targetX = rowNodeX(index, targetNodes.length, svgWidth)

@@ -13,9 +13,6 @@ export interface Gene {
 
 export interface GeneDetail extends Gene {
   rna_ids: string
-  monomer_id: string | null
-  monomer_name: string | null
-  complex_ids: string             // JSON array of complex IDs
   regulated_by: TFRegulation[]
   regulates: TFRegulation[]
 }
@@ -113,7 +110,6 @@ export interface ExperimentCreate {
   timeline?: string
   sim_params?: string
   gene_symbol?: string
-  include_wildtype?: boolean
 }
 
 // --- Batch experiment creation ---
@@ -136,7 +132,6 @@ export interface BatchRequest {
   timeline?: string
   sim_params?: string
   description?: string
-  include_wildtype?: boolean
 }
 
 export interface BatchResponse {
@@ -489,22 +484,6 @@ export interface ComparisonResponse {
   wildtype: ComparisonExperiment | null
   wildtype_suggestion: WildtypeSuggestion | null
   deltas: ComparisonDelta[]
-}
-
-// --- Wildtype delta (single experiment) ---
-
-export interface WildtypeDelta {
-  has_wildtype: boolean
-  wt_experiment_id: number | null
-  wt_status: string | null
-  division_time_pct: number | null
-  final_mass_pct: number | null
-  growth_rate_pct: number | null
-  doubling_time_pct: number | null
-  wt_division_time_min: number | null
-  wt_final_mass_fg: number | null
-  wt_growth_rate: number | null
-  wt_doubling_time_min: number | null
 }
 
 // --- Molecule explorer ---
