@@ -16,8 +16,8 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import settings
 from app.db.models import (
-    AAPathway, Complex, Condition, Experiment, Gene, SimulationJob,
-    SimulationResult, TFEdge, Timeline, Variant,
+    AAPathway, Complex, Condition, Experiment, Gene, MediaRecipe, SimulationJob,
+    SimulationResult, TFEdge, Timeline, UserTimeline, Variant,
 )
 
 logger = logging.getLogger(__name__)
@@ -714,6 +714,32 @@ def _ingest_timelines(session: Session) -> int:
     return count
 
 
+def _ingest_media_recipes(session: Session) -> int:
+    """Parse media_recipes.tsv → media_recipes table."""
+    path = settings.media_recipes_tsv
+    if not path.exists():
+        logger.warning("media_recipes.tsv not found: %s", path)
+        return 0
+    rows = _read_tsv_rows(path)
+    if not rows:
+        return 0
+    count = 0
+    for row in rows[1:]:  # skip header
+        if not row or not _strip_quotes(row[0]):
+            continue
+        recipe = MediaRecipe(
+            media_id=_strip_quotes(row[0]),
+            base_media=_strip_quotes(row[1]) if len(row) > 1 else "",
+            added_media=_strip_quotes(row[3]) if len(row) > 3 else "",
+            ingredients=row[5] if len(row) > 5 else "",
+        )
+        session.add(recipe)
+        count += 1
+    session.commit()
+    logger.info("Ingested %d media recipes", count)
+    return count
+
+
 def _ingest_variants(session: Session) -> int:
     """Read variant Python files and extract docstrings."""
     variant_dir = settings.variants_dir
@@ -804,6 +830,7 @@ def _ingest_complexes(session: Session) -> int:
 #   v3: added is_mechanistic flag, HTML-stripped gene symbols
 #   v4: added divided (simulation_results), docker_container_id (simulation_jobs),
 #       imported all models so create_all() creates complete schema
+#   v5: added media_recipes table (ingested from media_recipes.tsv)
 _SCHEMA_VERSION = 8  # v8: use authoritative ko_index from simData.cPickle extraction
 
 
@@ -840,6 +867,7 @@ def needs_rebuild() -> bool:
         settings.amino_acid_pathways_tsv,
         settings.condition_defs_tsv,
         settings.timelines_def_tsv,
+        settings.media_recipes_tsv,
     ]
     for src in source_files:
         if src.exists() and src.stat().st_mtime > db_mtime:
@@ -856,7 +884,7 @@ def _backup_user_tables(db_path: Path) -> dict[str, list[tuple]]:
     """
     import sqlite3
 
-    USER_TABLES = ["experiments", "simulation_jobs", "simulation_results"]
+    USER_TABLES = ["experiments", "simulation_jobs", "simulation_results", "user_timelines"]
     backup: dict[str, list[tuple]] = {}
 
     if not db_path.exists():
@@ -987,6 +1015,7 @@ def init_database() -> None:
         aa_count = _ingest_aa_pathways(session)
         cond_count = _ingest_conditions(session)
         tl_count = _ingest_timelines(session)
+        media_count = _ingest_media_recipes(session)
         var_count = _ingest_variants(session)
         cplx_count = _ingest_complexes(session)
 
@@ -1005,8 +1034,8 @@ def init_database() -> None:
 
     logger.info(
         "Database built: %d genes, %d TF edges, %d AA pathways, "
-        "%d conditions, %d timelines, %d variants, %d complexes",
-        gene_count, tf_count, aa_count, cond_count, tl_count, var_count, cplx_count,
+        "%d conditions, %d timelines, %d media recipes, %d variants, %d complexes",
+        gene_count, tf_count, aa_count, cond_count, tl_count, media_count, var_count, cplx_count,
     )
 
 

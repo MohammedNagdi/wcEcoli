@@ -69,6 +69,25 @@ class Timeline(SQLModel, table=True):
     definition: str = ""                         # JSON of timeline steps
 
 
+class MediaRecipe(SQLModel, table=True):
+    __tablename__ = "media_recipes"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    media_id: str = Field(index=True)            # key used in timeline event strings, e.g. "minimal_acetate"
+    base_media: str = ""                         # base stock, e.g. "MIX0-57"
+    added_media: str = ""                        # supplemental stock, e.g. "5X_supplement_EZ"
+    ingredients: str = ""                        # JSON array of extra molecule IDs
+
+
+class UserTimeline(SQLModel, table=True):
+    __tablename__ = "user_timelines"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)                # user-given name
+    definition: str = ""                         # raw event string e.g. "0 minimal, 1200 minimal_acetate"
+    created_at: str = ""                         # ISO timestamp
+
+
 class Variant(SQLModel, table=True):
     __tablename__ = "variants"
 
