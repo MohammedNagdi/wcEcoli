@@ -3,7 +3,6 @@ import { useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import { GeneCatalogPage } from '../genes/GeneCatalogPage'
 import { GenomeContextRail } from '../genes/GenomeContextRail'
-import { GenomeViewerPage } from '../genome/GenomeViewerPage'
 import { CategoryBadge, DirectionBadge, RegTypeBadge } from '../common/Badge'
 import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
@@ -101,32 +100,17 @@ export function ExploreWorkspacePage() {
           <div className="h-12 w-1 rounded-full bg-gray-300 transition group-hover:bg-brand-400 group-active:bg-brand-500" />
         </div>
 
-        <div
-          className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(260px,340px)] gap-3"
+        <section
+          className="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white"
           style={{ flex: 1, minWidth: 0 }}
         >
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white p-3">
-            <div className="mb-2 flex flex-shrink-0 items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900">Genome</h2>
-                <p className="text-xs text-gray-400">Chromosome position and category context.</p>
-              </div>
-              <span className="text-xs text-gray-400">map</span>
-            </div>
-            <div className="min-h-0 flex-1">
-              <GenomeViewerPage embedded compact />
-            </div>
-          </section>
-
-          <section className="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white">
-            <SelectedGeneSummary
-              gene={selectedGeneDetail}
-              loading={detailLoading}
-              selectedGene={selectedGene}
-              onSelectGene={(symbol) => setSelectedGene(symbol, { replace: false })}
-            />
-          </section>
-        </div>
+          <SelectedGeneSummary
+            gene={selectedGeneDetail}
+            loading={detailLoading}
+            selectedGene={selectedGene}
+            onSelectGene={(symbol) => setSelectedGene(symbol, { replace: false })}
+          />
+        </section>
       </div>
     </div>
   )
