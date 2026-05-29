@@ -15,7 +15,7 @@ const LABEL_HEIGHT = 14
 const AXIS_Y = LABEL_HEIGHT + TRACK_HEIGHT + 4
 const FWD_LANE_TOP = LABEL_HEIGHT
 const REV_LANE_TOP = AXIS_Y + 4 + 1
-const SVG_HEIGHT = REV_LANE_TOP + TRACK_HEIGHT + LABEL_HEIGHT + 30
+const SVG_HEIGHT = REV_LANE_TOP + TRACK_HEIGHT + LABEL_HEIGHT + 40
 const TRACK_PAD = 16
 const LABEL_CHAR_W = 5.8
 const LABEL_MIN_GAP = 5
@@ -102,15 +102,16 @@ function strandGapSegments(genes: PositionedGene[], direction: '+' | '-' | null)
 function buildVisibleLabels(
   genes: Array<{ gene: { symbol: string }; x: number; width: number; direction: '+' | '-' | null }>,
   selectedSymbol: string
-): Set<string> {
-  const visible = new Set<string>()
+): Map<string, 0 | 1> {
+  const visible = new Map<string, 0 | 1>()
 
   for (const strandDir of ['+', '-'] as const) {
     const strand = genes
       .filter((g) => g.direction === strandDir)
       .sort((a, b) => (a.x + a.width / 2) - (b.x + b.width / 2))
 
-    let lastRightEdge = -Infinity
+    let lastRight0 = -Infinity
+    let lastRight1 = -Infinity
 
     for (const g of strand) {
       const sym = g.gene.symbol.slice(0, 8)
@@ -121,11 +122,14 @@ function buildVisibleLabels(
       const isSelected = g.gene.symbol === selectedSymbol
 
       if (isSelected) {
-        visible.add(g.gene.symbol)
-        if (labelRight > lastRightEdge) lastRightEdge = labelRight
-      } else if (labelLeft >= lastRightEdge + LABEL_MIN_GAP) {
-        visible.add(g.gene.symbol)
-        lastRightEdge = labelRight
+        visible.set(g.gene.symbol, 0)
+        if (labelRight > lastRight0) lastRight0 = labelRight
+      } else if (labelLeft >= lastRight0 + LABEL_MIN_GAP) {
+        visible.set(g.gene.symbol, 0)
+        lastRight0 = labelRight
+      } else if (labelLeft >= lastRight1 + LABEL_MIN_GAP) {
+        visible.set(g.gene.symbol, 1)
+        lastRight1 = labelRight
       }
     }
 
@@ -137,8 +141,8 @@ function buildVisibleLabels(
       const selectedLeft = selectedCx - selectedHalfW - LABEL_MIN_GAP
       const selectedRight = selectedCx + selectedHalfW + LABEL_MIN_GAP
 
-      for (const sym of [...visible]) {
-        if (sym === selectedSymbol) continue
+      for (const [sym, row] of [...visible.entries()]) {
+        if (sym === selectedSymbol || row !== 0) continue
         const gene = strand.find((g) => g.gene.symbol === sym)
         if (!gene) continue
         const otherSym = sym.slice(0, 8)
@@ -297,10 +301,11 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
               const { gene, x, width, laneTop, direction } = item
               const selected = gene.symbol === symbol
               const fill = CATEGORY_FILL[gene.category] ?? CATEGORY_FILL.other
-              const showLabel = visibleLabels.has(gene.symbol)
+              const labelRow = visibleLabels.get(gene.symbol)
+              const showLabel = labelRow !== undefined
               const labelY = direction === '+'
-                ? FWD_LANE_TOP - 2
-                : REV_LANE_TOP + TRACK_HEIGHT + 11
+                ? FWD_LANE_TOP - 2 - (labelRow === 1 ? 10 : 0)
+                : REV_LANE_TOP + TRACK_HEIGHT + 11 + (labelRow === 1 ? 10 : 0)
 
               return (
                 <g

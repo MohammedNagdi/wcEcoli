@@ -18,12 +18,13 @@ interface Props {
 
 const NODE_R = 14
 const FOCAL_R = NODE_R + 3
-const ROW_SPACING = 72
-const PAD_TOP = 24
+const ROW_SPACING = 80
+const PAD_TOP = 36
 const PAD_BOTTOM = 24
 const PAD_SIDE = 36
-const LABEL_BELOW_OFFSET = NODE_R + 13
-const LABEL_ABOVE_OFFSET = -(NODE_R + 4)
+const REG_LABEL_ABOVE = -(NODE_R + 10)
+const TARGET_LABEL_BELOW = NODE_R + 14
+const FOCAL_LABEL_ABOVE = -(FOCAL_R + 10)
 const LABEL_FONT = 9
 const MAX_REG = 7
 const MAX_TARGET = 11
@@ -34,14 +35,13 @@ function edgeProps(log2fc: number, type: string): {
   stroke: string
   markerEnd: string
 } {
-  const isDual = type.toLowerCase().includes('dual')
-  if (isDual || log2fc === 0) {
-    return { stroke: '#9ca3af', markerEnd: 'url(#tfnet-arr-neu)' }
-  }
-  if (log2fc > 0) {
-    return { stroke: '#16a34a', markerEnd: 'url(#tfnet-arr-act)' }
-  }
-  return { stroke: '#dc2626', markerEnd: 'url(#tfnet-bar-rep)' }
+  const t = type.toLowerCase()
+  if (t.includes('activat')) return { stroke: '#16a34a', markerEnd: 'url(#tfnet-arr-act)' }
+  if (t.includes('repres') || t.includes('inhibit')) return { stroke: '#dc2626', markerEnd: 'url(#tfnet-bar-rep)' }
+  if (t.includes('dual')) return { stroke: '#9ca3af', markerEnd: 'url(#tfnet-arr-neu)' }
+  if (log2fc > 0) return { stroke: '#16a34a', markerEnd: 'url(#tfnet-arr-act)' }
+  if (log2fc < 0) return { stroke: '#dc2626', markerEnd: 'url(#tfnet-bar-rep)' }
+  return { stroke: '#9ca3af', markerEnd: 'url(#tfnet-arr-neu)' }
 }
 
 function rowNodeX(index: number, total: number, svgWidth: number): number {
@@ -294,7 +294,7 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
                 fill={CONTEXT_FILL}
                 onClick={() => onSelectGene?.(edge.symbol)}
               />
-              <NodeLabel x={regX} y={regY + LABEL_BELOW_OFFSET} label={edge.symbol} />
+              <NodeLabel x={regX} y={regY + REG_LABEL_ABOVE} label={edge.symbol} />
             </g>
           )
         })}
@@ -308,7 +308,7 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
           r={FOCAL_R}
           onClick={() => onSelectGene?.(symbol)}
         />
-        <NodeLabel x={focalX} y={focalY + LABEL_ABOVE_OFFSET} label={symbol} focal />
+        <NodeLabel x={focalX} y={focalY + FOCAL_LABEL_ABOVE} label={symbol} focal />
 
         {hasTarget && targetRowIndex != null && targetNodes.map((edge, index) => {
           const targetX = rowNodeX(index, targetNodes.length, svgWidth)
@@ -333,7 +333,7 @@ export function TFNetworkMini({ symbol, focalCategory, regulatedBy, regulates, o
                 fill={CONTEXT_FILL}
                 onClick={() => onSelectGene?.(edge.symbol)}
               />
-              <NodeLabel x={targetX} y={targetY + LABEL_BELOW_OFFSET} label={edge.symbol} />
+              <NodeLabel x={targetX} y={targetY + TARGET_LABEL_BELOW} label={edge.symbol} />
             </g>
           )
         })}
