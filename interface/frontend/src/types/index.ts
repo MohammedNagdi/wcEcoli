@@ -73,6 +73,21 @@ export interface Timeline {
   definition: string
 }
 
+export interface MediaRecipe {
+  id: number
+  media_id: string          // key used in timeline event strings, e.g. "minimal_acetate"
+  base_media: string        // base stock, e.g. "MIX0-57"
+  added_media: string       // supplemental stock, e.g. "5X_supplement_EZ"
+  ingredients: string       // raw string like '["ACETATE"]'
+}
+
+export interface UserTimeline {
+  id: number
+  name: string
+  definition: string        // raw event string e.g. "0 minimal, 1200 minimal_acetate"
+  created_at: string
+}
+
 export interface Variant {
   name: string
   docstring: string
@@ -84,7 +99,20 @@ export interface VariantDetail extends Variant {
   parameter_hints: {
     index_meaning?: string
     index_range?: [number, number]
+    min_valid_index?: number
+    max_valid_index?: number
+    max_exact_index?: number
+    index_options?: string[]
+    control_period?: number
+    condition_stride?: number
+    condition_count?: number
+    valid_remainder_range?: [number, number]
+    tf_names?: string[]
+    condition_names?: string[]
     supports_gene_lookup?: boolean
+    hide_index?: boolean
+    timeline_behavior?: 'composer' | 'internal_override' | 'internal_conditional_override'
+    timeline_notice?: string
   }
 }
 

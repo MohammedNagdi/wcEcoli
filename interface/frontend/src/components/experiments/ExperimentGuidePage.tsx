@@ -33,46 +33,49 @@ const VARIANT_DOCS: Record<string, {
     summary: 'Overrides the growth condition for the entire simulation, changing the nutrient environment the virtual cell grows in. Each condition defines available carbon sources, nitrogen sources, amino acids, and other nutrients.',
     modifies: 'sim_data.condition, sim_data.doubling_time.',
     useCase: 'Study how the cell adapts to different media (minimal, rich, carbon-limited, etc.). Combine with gene knockouts to test conditional essentiality.',
-    paramHint: 'The variant index maps to a row in condition_defs.tsv. Use the Growth Condition dropdown in the designer to select by name.',
+    paramHint: 'The variant index follows the runtime order from condition_defs.tsv, not alphabetical order. The designer preserves that order in the Growth Condition dropdown and this variant internally derives its effective timeline from the selected condition.',
     category: 'core',
   },
   timelines: {
     summary: 'Defines a sequence of media shifts at specified simulation times, modeling nutrient upshift or downshift experiments. At each timepoint, the media composition changes instantaneously.',
     modifies: 'sim_data.condition (at specified timepoints), sim_data.external_state.',
     useCase: 'Model nutrient shift experiments (e.g., switching from minimal to rich medium at 20 min to observe the upshift response).',
-    paramHint: 'The variant index maps to a row in timelines_def.tsv. Use the Timeline dropdown in the designer.',
+    paramHint: 'Use the Timeline Composer in the designer to define the effective timeline. The parameter index is not used for this experiment type in the interface.',
     category: 'core',
   },
   add_one_aa: {
     summary: 'Adds a single amino acid to the minimal medium. The cell can import the added amino acid instead of synthesizing it, potentially affecting growth rate, resource allocation, and biosynthesis gene expression.',
     modifies: 'sim_data.external_state.saved_media (adds one amino acid to minimal medium).',
     useCase: 'Study how external amino acid availability affects biosynthesis pathway regulation, ppGpp signaling, and growth rate.',
-    paramHint: 'Index 0–20 maps to the 20 standard amino acids plus selenocysteine.',
+    paramHint: 'Index 0-20 maps to the runtime amino-acid order. The selenocysteine entry acts as the control because it is already present in minimal media.',
     category: 'amino_acid',
   },
   remove_one_aa: {
     summary: 'Removes a single amino acid from the rich medium (minimal + all amino acids). Forces the cell to synthesize the removed amino acid, potentially causing growth rate changes if biosynthesis capacity is limiting.',
     modifies: 'sim_data.condition (adjusts the amino acid pool in the media definition).',
     useCase: 'Identify which amino acids are growth-rate-limiting when removed from rich medium, testing biosynthesis pathway sufficiency.',
-    paramHint: 'Index 0–20 maps to the amino acid being removed.',
+    paramHint: 'Index 0-20 maps to the runtime amino-acid order. The selenocysteine entry acts as the control because that amino acid must remain available in rich media.',
     category: 'amino_acid',
   },
   add_one_aa_shift: {
     summary: 'Adds one amino acid to minimal medium after 10 minutes of growth. Models a nutrient upshift for a single amino acid, allowing observation of the dynamic response.',
     modifies: 'sim_data.external_state.saved_media (shifts at t = 600s).',
     useCase: 'Study the kinetics of amino acid import activation and biosynthesis downregulation after a single amino acid becomes available.',
+    paramHint: 'Index 0-20 maps to the runtime amino-acid order. The selenocysteine entry behaves as the control branch; other indices create the internal 10-minute shift to the selected amino acid.',
     category: 'amino_acid',
   },
   remove_one_aa_shift: {
     summary: 'Removes one amino acid from rich medium after 10 minutes. Models a nutrient downshift for a single amino acid.',
     modifies: 'sim_data.condition (shifts at t = 600s).',
     useCase: 'Observe how the cell activates biosynthesis for a single amino acid after it becomes unavailable.',
+    paramHint: 'Index 0-20 maps to the runtime amino-acid order. The selenocysteine entry behaves as the control branch; other indices create the internal 10-minute shift away from the selected amino acid.',
     category: 'amino_acid',
   },
   remove_aas_shift: {
     summary: 'Removes amino acids from the rich medium after 10 minutes, forcing a transition from exogenous amino acid uptake to endogenous biosynthesis.',
     modifies: 'sim_data.condition (shifts at t = 600s).',
     useCase: 'Study the global response to losing amino acid supplementation — gene expression changes, ppGpp dynamics, and growth rate adaptation.',
+    paramHint: '0 = rich-media control, 1 = shift to 12 amino acids, 2 = shift to 6 amino acids, 3 = static minimal-media control branch with no internal shift timeline, 4-22 = shift to a single amino acid, 23 = shift to no amino acids.',
     category: 'amino_acid',
   },
   aa_synthesis_ko: {
@@ -109,7 +112,7 @@ const VARIANT_DOCS: Record<string, {
     summary: 'Sets the intracellular ppGpp concentration to a fixed value throughout the simulation. ppGpp is the central alarmone controlling ribosome biogenesis and amino acid biosynthesis — clamping its concentration allows study of its downstream effects.',
     modifies: 'sim_data.process.transcription (ppGpp-dependent parameters held constant).',
     useCase: 'Dissect ppGpp signaling: at low ppGpp, ribosomes dominate; at high ppGpp, amino acid biosynthesis is upregulated. Compare growth rate vs. ppGpp level.',
-    paramHint: 'Index maps to different ppGpp concentration levels.',
+    paramHint: 'Valid indices are 0-19. Indices 0-9 apply the ppGpp factor series in minimal media, and 10-19 apply the same factor series in minimal_plus_amino_acids.',
     category: 'ppgpp',
   },
   ppgpp_limitations: {
@@ -158,6 +161,7 @@ const VARIANT_DOCS: Record<string, {
     summary: 'Forces a transcription factor to be constitutively active or inactive, overriding the model\'s regulatory logic. Useful for validating the TF\'s regulon and its effect on gene expression.',
     modifies: 'sim_data.process.transcription_regulation (TF activity state).',
     useCase: 'Validate transcription factor models: compare expression of a TF\'s regulon when it is forced active vs. inactive vs. wildtype.',
+    paramHint: '0 is control. For the listed TFs, odd indices force a TF active and the following even index forces that same TF inactive, in the model\'s sorted TF order. The designer shows the exact TF names and flags invalid overflow indices.',
     category: 'advanced',
   },
   time_step: {
@@ -176,13 +180,14 @@ const VARIANT_DOCS: Record<string, {
     summary: 'Introduces a new gene with varying expression levels and translational efficiencies, then performs a media shift. Tests the cell\'s response to expressing a foreign protein.',
     modifies: 'Transcription/translation parameters for the new gene, media shift.',
     useCase: 'Model heterologous gene expression and its burden on the cell under different growth conditions.',
+    paramHint: 'The index is encoded as condition_block * 1000 + remainder. Valid remainders are 0-20 within each condition block; the designer decodes the selected remainder into expression and translation settings.',
     category: 'advanced',
   },
   sinusoidal_media: {
     summary: 'Exposes cells to a sinusoidal oscillation between two media compositions. At each time point, the media is a weighted mix: p(t) = (sin(2pi*t/period) + 1) / 2 between media_a and media_b.',
     modifies: 'sim_data.external_state (continuous media mixing).',
     useCase: 'Study dynamic adaptation to oscillating environments — relevant for chemostat, gut, and industrial fermentation conditions.',
-    paramHint: 'Parameters encode the period, media_a, and media_b identifiers.',
+    paramHint: 'The parameter index is the oscillation period in minutes and must be at least 1. media_a and media_b are configured separately by the runtime environment, not encoded in the index.',
     category: 'advanced',
   },
   param_sensitivity: {
@@ -511,6 +516,14 @@ export function ExperimentGuidePage() {
             time, the growth medium changes instantaneously. This models nutrient upshift,
             downshift, and oscillation experiments. Times are in seconds from simulation start.
           </p>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            <p className="font-medium">Designer behavior</p>
+            <p className="mt-1 text-blue-800">
+              In the interface, the <span className="font-medium">timelines</span> experiment type uses the
+              Timeline Composer as its effective timeline source. Some other experiment types still
+              preset timeline internally, and the designer will show a notice when that happens.
+            </p>
+          </div>
           <div className="space-y-3">
             {timelines.map(t => (
               <TimelineCard key={t.name} timeline={t} />

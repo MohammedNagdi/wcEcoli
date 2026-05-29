@@ -10,6 +10,7 @@ from sqlmodel import Session, col, select
 
 from app.db.models import Experiment, SimulationJob, SimulationResult
 from app.main import get_session
+from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -83,7 +84,10 @@ def create_simulation_jobs_for_experiment(
 
     num_seeds = body.seeds if body.seeds is not None else params.get("seeds", 1)
     generations = body.generations if body.generations is not None else params.get("generations", 1)
+    timeline = resolve_timeline_definition(session, experiment.timeline) if experiment.timeline else ""
     condition = body.condition or experiment.condition or "basal"
+    if timeline:
+        condition = infer_condition_from_timeline(session, timeline, condition)
     now = datetime.now(timezone.utc).isoformat()
 
     job_ids = []
@@ -98,7 +102,7 @@ def create_simulation_jobs_for_experiment(
             condition=condition,
             seed=seed,
             generations=generations,
-            timeline=experiment.timeline,
+            timeline=timeline,
         )
         session.add(job)
         session.flush()  # get the auto-increment ID

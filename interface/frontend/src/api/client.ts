@@ -5,7 +5,7 @@
 
 import type {
   Gene, GeneDetail, GeneSearchResult, CategoryCount,
-  TFNetwork, TFNode, AAPathway, Condition, Timeline, Variant,
+  TFNetwork, TFNode, AAPathway, Condition, Timeline, MediaRecipe, UserTimeline, Variant,
   VariantDetail, Experiment, ExperimentCreate,
   BatchRequest, BatchResponse, BatchSummary, BatchDetail, BatchRunResponse,
   SimulationJob, SimulationResult, RunJobRequest, RunResponse, ResultsResponse,
@@ -105,6 +105,22 @@ export async function getConditions(): Promise<Condition[]> {
 
 export async function getTimelines(): Promise<Timeline[]> {
   return fetchJSON('/timelines')
+}
+
+export async function getMediaRecipes(): Promise<MediaRecipe[]> {
+  return fetchJSON('/media-recipes')
+}
+
+export async function getUserTimelines(): Promise<UserTimeline[]> {
+  return fetchJSON('/user-timelines')
+}
+
+export async function saveUserTimeline(name: string, definition: string): Promise<UserTimeline> {
+  return fetchJSON('/user-timelines', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, definition }),
+  })
 }
 
 export async function getVariants(): Promise<Variant[]> {
