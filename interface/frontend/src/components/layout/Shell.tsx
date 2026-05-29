@@ -180,7 +180,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 overflow-hidden p-4">
+      <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4">
         {children}
       </main>
       <CommandSearch open={commandSearchOpen} onClose={() => setCommandSearchOpen(false)} />

@@ -81,6 +81,28 @@ export async function getGeneByKoIndex(koIndex: number): Promise<Gene> {
   return fetchJSON(`/genes/by-ko-index/${koIndex}`)
 }
 
+export async function getGeneNeighbors(symbol: string, window = 5000): Promise<Gene[]> {
+  const focalGene = await getGene(symbol)
+  if (focalGene.left_end_pos == null || focalGene.right_end_pos == null) {
+    return []
+  }
+
+  const focalLeft = Math.min(focalGene.left_end_pos, focalGene.right_end_pos)
+  const focalRight = Math.max(focalGene.left_end_pos, focalGene.right_end_pos)
+  const minPosition = focalLeft - window
+  const maxPosition = focalRight + window
+
+  const data = await getGenes({ page_size: 5000 })
+  return data.genes
+    .filter((gene) => gene.left_end_pos != null && gene.right_end_pos != null)
+    .filter((gene) => {
+      const geneLeft = Math.min(gene.left_end_pos ?? 0, gene.right_end_pos ?? 0)
+      const geneRight = Math.max(gene.left_end_pos ?? 0, gene.right_end_pos ?? 0)
+      return geneRight >= minPosition && geneLeft <= maxPosition
+    })
+    .sort((leftGene, rightGene) => (leftGene.left_end_pos ?? 0) - (rightGene.left_end_pos ?? 0))
+}
+
 // --- TF Network ---
 
 export async function getTFNetwork(): Promise<TFNetwork> {
