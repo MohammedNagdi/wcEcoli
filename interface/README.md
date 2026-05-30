@@ -167,6 +167,21 @@ docker compose up --build
 
 This starts three containers (API on 8000, worker, frontend on 5173). The worker container mounts the Docker socket to launch simulation containers. You still need to build `wcecoli-sim:latest` separately (step 3 above).
 
+Source code is bind-mounted into the containers (`./backend/app:/app/app` and `./frontend/src:/app/src`), so most changes are picked up automatically: the backend uses `uvicorn --reload` and the frontend uses Vite HMR. If hot reload doesn't pick up changes (new files, config changes, dependency updates), restart the relevant service:
+
+```bash
+# Restart just the frontend:
+docker compose restart web
+
+# Restart backend + worker:
+docker compose restart api worker
+
+# Full rebuild (nuclear option — needed after dependency changes):
+docker compose down && docker compose up -d --build
+```
+
+After restarting the frontend, do a hard refresh in the browser (`Ctrl+Shift+R`) to clear Vite's module cache.
+
 ---
 
 ## Running a Simulation
@@ -195,8 +210,11 @@ The interface uses a three-stage workflow navigation — **Explore → Simulate 
 |-------|------|-------------|
 | **Explore** | Genes | Searchable/filterable table of all 1,592 genes with categories, mechanistic status, and links to TF regulation |
 | **Explore** | Network | Interactive Cytoscape.js graph of TF → target regulatory connections |
-| **Simulate** | Experiments | Create single or batch knockout experiments, configure conditions and timelines |
-| **Analyze** | Results | Time-series charts (mass, growth rate, RNA/DNA/protein), summary cards, molecule explorer with per-gene/mRNA/protein trajectories |
+| **Explore** | Genome | Circular chromosome map with gene annotations, zoom/rotate, and click-through to gene catalog |
+| **Explore** | Pathways | Essentiality heatmap by functional category and amino acid biosynthesis pathway diagram |
+| **Simulate** | Experiments | Create single or batch knockout experiments, configure conditions and timelines, optional WT control, cost estimator |
+| **Simulate** | Batch | Screen presets (all mechanistic, by category) or explicit gene lists with parallel experiment creation |
+| **Analyze** | Results | Time-series charts (mass, growth rate, RNA/DNA/protein), summary cards, WT delta comparison, molecule explorer with multi-identifier search |
 | **Analyze** | ML | Train surrogate classifiers (Random Forest, Gradient Boosting) on simulation features — essentiality prediction with cross-validation metrics |
 | **Analyze** | Design | Genome-wide essentiality overview with phenotype classification (essential / growth defect / neutral), stacked bar charts by category |
 
@@ -322,6 +340,8 @@ interface/
 │       ├── __init__.py
 │       ├── main.py                    # FastAPI app with lifespan, migrations, auto-reingest
 │       ├── config.py                  # Pydantic Settings (env var loading)
+│       ├── data/
+│       │   └── ko_index_map.json     # Ground-truth gene→ko_index mapping from simData
 │       ├── db/
 │       │   ├── __init__.py
 │       │   ├── init_db.py            # TSV → SQLite ingestion pipeline
@@ -336,6 +356,8 @@ interface/
 │       │   ├── molecules.py          # Per-molecule timeseries (mRNA, protein, metabolite)
 │       │   ├── ml.py                 # ML training (Random Forest, Gradient Boosting, cross-val)
 │       │   └── design.py             # Genome-wide essentiality overview
+│       ├── scripts/
+│       │   └── extract_ko_map.py      # Extract ko_index mapping from simData.cPickle
 │       └── services/
 │           ├── __init__.py
 │           ├── sim_worker.py          # Job executor — polls DB, runs Docker containers
@@ -352,7 +374,7 @@ interface/
 │   ├── index.html
 │   └── src/
 │       ├── main.tsx                   # React entry point
-│       ├── App.tsx                    # Router setup (7 routes)
+│       ├── App.tsx                    # Router setup (13 routes)
 │       ├── api/
 │       │   └── client.ts             # Typed API client (all 47 endpoints)
 │       ├── types/
@@ -361,7 +383,8 @@ interface/
 │       ├── hooks/
 │       │   └── useGenes.ts           # Gene search hook with debounce
 │       ├── utils/
-│       │   └── labels.ts             # Human-readable category/variant labels
+│       │   ├── labels.ts             # Human-readable category/variant labels
+│       │   └── genome.ts             # Coordinate math for circular chromosome (bpToAngle, arcPath)
 │       ├── styles/
 │       │   └── globals.css           # Tailwind base + custom styles
 │       └── components/
@@ -378,15 +401,26 @@ interface/
 │           │   └── GeneDetailPanel.tsx    # Gene detail with TF regulation
 │           ├── network/
 │           │   └── TFNetworkPage.tsx      # Interactive TF regulatory graph
+│           ├── genome/
+│           │   ├── GenomeViewerPage.tsx    # Circular genome viewer page
+│           │   └── CircularGenomeMap.tsx   # SVG circular chromosome with gene arcs
+│           ├── pathways/
+│           │   ├── PathwaysPage.tsx        # Tab toggle between heatmap and pathway views
+│           │   ├── EssentialityHeatmap.tsx # Gene essentiality grid by functional category
+│           │   └── AAPathwayDiagram.tsx    # Amino acid biosynthesis node-link diagram
 │           ├── experiments/
 │           │   ├── ExperimentListPage.tsx  # Experiment list with status polling
-│           │   ├── ExperimentDesigner.tsx  # Create/edit experiment form
+│           │   ├── ExperimentDesigner.tsx  # Create/edit form with gene impact preview, cost estimator
+│           │   ├── BatchCreator.tsx        # Batch experiment creation with screen presets
+│           │   ├── BatchDashboard.tsx      # Batch run overview and progress
+│           │   ├── FailedJobsPanel.tsx     # Failed job diagnostics
 │           │   ├── ExperimentDetailPanel.tsx # Detail panel with job cards
 │           │   └── ExperimentGuidePage.tsx # In-platform documentation
 │           ├── results/
 │           │   ├── ResultsBrowserPage.tsx  # Top-level results browser
-│           │   ├── ResultsPage.tsx        # Charts, summary cards, seed aggregation
-│           │   └── MoleculeExplorer.tsx   # Per-molecule timeseries explorer
+│           │   ├── ComparisonDashboard.tsx # Side-by-side experiment comparison
+│           │   ├── ResultsPage.tsx        # Charts, summary cards, WT delta, seed aggregation
+│           │   └── MoleculeExplorer.tsx   # Per-molecule timeseries (gene/monomer/complex/RNA search)
 │           ├── ml/
 │           │   └── MLPage.tsx             # ML training interface with metrics
 │           └── design/

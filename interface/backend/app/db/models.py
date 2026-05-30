@@ -18,6 +18,9 @@ class Gene(SQLModel, table=True):
     category: str = "other"                      # functional category
     ko_index: int = 0                            # index for gene_knockout variant
     is_mechanistic: bool = False                 # True if gene has downstream mechanistic effects
+    monomer_id: Optional[str] = None             # protein monomer ID, e.g. "6PFK-1-MONOMER"
+    monomer_name: Optional[str] = None           # protein common name, e.g. "6-phosphofructokinase 1"
+    complex_ids: str = ""                        # JSON array of complex IDs this monomer participates in
 
 
 class TFEdge(SQLModel, table=True):

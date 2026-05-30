@@ -33,7 +33,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Explore',
     items: [
       { path: '/', label: 'Workspace', icon: ICON_EXPLORE },
-      { path: '/genome', label: 'Genome', icon: ICON_GENOME },
+      { path: '/genome', label: 'Genome Map', icon: ICON_GENOME },
       { path: '/network', label: 'Network', icon: ICON_NETWORK },
       { path: '/pathways', label: 'Pathways', icon: ICON_PATHWAYS },
     ],

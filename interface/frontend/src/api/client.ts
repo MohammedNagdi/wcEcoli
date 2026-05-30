@@ -15,6 +15,7 @@ import type {
   TrainRequest, TrainResponse, DataSummary,
   DesignOverview, EssentialityStats,
   ComparisonResponse, FailedJobSummary,
+  WildtypeDelta,
 } from '../types'
 
 const BASE = '/api'
@@ -35,7 +36,7 @@ export async function getGenes(params?: {
   mechanistic?: boolean
   page?: number
   page_size?: number
-}): Promise<GeneSearchResult> {
+}, signal?: AbortSignal): Promise<GeneSearchResult> {
   const qs = new URLSearchParams()
   if (params?.q) qs.set('q', params.q)
   if (params?.category) qs.set('category', params.category)
@@ -43,7 +44,21 @@ export async function getGenes(params?: {
   if (params?.page) qs.set('page', String(params.page))
   if (params?.page_size) qs.set('page_size', String(params.page_size))
   const query = qs.toString()
-  return fetchJSON(`/genes${query ? '?' + query : ''}`)
+  return fetchJSON(`/genes${query ? '?' + query : ''}`, { signal })
+}
+
+export async function getAllGenes(
+  onBatch: (genes: Gene[]) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  let page = 1
+  const PAGE = 500
+  while (true) {
+    const data = await getGenes({ page, page_size: PAGE }, signal)
+    onBatch(data.genes)
+    if (data.genes.length < PAGE) break
+    page += 1
+  }
 }
 
 export async function searchGenes(q: string, limit = 20): Promise<Gene[]> {
@@ -52,6 +67,10 @@ export async function searchGenes(q: string, limit = 20): Promise<Gene[]> {
 
 export async function getGene(symbol: string): Promise<GeneDetail> {
   return fetchJSON(`/genes/${encodeURIComponent(symbol)}`)
+}
+
+export async function getGeneNeighbors(symbol: string, window = 5000): Promise<Gene[]> {
+  return fetchJSON(`/genes/neighbors?symbol=${encodeURIComponent(symbol)}&window=${window}`)
 }
 
 export async function getCategories(): Promise<CategoryCount[]> {
@@ -124,7 +143,10 @@ export async function updateExperiment(id: number, data: Partial<ExperimentCreat
 }
 
 export async function deleteExperiment(id: number): Promise<void> {
-  await fetch(`${BASE}/experiments/${id}`, { method: 'DELETE' })
+  const res = await fetch(`${BASE}/experiments/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    throw new Error(`Delete failed: ${res.status}`)
+  }
 }
 
 export async function createBatchExperiments(data: BatchRequest): Promise<BatchResponse> {
@@ -304,6 +326,12 @@ export async function getEssentiality(
   if (condition) qs.set('condition', condition)
   const query = qs.toString()
   return fetchJSON(`/design/essentiality${query ? '?' + query : ''}`)
+}
+
+// --- Wildtype delta ---
+
+export async function getWtDelta(experimentId: number): Promise<WildtypeDelta> {
+  return fetchJSON(`/experiments/wt-delta/${experimentId}`)
 }
 
 // --- Comparison ---

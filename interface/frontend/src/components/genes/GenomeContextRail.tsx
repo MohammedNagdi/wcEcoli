@@ -10,8 +10,8 @@ interface Props {
   onSelectGene?: (symbol: string) => void
 }
 
-const TRACK_HEIGHT = 16
-const LABEL_HEIGHT = 14
+const TRACK_HEIGHT = 20
+const LABEL_HEIGHT = 26
 const AXIS_Y = LABEL_HEIGHT + TRACK_HEIGHT + 4
 const FWD_LANE_TOP = LABEL_HEIGHT
 const REV_LANE_TOP = AXIS_Y + 4 + 1
@@ -19,6 +19,7 @@ const SVG_HEIGHT = REV_LANE_TOP + TRACK_HEIGHT + LABEL_HEIGHT + 40
 const TRACK_PAD = 16
 const LABEL_CHAR_W = 5.8
 const LABEL_MIN_GAP = 5
+const MIN_LABEL_BODY_WIDTH = 16
 
 interface PositionedGene {
   gene: Gene
@@ -39,26 +40,26 @@ function geneArrowPoints(
 
   if (direction === '+') {
     if (width <= arrowTip) {
-      return `${x},${y} ${x + width},${mid} ${x},${y + height}`
+      return x + ',' + y + ' ' + (x + width) + ',' + mid + ' ' + x + ',' + (y + height)
     }
     return [
-      `${x},${y}`,
-      `${x + width - arrowTip},${y}`,
-      `${x + width},${mid}`,
-      `${x + width - arrowTip},${y + height}`,
-      `${x},${y + height}`,
+      x + ',' + y,
+      (x + width - arrowTip) + ',' + y,
+      (x + width) + ',' + mid,
+      (x + width - arrowTip) + ',' + (y + height),
+      x + ',' + (y + height),
     ].join(' ')
   }
 
   if (width <= arrowTip) {
-    return `${x + width},${y} ${x},${mid} ${x + width},${y + height}`
+    return (x + width) + ',' + y + ' ' + x + ',' + mid + ' ' + (x + width) + ',' + (y + height)
   }
   return [
-    `${x + arrowTip},${y}`,
-    `${x + width},${y}`,
-    `${x + width},${y + height}`,
-    `${x + arrowTip},${y + height}`,
-    `${x},${mid}`,
+    (x + arrowTip) + ',' + y,
+    (x + width) + ',' + y,
+    (x + width) + ',' + (y + height),
+    (x + arrowTip) + ',' + (y + height),
+    x + ',' + mid,
   ].join(' ')
 }
 
@@ -79,7 +80,7 @@ function formatBp(value: number | null): string {
 }
 
 function scaleLabel(scaleBp: number): string {
-  return scaleBp >= 1000 ? `${scaleBp / 1000} kbp` : `${scaleBp} bp`
+  return scaleBp >= 1000 ? (scaleBp / 1000) + ' kbp' : scaleBp + ' bp'
 }
 
 function strandGapSegments(genes: PositionedGene[], direction: '+' | '-' | null) {
@@ -124,6 +125,8 @@ function buildVisibleLabels(
       if (isSelected) {
         visible.set(g.gene.symbol, 0)
         if (labelRight > lastRight0) lastRight0 = labelRight
+      } else if (g.width < MIN_LABEL_BODY_WIDTH) {
+        continue
       } else if (labelLeft >= lastRight0 + LABEL_MIN_GAP) {
         visible.set(g.gene.symbol, 0)
         lastRight0 = labelRight
@@ -230,6 +233,7 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
           laneTop: item.direction === '+' ? FWD_LANE_TOP : REV_LANE_TOP,
         }
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [bounds, positionedGenes, trackWidth]
   )
 
@@ -257,7 +261,7 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
             Genomic context
           </p>
-          <p className="text-xs text-gray-500">Nearby genes within {window.toLocaleString()} bp</p>
+          <p className="text-xs text-gray-500">Nearby genes (±{window.toLocaleString()} bp)</p>
         </div>
         {loading && <span className="text-xs text-gray-400">Loading</span>}
       </div>
@@ -269,14 +273,14 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
               width={trackWidth}
               height={SVG_HEIGHT}
               role="img"
-              aria-label={`Genomic context around ${symbol}`}
+              aria-label={'Genomic context around ' + symbol}
               style={{ minWidth: '200px' }}
             >
             <line x1={TRACK_PAD} y1={AXIS_Y} x2={trackWidth - TRACK_PAD} y2={AXIS_Y} stroke="#d1d5db" strokeWidth={1} />
 
             {forwardGaps.map((segment, index) => (
               <line
-                key={`fwd-gap-${index}`}
+                key={'fwd-gap-' + index}
                 x1={segment.x1}
                 y1={FWD_LANE_TOP + TRACK_HEIGHT / 2}
                 x2={segment.x2}
@@ -287,7 +291,7 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
             ))}
             {reverseGaps.map((segment, index) => (
               <line
-                key={`rev-gap-${index}`}
+                key={'rev-gap-' + index}
                 x1={segment.x1}
                 y1={REV_LANE_TOP + TRACK_HEIGHT / 2}
                 x2={segment.x2}
@@ -312,7 +316,7 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
                   key={gene.symbol}
                   role="button"
                   tabIndex={0}
-                  aria-label={`Select ${gene.symbol}`}
+                  aria-label={'Select ' + gene.symbol}
                   onClick={() => onSelectGene?.(gene.symbol)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -334,16 +338,30 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
                     </title>
                   </polygon>
                   {showLabel && (
-                    <text
-                      x={x + width / 2}
-                      y={labelY}
-                      textAnchor="middle"
-                      fontSize={selected ? 12 : 11}
-                      fontWeight={selected ? '600' : '400'}
-                      fill={selected ? '#1e3a5f' : '#6b7280'}
-                    >
-                      {gene.symbol.slice(0, 8)}
-                    </text>
+                    <>
+                      {labelRow === 1 && !selected && (
+                        <line
+                          x1={x + width / 2}
+                          y1={direction === '+' ? labelY + 3 : labelY - 3}
+                          x2={x + width / 2}
+                          y2={direction === '+' ? laneTop : laneTop + TRACK_HEIGHT}
+                          stroke="#d1d5db"
+                          strokeWidth={0.75}
+                          strokeDasharray="2,2"
+                          style={{ pointerEvents: 'none' }}
+                        />
+                      )}
+                      <text
+                        x={x + width / 2}
+                        y={labelY}
+                        textAnchor="middle"
+                        fontSize={selected ? 12 : 11}
+                        fontWeight={selected ? '600' : '400'}
+                        fill={selected ? '#1e3a5f' : '#6b7280'}
+                      >
+                        {gene.symbol.slice(0, 8)}
+                      </text>
+                    </>
                   )}
                 </g>
               )

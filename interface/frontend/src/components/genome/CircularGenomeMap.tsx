@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, PointerEvent, WheelEvent } from 'react'
 import type { Gene } from '../../types'
 import {
@@ -25,7 +25,8 @@ const TER_BP = 1_590_000
 interface Props {
   genes: Gene[]
   searchTerm: string
-  dimmedCategories: Set<string>
+  highlightedCategories: Set<string>
+  focusGene?: string | null
   compact?: boolean
   darkMode?: boolean
 }
@@ -43,7 +44,14 @@ interface DragState {
   panY: number
 }
 
-export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact = false, darkMode = true }: Props) {
+export function CircularGenomeMap({
+  genes,
+  searchTerm,
+  highlightedCategories,
+  focusGene = null,
+  compact = false,
+  darkMode = true,
+}: Props) {
   const { setWorkspaceUrlState } = useUrlWorkspaceState()
   const containerRef = useRef<HTMLDivElement>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
@@ -51,6 +59,8 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [drag, setDrag] = useState<DragState | null>(null)
+  const hasAppliedFocusRef = useRef<string | null>(null)
+  const warnedFocusRef = useRef<string | null>(null)
   const palette = darkMode
     ? {
         bg: '#111827',
@@ -89,7 +99,48 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact
     })
   }, [genes])
 
+  useEffect(() => {
+    hasAppliedFocusRef.current = null
+    warnedFocusRef.current = null
+  }, [focusGene])
+
+  useEffect(() => {
+    if (!focusGene) return
+    if (hasAppliedFocusRef.current === focusGene) return
+
+    const entry = positionedGenes.find(
+      (pg) => pg.gene.symbol.toLowerCase() === focusGene.toLowerCase()
+    )
+    if (!entry) {
+      if (positionedGenes.length > 4000 && warnedFocusRef.current !== focusGene) {
+        console.warn(`[GenomeMap] focusGene "${focusGene}" not found in mapped genes`)
+        warnedFocusRef.current = focusGene
+      }
+      return
+    }
+
+    const midAngle = (entry.startAngle + entry.endAngle) / 2
+    const focusRadius = entry.gene.direction === '-'
+      ? (REVERSE_INNER_R + REVERSE_OUTER_R) / 2
+      : (FORWARD_INNER_R + FORWARD_OUTER_R) / 2
+    const arcX = CENTER + focusRadius * Math.cos(midAngle)
+    const arcY = CENTER + focusRadius * Math.sin(midAngle)
+    const targetZoom = 8
+    setZoom(targetZoom)
+    setPan({
+      x: (CENTER - arcX) * targetZoom,
+      y: (CENTER - arcY) * targetZoom,
+    })
+    hasAppliedFocusRef.current = focusGene
+  }, [focusGene, positionedGenes])
+
   const normalizedSearch = searchTerm.trim().toLowerCase()
+  const hasSearch = normalizedSearch.length > 0
+  const hasHighlightedCategories = highlightedCategories.size > 0
+  const hasFocusGene = focusGene != null
+  const glowFilter = darkMode
+    ? 'drop-shadow(0 0 8px rgba(250, 204, 21, 0.95))'
+    : 'drop-shadow(0 0 8px rgba(15, 23, 42, 0.85)) drop-shadow(0 0 4px rgba(234, 88, 12, 0.7))'
 
   function updateTooltip(event: MouseEvent<SVGPathElement>, gene: Gene) {
     const rect = containerRef.current?.getBoundingClientRect()
@@ -105,7 +156,7 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact
     event.preventDefault()
     const factor = event.deltaY < 0 ? 1.15 : 0.85
     setZoom((current) => {
-      const next = Math.min(8, Math.max(1, current * factor))
+      const next = Math.min(16, Math.max(1, current * factor))
       if (next === 1) setPan({ x: 0, y: 0 })
       return next
     })
@@ -136,8 +187,15 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact
   }
 
   return (
-    <div ref={containerRef} className={`relative ${compact ? 'flex min-h-0 flex-1 items-center justify-center' : ''}`}>
-      <div className={`relative mx-auto aspect-square overflow-hidden rounded-xl ${compact ? 'h-full max-h-[420px] max-w-full' : 'w-full max-h-[760px]'} ${palette.wrapperCls}`}>
+    <div
+      ref={containerRef}
+      className={`relative ${
+        compact
+          ? 'flex min-h-0 flex-1 items-center justify-center'
+          : 'flex h-full min-h-0 items-center justify-center'
+      }`}
+    >
+      <div className={`relative mx-auto aspect-square overflow-hidden rounded-xl ${compact ? 'h-full max-h-[420px] max-w-full' : 'h-full max-w-full'} ${palette.wrapperCls}`}>
         <svg
           viewBox={`0 0 ${VIEW_SIZE} ${VIEW_SIZE}`}
           className={`h-full w-full select-none ${zoom > 1 ? 'cursor-grab' : ''} ${
@@ -165,10 +223,12 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact
             {positionedGenes.map(({ gene, left, right, startAngle, endAngle }) => {
               const isForward = gene.direction === '+'
               const isHovered = hoveredSymbol === gene.symbol
-              const isSearchMatch =
-                normalizedSearch.length > 0 &&
-                gene.symbol.toLowerCase().includes(normalizedSearch)
-              const isDimmed = dimmedCategories.has(gene.category)
+              const isFocusGene = hasFocusGene && gene.symbol.toLowerCase() === focusGene?.toLowerCase()
+              const isSearchMatch = hasSearch && gene.symbol.toLowerCase().includes(normalizedSearch)
+              const isCategoryHighlight = hasHighlightedCategories && highlightedCategories.has(gene.category)
+              const isGlowing = isHovered || isSearchMatch || isFocusGene || isCategoryHighlight
+              const hasAnyFilter = hasSearch || hasHighlightedCategories || hasFocusGene
+              const isDimmedOut = hasAnyFilter && !isGlowing
               const fill = CATEGORY_FILL[gene.category] ?? CATEGORY_FILL.other
               const d = arcPath(
                 CENTER,
@@ -184,13 +244,13 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact
                   key={`${gene.id}-${left}-${right}`}
                   d={d}
                   fill={fill}
-                  opacity={isDimmed ? 0.1 : isHovered || isSearchMatch ? 1 : 0.85}
-                  stroke={isHovered || isSearchMatch ? '#f9fafb' : 'none'}
-                  strokeWidth={isHovered || isSearchMatch ? 1.25 : 0}
-                  className={isSearchMatch ? 'animate-pulse' : undefined}
+                  opacity={isDimmedOut ? 0.08 : isGlowing ? 1 : 0.85}
+                  stroke={isGlowing ? (darkMode ? '#f9fafb' : '#0f172a') : 'none'}
+                  strokeWidth={isFocusGene ? 5 : isGlowing ? 1.25 : 0}
+                  className={isSearchMatch || isCategoryHighlight || isFocusGene ? 'animate-pulse' : undefined}
                   style={{
                     cursor: 'pointer',
-                    filter: isSearchMatch ? 'drop-shadow(0 0 7px rgba(250, 204, 21, 0.95))' : undefined,
+                    filter: isGlowing ? glowFilter : undefined,
                     transition: 'opacity 120ms ease, stroke-width 120ms ease',
                   }}
                   onPointerDown={(event) => event.stopPropagation()}
@@ -256,6 +316,9 @@ export function CircularGenomeMap({ genes, searchTerm, dimmedCategories, compact
             </span>
             <span className={palette.tooltipLabel}>Strand</span>
             <span>{tooltip.gene.direction === '+' ? 'Forward' : tooltip.gene.direction === '-' ? 'Reverse' : 'Unknown'}</span>
+          </div>
+          <div className={`mt-2 border-t ${darkMode ? 'border-gray-700' : 'border-gray-200'} pt-1.5 text-[10px] opacity-60`}>
+            Click to open in Explore
           </div>
         </div>
       )}

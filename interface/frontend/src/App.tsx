@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { Shell } from './components/layout/Shell'
+import { ExploreWorkspacePage } from './components/explore/ExploreWorkspacePage'
 import { GeneCatalogPage } from './components/genes/GeneCatalogPage'
 import { TFNetworkPage } from './components/network/TFNetworkPage'
 import { ExperimentListPage } from './components/experiments/ExperimentListPage'
@@ -11,13 +12,20 @@ import { ResultsBrowserPage } from './components/results/ResultsBrowserPage'
 import { ComparisonDashboard } from './components/results/ComparisonDashboard'
 import { MLPage } from './components/ml/MLPage'
 import { DesignPage } from './components/design/DesignPage'
+import { GenomeViewerPage } from './components/genome/GenomeViewerPage'
+import { PathwaysPage } from './components/pathways/PathwaysPage'
+import { WorkspaceUrlSync } from './hooks/useUrlWorkspaceState'
 
 export default function App() {
   return (
     <Shell>
+      <WorkspaceUrlSync />
       <Routes>
-        <Route path="/" element={<GeneCatalogPage />} />
+        <Route path="/" element={<ExploreWorkspacePage />} />
+        <Route path="/genes" element={<GeneCatalogPage />} />
         <Route path="/network" element={<TFNetworkPage />} />
+        <Route path="/genome" element={<GenomeViewerPage />} />
+        <Route path="/pathways" element={<PathwaysPage />} />
         <Route path="/experiments" element={<ExperimentListPage />} />
         <Route path="/experiments/new" element={<ExperimentDesigner />} />
         <Route path="/experiments/batch" element={<BatchCreator />} />

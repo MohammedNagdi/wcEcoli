@@ -132,8 +132,12 @@ export function GeneCatalogPage({
   useEffect(() => {
     if (selectedGeneSymbol && selectedGeneSymbol !== selectedSymbol) {
       setSelectedSymbol(selectedGeneSymbol)
+    } else if (!selectedGeneSymbol && embedded && selectedSymbol) {
+      // Gene breadcrumb was cleared — reset table selection and search query
+      setSelectedSymbol(null)
+      setQuery('')
     }
-  }, [selectedGeneSymbol, selectedSymbol])
+  }, [selectedGeneSymbol, selectedSymbol, embedded])
 
   useEffect(() => {
     const nextCategory = selectedCategory ?? undefined
@@ -382,7 +386,7 @@ export function GeneCatalogPage({
                       <td className="px-4 py-2 text-right">
                         <span className="font-mono text-xs text-gray-500">
                           {gene.left_end_pos && gene.right_end_pos
-                            ? `${gene.left_end_pos.toLocaleString()}-${gene.right_end_pos.toLocaleString()}`
+                            ? gene.left_end_pos.toLocaleString() + '-' + gene.right_end_pos.toLocaleString()
                             : '-'}
                         </span>
                         {length && (
@@ -397,7 +401,7 @@ export function GeneCatalogPage({
                         </td>
                       )}
                       <td className="px-4 py-2 text-right font-mono text-xs text-gray-500">
-                        {gene.ko_index}
+                        {gene.ko_index != null && gene.ko_index >= 0 ? gene.ko_index : '—'}
                       </td>
                       <td className="px-4 py-2" />
                     </tr>

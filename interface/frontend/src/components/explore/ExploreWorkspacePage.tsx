@@ -58,7 +58,7 @@ export function ExploreWorkspacePage() {
           </Link>
           {selectedGene && (
             <Link
-              to={`/genome?gene=${encodeURIComponent(selectedGene)}`}
+              to={'/genome?gene=' + encodeURIComponent(selectedGene)}
               className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-300 hover:text-gray-900"
             >
               Genome Map
@@ -69,14 +69,14 @@ export function ExploreWorkspacePage() {
 
       <div
         ref={containerRef}
-        className={`flex min-h-0 flex-1 gap-0 overflow-hidden ${isDragging ? 'select-none cursor-col-resize' : ''}`}
+        className={'flex min-h-0 flex-1 gap-0 overflow-hidden ' + (isDragging ? 'select-none cursor-col-resize' : '')}
         onMouseMove={handleDividerMove}
         onMouseUp={stopDragging}
         onMouseLeave={stopDragging}
       >
         <section
           className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white"
-          style={{ width: `${leftPct}%`, flexShrink: 0 }}
+          style={{ width: leftPct + '%', flexShrink: 0 }}
         >
           <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
             <div>
@@ -157,13 +157,13 @@ function SelectedGeneSummary({
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <Link
-            to={`/genome?gene=${encodeURIComponent(gene.symbol)}`}
+            to={'/genome?gene=' + encodeURIComponent(gene.symbol)}
             className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
           >
             Genome Map
           </Link>
           <Link
-            to={`/experiments/new?variant=gene_knockout&gene=${encodeURIComponent(gene.symbol)}`}
+            to={'/experiments/new?variant=gene_knockout&gene=' + encodeURIComponent(gene.symbol)}
             className="rounded-md bg-bio-gene px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90"
           >
             Design KO
@@ -177,7 +177,9 @@ function SelectedGeneSummary({
             <CategoryBadge label={gene.category} />
           </Fact>
           <Fact label="KO index">
-            <span className="font-mono text-gray-700">{gene.ko_index}</span>
+            <span className="font-mono text-gray-700">
+              {gene.ko_index != null && gene.ko_index >= 0 ? gene.ko_index : '—'}
+            </span>
           </Fact>
           {gene.direction && (
             <Fact label="Strand">
@@ -261,7 +263,7 @@ function ContextChip({
         type="button"
         onClick={onClear}
         className="ml-0.5 rounded-full px-1 text-brand-500 hover:bg-brand-100 hover:text-brand-800"
-        aria-label={`Clear ${label.toLowerCase()} context`}
+        aria-label={'Clear ' + label.toLowerCase() + ' context'}
       >
         x
       </button>
