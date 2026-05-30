@@ -18,6 +18,11 @@ const LAYOUT = {
   numIter: 300,
 }
 
+const SELECTED_GENE_MIN_ZOOM = 1.1
+const SELECTED_GENE_MAX_ZOOM = 1.65
+const SELECTED_GENE_DEFAULT_ZOOM = 1.3
+const SELECTED_GENE_ANIMATION_MS = 700
+
 type NetworkRole = 'tf' | 'target' | 'both'
 
 interface NetworkNodeData {
@@ -83,6 +88,12 @@ function formatSigned(value: number): string {
 
 function formatStd(value: number | null): string {
   return value == null ? 'n/a' : value.toFixed(2)
+}
+
+function selectedGeneZoom(currentZoom: number, maxZoom: number): number {
+  const boundedCurrent = Math.min(Math.max(currentZoom, SELECTED_GENE_MIN_ZOOM), SELECTED_GENE_MAX_ZOOM)
+  const target = currentZoom < SELECTED_GENE_MIN_ZOOM ? SELECTED_GENE_DEFAULT_ZOOM : boundedCurrent
+  return Math.min(target, maxZoom)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -234,7 +245,17 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
       )
     }
     if (node.length === 0) return
-    cy.animate({ fit: { eles: node, padding: 80 }, duration: 400 })
+    cy.stop(false, true)
+    cy.animate(
+      {
+        center: { eles: node },
+        zoom: selectedGeneZoom(cy.zoom(), cy.maxZoom()),
+      },
+      {
+        duration: SELECTED_GENE_ANIMATION_MS,
+        easing: 'ease-in-out-cubic',
+      }
+    )
   }, [network])
 
   const applyGraphVisibility = useCallback(() => {
@@ -415,7 +436,10 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
 
   useEffect(() => {
     if (!layoutReadyRef.current) return
-    centerSelectedGene(selectedGene)
+    const firstFrame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => centerSelectedGene(selectedGene))
+    })
+    return () => window.cancelAnimationFrame(firstFrame)
   }, [centerSelectedGene, selectedGene, elements.length])
 
   useEffect(() => {
@@ -448,6 +472,16 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   const handleCyInit = (cy: Core) => {
     cyRef.current = cy
     layoutReadyRef.current = false
+    let layoutReadyFallback = 0
+    const markLayoutReady = () => {
+      if (layoutReadyRef.current) return
+      layoutReadyRef.current = true
+      if (layoutReadyFallback) window.clearTimeout(layoutReadyFallback)
+      applyGraphVisibility()
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => centerSelectedGene(selectedGene))
+      })
+    }
     cy.on('tap', 'node', (evt: EventObject) => {
       const symbol = evt.target.data('label') as string
       setSelectedGene(symbol)
@@ -455,11 +489,8 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     cy.on('tap', (evt: EventObject) => {
       if (evt.target === cy) setSelectedGene(null)
     })
-    window.setTimeout(() => {
-      layoutReadyRef.current = true
-      applyGraphVisibility()
-      centerSelectedGene(selectedGene)
-    }, 100)
+    cy.one('layoutstop', markLayoutReady)
+    layoutReadyFallback = window.setTimeout(markLayoutReady, 500)
   }
 
   if (loading) {
