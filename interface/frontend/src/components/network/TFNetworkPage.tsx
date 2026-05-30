@@ -18,37 +18,68 @@ const LAYOUT = {
   numIter: 300,
 }
 
+type NetworkRole = 'tf' | 'target' | 'both'
+
+interface NetworkNodeData {
+  id: string
+  label: string
+  role: NetworkRole
+  isTF: boolean
+  isTarget: boolean
+  size: number
+  targetCount: number
+}
+
+function geneNodeId(symbol: string): string {
+  return `gene_${symbol}`
+}
+
+function nodeRole(isTF: boolean, isTarget: boolean): NetworkRole {
+  if (isTF && isTarget) return 'both'
+  return isTF ? 'tf' : 'target'
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const STYLESHEET: any[] = [
   {
-    selector: 'node[type="tf"]',
+    selector: 'node',
     style: {
-      'background-color': '#534AB7',
       label: 'data(label)',
       color: '#fff',
       'text-valign': 'center',
       'text-halign': 'center',
-      'font-size': '9px',
-      'font-weight': 'bold',
       width: 'data(size)',
       height: 'data(size)',
+      'font-size': '8px',
+      'font-weight': 600,
       'border-width': 2,
-      'border-color': '#3D3690',
     },
   },
   {
-    selector: 'node[type="target"]',
+    selector: 'node[role="tf"]',
+    style: {
+      'background-color': '#534AB7',
+      'border-color': '#3D3690',
+      'font-size': '9px',
+    },
+  },
+  {
+    selector: 'node[role="target"]',
     style: {
       'background-color': '#1D9E75',
-      label: 'data(label)',
-      color: '#fff',
-      'text-valign': 'center',
-      'text-halign': 'center',
       'font-size': '7px',
-      width: 14,
-      height: 14,
       'border-width': 1,
       'border-color': '#157A5A',
+    },
+  },
+  {
+    selector: 'node[role="both"]',
+    style: {
+      'background-color': '#2563EB',
+      'border-width': 3,
+      'border-color': '#16A34A',
+      'font-size': '9px',
+      'font-weight': 'bold',
     },
   },
   {
@@ -60,6 +91,14 @@ const STYLESHEET: any[] = [
       'curve-style': 'bezier',
       width: 'data(width)',
       opacity: 0.5,
+    },
+  },
+  {
+    selector: 'edge[isSelfLoop]',
+    style: {
+      'loop-direction': '45deg',
+      'loop-sweep': '70deg',
+      'control-point-step-size': 45,
     },
   },
   {
@@ -143,84 +182,112 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   const centerSelectedGene = useCallback((geneSymbol: string | null) => {
     const cy = cyRef.current
     if (!cy || !network || !geneSymbol) return
-    const node = cy.nodes().filter(
-      (n) => (n.data('label') as string).toLowerCase() === geneSymbol.toLowerCase()
-    )
+    let node = cy.getElementById(geneNodeId(geneSymbol))
+    if (node.length === 0) {
+      node = cy.nodes().filter(
+        (n) => (n.data('label') as string).toLowerCase() === geneSymbol.toLowerCase()
+      )
+    }
     if (node.length === 0) return
     cy.animate({ fit: { eles: node, padding: 80 }, duration: 400 })
-    const nodeType = node.data('type') as string
-    if (nodeType === 'tf') {
+    const role = node.data('role') as NetworkRole
+    if (role === 'tf' || role === 'both') {
       const label = node.data('label') as string
       setSelectedTF(network.tfs.find((t) => t.symbol === label) ?? null)
     }
   }, [network])
 
-  const applyHubFilter = useCallback(() => {
+  const applyGraphVisibility = useCallback(() => {
     const cy = cyRef.current
     if (!cy || !layoutReadyRef.current) return
 
-    cy.nodes('[type="tf"]').forEach((node) => {
-      const count = node.data('targetCount') as number
-      if (count < minTargets) {
-        node.addClass('node-hidden')
-        node.connectedEdges().addClass('node-hidden')
-      } else {
-        node.removeClass('node-hidden')
-        node.connectedEdges().removeClass('node-hidden')
-      }
+    cy.elements().removeClass('node-hidden edge-hidden')
+
+    cy.edges().forEach((edge) => {
+      const source = edge.source()
+      const sourceTargetCount = source.data('targetCount') as number
+      const sourceIsSmallHub = sourceTargetCount > 0 && sourceTargetCount < minTargets
+      const hiddenByType = edgeFilter !== 'all' && edge.data('edgeType') !== edgeFilter
+      if (sourceIsSmallHub || hiddenByType) edge.addClass('edge-hidden')
     })
 
-    cy.nodes('[type="target"]').forEach((node) => {
-      let allHidden = true
-      node.connectedEdges().forEach((edge) => {
-        if (!edge.hasClass('node-hidden')) allHidden = false
-      })
-      if (allHidden) {
+    cy.nodes().forEach((node) => {
+      const targetCount = node.data('targetCount') as number
+      if (targetCount > 0 && targetCount < minTargets) {
         node.addClass('node-hidden')
-      } else {
-        node.removeClass('node-hidden')
+        return
       }
+      let hasVisibleEdge = false
+      node.connectedEdges().forEach((edge) => {
+        if (!edge.hasClass('edge-hidden')) hasVisibleEdge = true
+      })
+      if (!hasVisibleEdge) node.addClass('node-hidden')
     })
-  }, [minTargets])
+  }, [edgeFilter, minTargets])
 
   // Build cytoscape elements
   const elements = useMemo(() => {
     if (!network) return []
-    const nodes: ElementDefinition[] = []
+    const nodeMap = new Map<string, NetworkNodeData>()
     const edges: ElementDefinition[] = []
-    const targetSet = new Set<string>()
+
+    const ensureNode = (symbol: string) => {
+      const id = geneNodeId(symbol)
+      const existing = nodeMap.get(symbol)
+      if (existing) return existing
+      const node = {
+        id,
+        label: symbol,
+        role: 'target' as NetworkRole,
+        isTF: false,
+        isTarget: false,
+        size: 14,
+        targetCount: 0,
+      }
+      nodeMap.set(symbol, node)
+      return node
+    }
 
     for (const tf of network.tfs) {
-      const size = Math.max(24, Math.min(60, 20 + tf.target_count * 0.6))
-      nodes.push({
-        data: { id: `tf_${tf.symbol}`, label: tf.symbol, type: 'tf', size, targetCount: tf.target_count },
-      })
+      const tfNode = ensureNode(tf.symbol)
+      tfNode.isTF = true
+      tfNode.targetCount = tf.target_count
+      tfNode.role = nodeRole(tfNode.isTF, tfNode.isTarget)
+      tfNode.size = Math.max(24, Math.min(60, 20 + tf.target_count * 0.6))
 
       for (const t of tf.targets) {
-        const targetId = `tgt_${t.target}`
-        if (!targetSet.has(t.target)) {
-          targetSet.add(t.target)
-          nodes.push({
-            data: { id: targetId, label: t.target, type: 'target' },
-          })
-        }
+        const targetNode = ensureNode(t.target)
+        targetNode.isTarget = true
+        targetNode.role = nodeRole(targetNode.isTF, targetNode.isTarget)
+        if (targetNode.role === 'target') targetNode.size = 14
         const edgeType = regulationEffect(t.log2fc, t.type)
         const absLfc = Math.abs(t.log2fc)
         const edgeWidth = Math.max(0.5, Math.min(4, 0.5 + absLfc * 0.6))
         edges.push({
           data: {
             id: `e_${tf.symbol}_${t.target}`,
-            source: `tf_${tf.symbol}`,
-            target: targetId,
+            source: geneNodeId(tf.symbol),
+            target: geneNodeId(t.target),
             edgeType,
+            isSelfLoop: tf.symbol === t.target,
             log2fc: t.log2fc,
             width: edgeWidth,
           },
         })
       }
     }
+
+    const nodes: ElementDefinition[] = [...nodeMap.values()].map((node) => ({ data: node }))
     return [...nodes, ...edges]
   }, [network])
+
+  const graphStats = useMemo(() => {
+    const nodes = elements.filter((element) => element.data && !('source' in element.data))
+    const both = nodes.filter((node) => node.data.role === 'both').length
+    const targetOnly = nodes.filter((node) => node.data.role === 'target').length
+    const selfLoops = elements.filter((element) => Boolean(element.data?.isSelfLoop)).length
+    return { totalNodes: nodes.length, both, targetOnly, selfLoops }
+  }, [elements])
 
   const edgeCounts = useMemo(() => {
     if (!network) return { activation: 0, repression: 0, all: 0 }
@@ -245,8 +312,8 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   }, [centerSelectedGene, selectedGene, elements.length])
 
   useEffect(() => {
-    applyHubFilter()
-  }, [applyHubFilter])
+    applyGraphVisibility()
+  }, [applyGraphVisibility])
 
   // Handle search / highlight
   useEffect(() => {
@@ -267,15 +334,8 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   }, [searchQuery, elements.length])
 
   useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.edges().removeClass('edge-hidden')
-    if (edgeFilter === 'all') {
-      return
-    } else {
-      cy.edges().not(`[edgeType="${edgeFilter}"]`).addClass('edge-hidden')
-    }
-  }, [edgeFilter, elements.length])
+    applyGraphVisibility()
+  }, [applyGraphVisibility, elements.length])
 
   // Handle node click — show TF details
   const handleCyInit = (cy: Core) => {
@@ -283,16 +343,16 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     layoutReadyRef.current = false
     cy.on('tap', 'node', (evt: EventObject) => {
       const symbol = evt.target.data('label') as string
-      const nodeType = evt.target.data('type') as string
+      const role = evt.target.data('role') as NetworkRole
       setSelectedGene(symbol)
-      setSelectedTF(nodeType === 'tf' ? network?.tfs.find((t) => t.symbol === symbol) ?? null : null)
+      setSelectedTF(role === 'tf' || role === 'both' ? network?.tfs.find((t) => t.symbol === symbol) ?? null : null)
     })
     cy.on('tap', (evt: EventObject) => {
       if (evt.target === cy) setSelectedTF(null)
     })
     window.setTimeout(() => {
       layoutReadyRef.current = true
-      applyHubFilter()
+      applyGraphVisibility()
       centerSelectedGene(selectedGene)
     }, 100)
   }
@@ -366,7 +426,11 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-full bg-bio-gene inline-block" />
-              Target gene
+              Target gene ({graphStats.targetOnly})
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full border-2 border-green-600 bg-blue-600 inline-block" />
+              Both ({graphStats.both})
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-0.5 bg-green-500 inline-block rounded" />
@@ -384,7 +448,7 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
             </span>
           </div>
           <span className="ml-auto text-xs text-gray-400">
-            {network?.total_edges.toLocaleString()} regulatory edges
+            {graphStats.totalNodes.toLocaleString()} genes · {network?.total_edges.toLocaleString()} edges · {graphStats.selfLoops} self-loops
           </span>
         </div>
 
