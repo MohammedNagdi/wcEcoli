@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import CytoscapeComponent from 'react-cytoscapejs'
 import type { Core, EventObject, ElementDefinition } from 'cytoscape'
 import { getTFNetwork } from '../../api/client'
@@ -8,7 +8,7 @@ import { SearchInput } from '../common/SearchInput'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { type RegulationEffect, regulationEffect } from '../../utils/regulation'
 
-const LAYOUT = {
+const FULL_LAYOUT = {
   name: 'cose',
   animate: false,
   nodeDimensionsIncludeLabels: true,
@@ -24,6 +24,7 @@ const SELECTED_GENE_DEFAULT_ZOOM = 1.3
 const SELECTED_GENE_ANIMATION_MS = 700
 
 type NetworkRole = 'tf' | 'target' | 'both'
+type NetworkViewMode = 'full' | 'neighborhood' | 'regulon' | 'incoming'
 
 interface NetworkNodeData {
   id: string
@@ -33,6 +34,7 @@ interface NetworkNodeData {
   isTarget: boolean
   size: number
   targetCount: number
+  focusLayer: number
 }
 
 interface InspectorEdge {
@@ -94,6 +96,20 @@ function selectedGeneZoom(currentZoom: number, maxZoom: number): number {
   const boundedCurrent = Math.min(Math.max(currentZoom, SELECTED_GENE_MIN_ZOOM), SELECTED_GENE_MAX_ZOOM)
   const target = currentZoom < SELECTED_GENE_MIN_ZOOM ? SELECTED_GENE_DEFAULT_ZOOM : boundedCurrent
   return Math.min(target, maxZoom)
+}
+
+function networkViewModeFromParam(value: string | null): NetworkViewMode | null {
+  if (value === 'full' || value === 'neighborhood' || value === 'regulon' || value === 'incoming') {
+    return value
+  }
+  return null
+}
+
+function networkModeLabel(mode: NetworkViewMode): string {
+  if (mode === 'full') return 'Full'
+  if (mode === 'neighborhood') return 'Neighborhood'
+  if (mode === 'regulon') return 'Regulon'
+  return 'Regulators'
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -210,12 +226,15 @@ interface TFNetworkPageProps {
 
 export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   const { selectedGene, setSelectedGene } = useUrlWorkspaceState()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialMode = networkViewModeFromParam(searchParams.get('mode')) ?? (selectedGene ? 'neighborhood' : 'full')
   const [network, setNetwork] = useState<TFNetwork | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [edgeFilter, setEdgeFilter] = useState<'all' | 'activation' | 'repression'>('all')
   const [minTargets, setMinTargets] = useState(1)
+  const [networkMode, setNetworkMode] = useState<NetworkViewMode>(initialMode)
   const cyRef = useRef<Core | null>(null)
   const layoutReadyRef = useRef(false)
   const viewportHeightClass = embedded
@@ -234,6 +253,32 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
       setSearchQuery(selectedGene)
     }
   }, [selectedGene])
+
+  useEffect(() => {
+    const urlMode = networkViewModeFromParam(searchParams.get('mode'))
+    if (urlMode && urlMode !== networkMode) setNetworkMode(urlMode)
+  }, [networkMode, searchParams])
+
+  useEffect(() => {
+    if (!selectedGene || searchParams.has('mode')) return
+    setNetworkMode('neighborhood')
+  }, [searchParams, selectedGene])
+
+  const setMode = useCallback((mode: NetworkViewMode) => {
+    setNetworkMode(mode)
+    const next = new URLSearchParams(searchParams)
+    if (mode === 'full') {
+      next.delete('mode')
+    } else {
+      next.set('mode', mode)
+    }
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (selectedGene || networkMode === 'full') return
+    setMode('full')
+  }, [networkMode, selectedGene, setMode])
 
   const centerSelectedGene = useCallback((geneSymbol: string | null) => {
     const cy = cyRef.current
@@ -267,14 +312,15 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     cy.edges().forEach((edge) => {
       const source = edge.source()
       const sourceTargetCount = source.data('targetCount') as number
-      const sourceIsSmallHub = sourceTargetCount > 0 && sourceTargetCount < minTargets
+      const sourceIsSmallHub = networkMode === 'full' && sourceTargetCount > 0 && sourceTargetCount < minTargets
       const hiddenByType = edgeFilter !== 'all' && edge.data('edgeType') !== edgeFilter
       if (sourceIsSmallHub || hiddenByType) edge.addClass('edge-hidden')
     })
 
     cy.nodes().forEach((node) => {
       const targetCount = node.data('targetCount') as number
-      if (targetCount > 0 && targetCount < minTargets) {
+      const isSelectedNode = selectedGene != null && (node.data('label') as string).toLowerCase() === selectedGene.toLowerCase()
+      if (networkMode === 'full' && targetCount > 0 && targetCount < minTargets) {
         node.addClass('node-hidden')
         return
       }
@@ -282,9 +328,10 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
       node.connectedEdges().forEach((edge) => {
         if (!edge.hasClass('edge-hidden')) hasVisibleEdge = true
       })
+      if (networkMode !== 'full' && isSelectedNode) return
       if (!hasVisibleEdge) node.addClass('node-hidden')
     })
-  }, [edgeFilter, minTargets])
+  }, [edgeFilter, minTargets, networkMode, selectedGene])
 
   // Build cytoscape elements
   const elements = useMemo(() => {
@@ -304,6 +351,7 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
         isTarget: false,
         size: 14,
         targetCount: 0,
+        focusLayer: 1,
       }
       nodeMap.set(symbol, node)
       return node
@@ -329,6 +377,8 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
             id: `e_${tf.symbol}_${t.target}`,
             source: geneNodeId(tf.symbol),
             target: geneNodeId(t.target),
+            tf: tf.symbol,
+            targetSymbol: t.target,
             edgeType,
             isSelfLoop: tf.symbol === t.target,
             log2fc: t.log2fc,
@@ -342,14 +392,6 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     const nodes: ElementDefinition[] = [...nodeMap.values()].map((node) => ({ data: node }))
     return [...nodes, ...edges]
   }, [network])
-
-  const graphStats = useMemo(() => {
-    const nodes = elements.filter((element) => element.data && !('source' in element.data))
-    const both = nodes.filter((node) => node.data.role === 'both').length
-    const targetOnly = nodes.filter((node) => node.data.role === 'target').length
-    const selfLoops = elements.filter((element) => Boolean(element.data?.isSelfLoop)).length
-    return { totalNodes: nodes.length, both, targetOnly, selfLoops }
-  }, [elements])
 
   const inspectorBySymbol = useMemo(() => {
     const inspectors = new Map<string, GeneInspector>()
@@ -417,6 +459,83 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
 
   const selectedInspector = selectedGene ? inspectorBySymbol.get(selectedGene) ?? null : null
 
+  const graphElements = useMemo(() => {
+    if (networkMode === 'full' || !selectedGene || !selectedInspector) {
+      return elements
+    }
+
+    const selected = selectedInspector.symbol
+    const nodeSymbols = new Set<string>([selected])
+    const edgeIds = new Set<string>()
+
+    const includeEdges = (edges: InspectorEdge[]) => {
+      for (const edge of edges) {
+        nodeSymbols.add(edge.tf)
+        nodeSymbols.add(edge.target)
+        edgeIds.add(`e_${edge.tf}_${edge.target}`)
+      }
+    }
+
+    if (networkMode === 'neighborhood') {
+      includeEdges(selectedInspector.incoming)
+      includeEdges(selectedInspector.outgoing)
+    } else if (networkMode === 'regulon') {
+      includeEdges(selectedInspector.outgoing)
+    } else if (networkMode === 'incoming') {
+      includeEdges(selectedInspector.incoming)
+    }
+
+    return elements
+      .filter((element) => {
+        const data = element.data
+        if (!data) return false
+        if ('source' in data) return edgeIds.has(data.id as string)
+        return nodeSymbols.has(data.label as string)
+      })
+      .map((element) => {
+        const data = element.data
+        if (!data || 'source' in data) return element
+        const symbol = data.label as string
+        const isSelected = symbol.toLowerCase() === selected.toLowerCase()
+        const isRegulator = selectedInspector.incoming.some((edge) => edge.tf === symbol)
+        return {
+          ...element,
+          data: {
+            ...data,
+            focusLayer: isSelected ? 3 : isRegulator ? 2 : 1,
+            size: isSelected ? Math.max(data.size as number, 42) : data.size,
+          },
+        }
+      })
+  }, [elements, networkMode, selectedGene, selectedInspector])
+
+  const graphLayout = useMemo(() => {
+    if (networkMode === 'full') return FULL_LAYOUT
+    return {
+      name: 'concentric',
+      animate: true,
+      animationDuration: 450,
+      animationEasing: 'ease-in-out-cubic',
+      fit: true,
+      padding: 70,
+      minNodeSpacing: 34,
+      avoidOverlap: true,
+      nodeDimensionsIncludeLabels: true,
+      concentric: (node: { data: (key: string) => unknown }) => node.data('focusLayer') as number,
+      levelWidth: () => 1,
+    }
+  }, [networkMode])
+
+  const graphStats = useMemo(() => {
+    const nodes = graphElements.filter((element) => element.data && !('source' in element.data))
+    const nodeData = nodes.map((node) => node.data as Partial<NetworkNodeData>)
+    const both = nodeData.filter((data) => data.role === 'both').length
+    const targetOnly = nodeData.filter((data) => data.role === 'target').length
+    const selfLoops = graphElements.filter((element) => Boolean((element.data as { isSelfLoop?: boolean } | undefined)?.isSelfLoop)).length
+    const edges = graphElements.filter((element) => element.data && 'source' in element.data).length
+    return { totalNodes: nodes.length, both, targetOnly, selfLoops, edges }
+  }, [graphElements])
+
   const edgeCounts = useMemo(() => {
     if (!network) return { activation: 0, repression: 0, all: 0 }
     let activation = 0
@@ -436,11 +555,12 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
 
   useEffect(() => {
     if (!layoutReadyRef.current) return
+    if (networkMode !== 'full') return
     const firstFrame = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => centerSelectedGene(selectedGene))
     })
     return () => window.cancelAnimationFrame(firstFrame)
-  }, [centerSelectedGene, selectedGene, elements.length])
+  }, [centerSelectedGene, networkMode, selectedGene, graphElements.length])
 
   useEffect(() => {
     applyGraphVisibility()
@@ -462,11 +582,11 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     matched.removeClass('dimmed').addClass('highlighted')
     matched.connectedEdges().removeClass('dimmed')
     matched.connectedEdges().connectedNodes().removeClass('dimmed')
-  }, [searchQuery, elements.length])
+  }, [searchQuery, graphElements.length])
 
   useEffect(() => {
     applyGraphVisibility()
-  }, [applyGraphVisibility, elements.length])
+  }, [applyGraphVisibility, graphElements.length])
 
   // Handle node click — show TF details
   const handleCyInit = (cy: Core) => {
@@ -479,11 +599,14 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
       if (layoutReadyFallback) window.clearTimeout(layoutReadyFallback)
       applyGraphVisibility()
       window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => centerSelectedGene(selectedGene))
+        window.requestAnimationFrame(() => {
+          if (networkMode === 'full') centerSelectedGene(selectedGene)
+        })
       })
     }
     cy.on('tap', 'node', (evt: EventObject) => {
       const symbol = evt.target.data('label') as string
+      if (networkMode === 'full') setMode('neighborhood')
       setSelectedGene(symbol)
     })
     cy.on('tap', (evt: EventObject) => {
@@ -517,6 +640,25 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
       {/* Network canvas */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-3">
+          <div className="flex overflow-hidden rounded-md border border-gray-200 text-xs">
+            {(['full', 'neighborhood', 'regulon', 'incoming'] as const).map((mode) => {
+              const needsGene = mode !== 'full'
+              const isDisabled = needsGene && !selectedInspector
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => !isDisabled && setMode(mode)}
+                  disabled={isDisabled}
+                  className={`px-2.5 py-1.5 disabled:cursor-not-allowed disabled:opacity-40 ${
+                    networkMode === mode ? 'bg-brand-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  {networkModeLabel(mode)}
+                </button>
+              )
+            })}
+          </div>
           <SearchInput
             value={searchQuery}
             onChange={setSearchQuery}
@@ -584,15 +726,21 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
             </span>
           </div>
           <span className="ml-auto text-xs text-gray-400">
-            {graphStats.totalNodes.toLocaleString()} genes · {network?.total_edges.toLocaleString()} edges · {graphStats.selfLoops} self-loops
+            {graphStats.totalNodes.toLocaleString()} genes · {graphStats.edges.toLocaleString()} edges · {graphStats.selfLoops} self-loops
+            {networkMode !== 'full' && network && (
+              <span className="ml-1 text-gray-300">
+                {' '}of {network.total_edges.toLocaleString()}
+              </span>
+            )}
           </span>
         </div>
 
         <div className="relative flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white">
-          {elements.length > 0 && (
+          {graphElements.length > 0 && (
             <CytoscapeComponent
-              elements={elements}
-              layout={LAYOUT as any}
+              key={`${networkMode}-${selectedGene ?? 'none'}`}
+              elements={graphElements}
+              layout={graphLayout as any}
               stylesheet={STYLESHEET as any}
               cy={handleCyInit}
               style={{ width: '100%', height: '100%' }}

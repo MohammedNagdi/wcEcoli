@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MouseEvent, PointerEvent, WheelEvent } from 'react'
+import type { MouseEvent, PointerEvent } from 'react'
 import type { Gene } from '../../types'
 import {
   CATEGORY_FILL,
@@ -134,6 +134,25 @@ export function CircularGenomeMap({
     hasAppliedFocusRef.current = focusGene
   }, [focusGene, positionedGenes])
 
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleNativeWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const factor = Math.exp(-event.deltaY * 0.002)
+      setZoom((current) => {
+        const next = Math.min(16, Math.max(1, current * factor))
+        if (next === 1) setPan({ x: 0, y: 0 })
+        return next
+      })
+    }
+
+    container.addEventListener('wheel', handleNativeWheel, { passive: false })
+    return () => container.removeEventListener('wheel', handleNativeWheel)
+  }, [])
+
   const normalizedSearch = searchTerm.trim().toLowerCase()
   const hasSearch = normalizedSearch.length > 0
   const hasHighlightedCategories = highlightedCategories.size > 0
@@ -149,16 +168,6 @@ export function CircularGenomeMap({
       gene,
       x: event.clientX - rect.left + 14,
       y: event.clientY - rect.top + 14,
-    })
-  }
-
-  function handleWheel(event: WheelEvent<SVGSVGElement>) {
-    event.preventDefault()
-    const factor = event.deltaY < 0 ? 1.15 : 0.85
-    setZoom((current) => {
-      const next = Math.min(16, Math.max(1, current * factor))
-      if (next === 1) setPan({ x: 0, y: 0 })
-      return next
     })
   }
 
@@ -194,6 +203,7 @@ export function CircularGenomeMap({
           ? 'flex min-h-0 flex-1 items-center justify-center'
           : 'flex h-full min-h-0 items-center justify-center'
       }`}
+      style={{ overscrollBehavior: 'contain', touchAction: 'none' }}
     >
       <div className={`relative mx-auto aspect-square overflow-hidden rounded-xl ${compact ? 'h-full max-h-[420px] max-w-full' : 'h-full max-w-full'} ${palette.wrapperCls}`}>
         <svg
@@ -201,7 +211,6 @@ export function CircularGenomeMap({
           className={`h-full w-full select-none ${zoom > 1 ? 'cursor-grab' : ''} ${
             drag ? 'cursor-grabbing' : ''
           }`}
-          onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
