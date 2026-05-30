@@ -42,7 +42,7 @@ export interface CategoryCount {
 export interface TFNode {
   symbol: string
   target_count: number
-  targets: { target: string; log2fc: number; type: string }[]
+  targets: { target: string; log2fc: number; log2fc_std?: number | null; type: string }[]
 }
 
 export interface TFNetwork {

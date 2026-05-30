@@ -34,6 +34,7 @@ def get_tf_network(session: Session = Depends(get_session)):
         tf_map.setdefault(e.tf_symbol, []).append({
             "target": e.target_symbol,
             "log2fc": e.log2fc_mean,
+            "log2fc_std": e.log2fc_std,
             "type": e.regulation_direct,
         })
 
@@ -58,7 +59,12 @@ def get_tf_subnetwork(tf_symbol: str, session: Session = Depends(get_session)):
         symbol=tf_symbol,
         target_count=len(edges),
         targets=[
-            {"target": e.target_symbol, "log2fc": e.log2fc_mean, "type": e.regulation_direct}
+            {
+                "target": e.target_symbol,
+                "log2fc": e.log2fc_mean,
+                "log2fc_std": e.log2fc_std,
+                "type": e.regulation_direct,
+            }
             for e in edges
         ],
     )

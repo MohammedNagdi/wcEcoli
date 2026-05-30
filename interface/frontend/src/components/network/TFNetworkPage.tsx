@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 import CytoscapeComponent from 'react-cytoscapejs'
 import type { Core, EventObject, ElementDefinition } from 'cytoscape'
 import { getTFNetwork } from '../../api/client'
-import type { TFNetwork, TFNode } from '../../types'
+import type { TFNetwork } from '../../types'
 import { SearchInput } from '../common/SearchInput'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
-import { regulationEffect } from '../../utils/regulation'
+import { type RegulationEffect, regulationEffect } from '../../utils/regulation'
 
 const LAYOUT = {
   name: 'cose',
@@ -30,6 +30,27 @@ interface NetworkNodeData {
   targetCount: number
 }
 
+interface InspectorEdge {
+  tf: string
+  target: string
+  partner: string
+  effect: RegulationEffect
+  log2fc: number
+  log2fcStd: number | null
+  rawType: string
+  isSelfLoop: boolean
+}
+
+interface GeneInspector {
+  symbol: string
+  role: NetworkRole
+  incoming: InspectorEdge[]
+  outgoing: InspectorEdge[]
+  selfLoops: InspectorEdge[]
+  targetCount: number
+  regulatorCount: number
+}
+
 function geneNodeId(symbol: string): string {
   return `gene_${symbol}`
 }
@@ -37,6 +58,31 @@ function geneNodeId(symbol: string): string {
 function nodeRole(isTF: boolean, isTarget: boolean): NetworkRole {
   if (isTF && isTarget) return 'both'
   return isTF ? 'tf' : 'target'
+}
+
+function roleLabel(role: NetworkRole): string {
+  if (role === 'both') return 'TF and target'
+  return role === 'tf' ? 'Transcription factor' : 'Target gene'
+}
+
+function effectClasses(effect: RegulationEffect): string {
+  if (effect === 'activation') return 'bg-green-50 text-green-700'
+  if (effect === 'repression') return 'bg-red-50 text-red-700'
+  return 'bg-gray-100 text-gray-600'
+}
+
+function effectLabel(effect: RegulationEffect): string {
+  if (effect === 'activation') return 'act'
+  if (effect === 'repression') return 'rep'
+  return effect
+}
+
+function formatSigned(value: number): string {
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}`
+}
+
+function formatStd(value: number | null): string {
+  return value == null ? 'n/a' : value.toFixed(2)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -156,7 +202,6 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   const [network, setNetwork] = useState<TFNetwork | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedTF, setSelectedTF] = useState<TFNode | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [edgeFilter, setEdgeFilter] = useState<'all' | 'activation' | 'repression'>('all')
   const [minTargets, setMinTargets] = useState(1)
@@ -190,11 +235,6 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     }
     if (node.length === 0) return
     cy.animate({ fit: { eles: node, padding: 80 }, duration: 400 })
-    const role = node.data('role') as NetworkRole
-    if (role === 'tf' || role === 'both') {
-      const label = node.data('label') as string
-      setSelectedTF(network.tfs.find((t) => t.symbol === label) ?? null)
-    }
   }, [network])
 
   const applyGraphVisibility = useCallback(() => {
@@ -271,6 +311,7 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
             edgeType,
             isSelfLoop: tf.symbol === t.target,
             log2fc: t.log2fc,
+            log2fcStd: t.log2fc_std ?? null,
             width: edgeWidth,
           },
         })
@@ -288,6 +329,72 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     const selfLoops = elements.filter((element) => Boolean(element.data?.isSelfLoop)).length
     return { totalNodes: nodes.length, both, targetOnly, selfLoops }
   }, [elements])
+
+  const inspectorBySymbol = useMemo(() => {
+    const inspectors = new Map<string, GeneInspector>()
+
+    const ensureInspector = (symbol: string) => {
+      const existing = inspectors.get(symbol)
+      if (existing) return existing
+      const inspector: GeneInspector = {
+        symbol,
+        role: 'target',
+        incoming: [],
+        outgoing: [],
+        selfLoops: [],
+        targetCount: 0,
+        regulatorCount: 0,
+      }
+      inspectors.set(symbol, inspector)
+      return inspector
+    }
+
+    if (!network) return inspectors
+
+    for (const tf of network.tfs) {
+      const tfInspector = ensureInspector(tf.symbol)
+      tfInspector.role = nodeRole(true, tfInspector.incoming.length > 0)
+      tfInspector.targetCount = tf.target_count
+
+      for (const target of tf.targets) {
+        const targetInspector = ensureInspector(target.target)
+        const effect = regulationEffect(target.log2fc, target.type)
+        const edge: InspectorEdge = {
+          tf: tf.symbol,
+          target: target.target,
+          partner: target.target,
+          effect,
+          log2fc: target.log2fc,
+          log2fcStd: target.log2fc_std ?? null,
+          rawType: target.type,
+          isSelfLoop: tf.symbol === target.target,
+        }
+        tfInspector.outgoing.push(edge)
+        if (edge.isSelfLoop) tfInspector.selfLoops.push(edge)
+
+        const incomingEdge = { ...edge, partner: tf.symbol }
+        targetInspector.incoming.push(incomingEdge)
+        if (incomingEdge.isSelfLoop) targetInspector.selfLoops.push(incomingEdge)
+        targetInspector.role = nodeRole(targetInspector.outgoing.length > 0, true)
+        targetInspector.regulatorCount = targetInspector.incoming.length
+      }
+    }
+
+    for (const inspector of inspectors.values()) {
+      inspector.outgoing.sort((a, b) => Math.abs(b.log2fc) - Math.abs(a.log2fc))
+      inspector.incoming.sort((a, b) => Math.abs(b.log2fc) - Math.abs(a.log2fc))
+      inspector.selfLoops = inspector.selfLoops.filter((edge, index, list) =>
+        list.findIndex((item) => item.tf === edge.tf && item.target === edge.target) === index
+      )
+      inspector.role = nodeRole(inspector.outgoing.length > 0, inspector.incoming.length > 0)
+      inspector.targetCount = inspector.outgoing.length
+      inspector.regulatorCount = inspector.incoming.length
+    }
+
+    return inspectors
+  }, [network])
+
+  const selectedInspector = selectedGene ? inspectorBySymbol.get(selectedGene) ?? null : null
 
   const edgeCounts = useMemo(() => {
     if (!network) return { activation: 0, repression: 0, all: 0 }
@@ -343,12 +450,10 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     layoutReadyRef.current = false
     cy.on('tap', 'node', (evt: EventObject) => {
       const symbol = evt.target.data('label') as string
-      const role = evt.target.data('role') as NetworkRole
       setSelectedGene(symbol)
-      setSelectedTF(role === 'tf' || role === 'both' ? network?.tfs.find((t) => t.symbol === symbol) ?? null : null)
     })
     cy.on('tap', (evt: EventObject) => {
-      if (evt.target === cy) setSelectedTF(null)
+      if (evt.target === cy) setSelectedGene(null)
     })
     window.setTimeout(() => {
       layoutReadyRef.current = true
@@ -474,56 +579,152 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
         </div>
       </div>
 
-      {/* TF detail sidebar */}
-      {selectedTF && (
-        <aside className="w-72 flex-shrink-0 border-l border-gray-200 bg-white overflow-y-auto">
+      {/* Gene detail sidebar */}
+      {selectedInspector && (
+        <aside className="w-80 flex-shrink-0 border-l border-gray-200 bg-white overflow-y-auto">
           <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
             <div>
-              <h3 className="font-semibold font-mono text-bio-tf">{selectedTF.symbol}</h3>
-              <p className="text-xs text-gray-400">{selectedTF.target_count} targets</p>
+              <h3 className="font-semibold font-mono text-gray-900">{selectedInspector.symbol}</h3>
+              <p className="text-xs text-gray-400">
+                {roleLabel(selectedInspector.role)}
+              </p>
             </div>
             <button
-              onClick={() => setSelectedTF(null)}
+              onClick={() => setSelectedGene(null)}
               className="text-gray-400 hover:text-gray-600"
+              aria-label="Close network inspector"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
-          <div className="px-4 py-3 space-y-1.5">
-            <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-gray-400">
-              <span className="w-20">Target</span>
-              <span className="w-8">Type</span>
-              <span className="ml-auto">log2fc</span>
+
+          <div className="space-y-4 px-4 py-3">
+            <div className="grid grid-cols-3 gap-2 rounded-md border border-gray-100 bg-gray-50 p-2 text-center">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">Regulators</p>
+                <p className="font-mono text-sm font-semibold text-gray-800">{selectedInspector.regulatorCount}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">Targets</p>
+                <p className="font-mono text-sm font-semibold text-gray-800">{selectedInspector.targetCount}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">Self</p>
+                <p className="font-mono text-sm font-semibold text-gray-800">{selectedInspector.selfLoops.length}</p>
+              </div>
             </div>
-            {selectedTF.targets
-              .slice()
-              .sort((a, b) => Math.abs(b.log2fc) - Math.abs(a.log2fc))
-              .map((t, i) => {
-                const isAct = regulationEffect(t.log2fc, t.type) === 'activation'
-                return (
-                  <div key={i} className="flex items-center gap-2 text-sm py-0.5">
-                    <Link
-                      to={`/?gene=${encodeURIComponent(t.target)}`}
-                      className="font-mono text-bio-gene text-xs w-20 truncate hover:underline"
-                    >
-                      {t.target}
-                    </Link>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      isAct ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-                    }`}>
-                      {isAct ? 'act' : 'rep'}
-                    </span>
-                    <span className="ml-auto font-mono text-xs text-gray-400">
-                      {t.log2fc > 0 ? '+' : ''}{t.log2fc.toFixed(2)}
-                    </span>
-                  </div>
-                )
-              })}
+
+            <div className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-900">
+              Source: reconstruction fold-change table via <span className="font-mono">/api/tf-network</span>.
+              This is a static regulatory edge catalog, not a time-resolved simulation trace.
+            </div>
+
+            <InspectorEdgeSection
+              title="Regulated by"
+              empty="No incoming TF edges"
+              edges={selectedInspector.incoming}
+              direction="incoming"
+              onInspect={setSelectedGene}
+            />
+
+            <InspectorEdgeSection
+              title="Regulates"
+              empty="No outgoing target edges"
+              edges={selectedInspector.outgoing}
+              direction="outgoing"
+              onInspect={setSelectedGene}
+            />
+
+            {selectedInspector.selfLoops.length > 0 && (
+              <InspectorEdgeSection
+                title="Autoregulation"
+                empty=""
+                edges={selectedInspector.selfLoops}
+                direction="self"
+                onInspect={setSelectedGene}
+              />
+            )}
+
+            <div className="flex gap-2 border-t border-gray-100 pt-3">
+              <Link
+                to={`/?gene=${encodeURIComponent(selectedInspector.symbol)}`}
+                className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+              >
+                Open Workspace
+              </Link>
+              <Link
+                to={`/genome?gene=${encodeURIComponent(selectedInspector.symbol)}`}
+                className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Genome Map
+              </Link>
+            </div>
           </div>
         </aside>
       )}
     </div>
+  )
+}
+
+function InspectorEdgeSection({
+  title,
+  empty,
+  edges,
+  direction,
+  onInspect,
+}: {
+  title: string
+  empty: string
+  edges: InspectorEdge[]
+  direction: 'incoming' | 'outgoing' | 'self'
+  onInspect: (symbol: string) => void
+}) {
+  const visibleEdges = edges.slice(0, 14)
+
+  return (
+    <section>
+      <div className="mb-1.5 flex items-center justify-between">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
+        <span className="font-mono text-[10px] text-gray-400">{edges.length}</span>
+      </div>
+      {edges.length === 0 ? (
+        <div className="rounded-md border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-400">
+          {empty}
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-[minmax(0,1fr)_36px_52px_44px] gap-2 px-1 text-[10px] uppercase tracking-wide text-gray-400">
+            <span>{direction === 'incoming' ? 'TF' : 'Target'}</span>
+            <span>Type</span>
+            <span>log2FC</span>
+            <span>std</span>
+          </div>
+          {visibleEdges.map((edge) => (
+            <button
+              key={`${direction}-${edge.tf}-${edge.target}`}
+              type="button"
+              onClick={() => onInspect(edge.partner)}
+              className="grid w-full grid-cols-[minmax(0,1fr)_36px_52px_44px] items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-gray-50"
+            >
+              <span className="truncate font-mono text-bio-gene">
+                {direction === 'self' ? edge.target : edge.partner}
+              </span>
+              <span className={`rounded px-1.5 py-0.5 text-center text-[10px] ${effectClasses(edge.effect)}`}>
+                {effectLabel(edge.effect)}
+              </span>
+              <span className="font-mono text-gray-600">{formatSigned(edge.log2fc)}</span>
+              <span className="font-mono text-gray-400">{formatStd(edge.log2fcStd)}</span>
+            </button>
+          ))}
+          {edges.length > visibleEdges.length && (
+            <div className="px-1 text-[11px] text-gray-400">
+              +{edges.length - visibleEdges.length} more
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
