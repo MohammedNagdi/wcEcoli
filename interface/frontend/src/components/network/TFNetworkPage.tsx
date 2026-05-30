@@ -6,6 +6,7 @@ import { getTFNetwork } from '../../api/client'
 import type { TFNetwork, TFNode } from '../../types'
 import { SearchInput } from '../common/SearchInput'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
+import { regulationEffect } from '../../utils/regulation'
 
 const LAYOUT = {
   name: 'cose',
@@ -203,7 +204,7 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
             data: { id: targetId, label: t.target, type: 'target' },
           })
         }
-        const edgeType = t.type.toLowerCase().includes('activat') ? 'activation' : 'repression'
+        const edgeType = regulationEffect(t.log2fc, t.type)
         const absLfc = Math.abs(t.log2fc)
         const edgeWidth = Math.max(0.5, Math.min(4, 0.5 + absLfc * 0.6))
         edges.push({
@@ -228,9 +229,9 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     for (const tf of network.tfs) {
       if (tf.target_count < minTargets) continue
       for (const target of tf.targets) {
-        if (target.type.toLowerCase().includes('activat')) {
+        if (regulationEffect(target.log2fc, target.type) === 'activation') {
           activation += 1
-        } else {
+        } else if (regulationEffect(target.log2fc, target.type) === 'repression') {
           repression += 1
         }
       }
@@ -436,7 +437,7 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
               .slice()
               .sort((a, b) => Math.abs(b.log2fc) - Math.abs(a.log2fc))
               .map((t, i) => {
-                const isAct = t.type.toLowerCase().includes('activat')
+                const isAct = regulationEffect(t.log2fc, t.type) === 'activation'
                 return (
                   <div key={i} className="flex items-center gap-2 text-sm py-0.5">
                     <Link

@@ -17,6 +17,7 @@ import {
 import Dagre from '@dagrejs/dagre'
 import '@xyflow/react/dist/style.css'
 import { CATEGORY_FILL } from '../../utils/genome'
+import { regulationEffect } from '../../utils/regulation'
 
 interface RegEdge {
   symbol: string
@@ -39,12 +40,9 @@ const REGULATOR_BG   = '#475569'
 const TARGET_BG      = '#64748b'
 
 function edgeColor(log2fc: number, type: string) {
-  const t = type.toLowerCase()
-  if (t.includes('activat')) return COLOR_ACTIVATE
-  if (t.includes('repres') || t.includes('inhibit')) return COLOR_REPRESS
-  if (t.includes('dual')) return COLOR_NEUTRAL
-  if (log2fc > 0) return COLOR_ACTIVATE
-  if (log2fc < 0) return COLOR_REPRESS
+  const effect = regulationEffect(log2fc, type)
+  if (effect === 'activation') return COLOR_ACTIVATE
+  if (effect === 'repression') return COLOR_REPRESS
   return COLOR_NEUTRAL
 }
 
