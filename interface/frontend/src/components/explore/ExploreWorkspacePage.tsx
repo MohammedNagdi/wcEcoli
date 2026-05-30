@@ -43,28 +43,6 @@ export function ExploreWorkspacePage() {
         <ContextChip label="Gene" value={selectedGene} onClear={() => setSelectedGene(null)} mono />
         <ContextChip label="Category" value={selectedCategory} onClear={() => setSelectedCategory(null)} />
         <ContextChip label="Condition" value={selectedCondition} onClear={() => setSelectedCondition(null)} />
-        <div className="ml-auto flex items-center gap-2">
-          <Link
-            to="/network"
-            className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-300 hover:text-gray-900"
-          >
-            Network
-          </Link>
-          <Link
-            to="/pathways"
-            className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-300 hover:text-gray-900"
-          >
-            Pathways
-          </Link>
-          {selectedGene && (
-            <Link
-              to={'/genome?gene=' + encodeURIComponent(selectedGene)}
-              className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-300 hover:text-gray-900"
-            >
-              Genome Map
-            </Link>
-          )}
-        </div>
       </div>
 
       <div

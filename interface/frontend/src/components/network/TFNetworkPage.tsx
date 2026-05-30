@@ -521,6 +521,10 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     }
   }, [networkMode])
 
+  const graphKey = networkMode === 'full'
+    ? 'full'
+    : `${networkMode}-${selectedGene ?? 'none'}`
+
   const graphStats = useMemo(() => {
     const nodes = graphElements.filter((element) => element.data && !('source' in element.data))
     const nodeData = nodes.map((node) => node.data as Partial<NetworkNodeData>)
@@ -659,6 +663,16 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
             placeholder="Highlight TF or gene..."
             className="w-64 flex-shrink-0"
           />
+          {selectedGene && (
+            <button
+              type="button"
+              onClick={() => setSelectedGene(null)}
+              className="inline-flex items-center gap-1 rounded-md border border-brand-100 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
+            >
+              <span className="font-mono">{selectedGene}</span>
+              <span className="text-brand-400">x</span>
+            </button>
+          )}
           <div className="flex overflow-hidden rounded-md border border-gray-200 text-xs">
             {(['all', 'activation', 'repression'] as const).map((opt) => {
               const count = opt === 'all' ? edgeCounts.all : edgeCounts[opt]
@@ -729,10 +743,16 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
           </span>
         </div>
 
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span className="font-medium">Static reconstruction network.</span>
+          <span>Edges come from <span className="font-mono">reconstruction/ecoli/flat/fold_changes.tsv</span>.</span>
+          <span className="text-amber-700">Simulation overlays are paused until the experiment recipe schema stabilizes.</span>
+        </div>
+
         <div className="relative flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white">
           {graphElements.length > 0 && (
             <CytoscapeComponent
-              key={`${networkMode}-${selectedGene ?? 'none'}`}
+              key={graphKey}
               elements={graphElements}
               layout={graphLayout as any}
               stylesheet={STYLESHEET as any}
