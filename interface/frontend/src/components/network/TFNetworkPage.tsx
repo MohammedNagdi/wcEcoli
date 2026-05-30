@@ -227,7 +227,7 @@ interface TFNetworkPageProps {
 export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   const { selectedGene, setSelectedGene } = useUrlWorkspaceState()
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialMode = networkViewModeFromParam(searchParams.get('mode')) ?? (selectedGene ? 'neighborhood' : 'full')
+  const initialMode = networkViewModeFromParam(searchParams.get('mode')) ?? 'full'
   const [network, setNetwork] = useState<TFNetwork | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -258,11 +258,6 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     const urlMode = networkViewModeFromParam(searchParams.get('mode'))
     if (urlMode && urlMode !== networkMode) setNetworkMode(urlMode)
   }, [networkMode, searchParams])
-
-  useEffect(() => {
-    if (!selectedGene || searchParams.has('mode')) return
-    setNetworkMode('neighborhood')
-  }, [searchParams, selectedGene])
 
   const setMode = useCallback((mode: NetworkViewMode) => {
     setNetworkMode(mode)
@@ -606,7 +601,6 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     }
     cy.on('tap', 'node', (evt: EventObject) => {
       const symbol = evt.target.data('label') as string
-      if (networkMode === 'full') setMode('neighborhood')
       setSelectedGene(symbol)
     })
     cy.on('tap', (evt: EventObject) => {
