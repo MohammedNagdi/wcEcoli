@@ -250,7 +250,8 @@ export function ResultsPage() {
   const grouped = groupChannels(channels)
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="h-full overflow-y-auto pr-1">
+      <div className="max-w-6xl mx-auto pb-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -407,6 +408,7 @@ export function ResultsPage() {
           </table>
         </div>
       )}
+      </div>
     </div>
   )
 }

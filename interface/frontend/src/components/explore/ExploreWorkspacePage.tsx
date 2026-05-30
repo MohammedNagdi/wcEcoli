@@ -197,11 +197,7 @@ function SelectedGeneSummary({
           )}
         </div>
 
-        <div className="mt-2 grid gap-2 text-sm">
-          {gene.monomer_id && (
-            <ProductRow label="Protein" value={gene.monomer_id} detail={gene.monomer_name ?? undefined} />
-          )}
-        </div>
+        <ModelStateSection gene={gene} pathways={aaPathways} />
 
         <PathwayContext gene={gene} pathways={aaPathways} />
 
@@ -241,22 +237,7 @@ interface PathwayMatch {
 }
 
 function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPathway[] }) {
-  const matches = useMemo(() => {
-    const identifiers = geneIdentifiers(gene)
-    if (identifiers.size === 0) return []
-
-    return pathways.flatMap((pathway): PathwayMatch[] => {
-      const forward = parseList(pathway.enzymes).some((enzyme) => identifiers.has(normalizeId(enzyme)))
-      const reverse = parseList(pathway.reverse_enzymes).some((enzyme) => identifiers.has(normalizeId(enzyme)))
-      const annotated = parseAnnotatedGenes(pathway.notes).some((symbol) => normalizeId(symbol) === normalizeId(gene.symbol))
-
-      if (!forward && !reverse && !annotated) return []
-      return [{
-        pathway,
-        role: forward && reverse ? 'Forward/reverse' : forward ? 'Forward' : reverse ? 'Reverse' : 'Annotated',
-      }]
-    })
-  }, [gene, pathways])
+  const matches = useMemo(() => pathwayMatchesForGene(gene, pathways), [gene, pathways])
 
   if (matches.length === 0) return null
 
@@ -295,6 +276,95 @@ function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPath
   )
 }
 
+function ModelStateSection({ gene, pathways }: { gene: GeneDetail; pathways: AAPathway[] }) {
+  const rnaIds = parseJsonList(gene.rna_ids)
+  const complexIds = parseJsonList(gene.complex_ids)
+  const pathwayMetabolites = useMemo(() => {
+    const values = pathwayMatchesForGene(gene, pathways).flatMap(({ pathway }) => [
+      pathway.amino_acid,
+      ...parseObjectKeys(pathway.upstream_aas),
+      ...parseObjectKeys(pathway.downstream_aas),
+    ])
+    return uniqueList(values).slice(0, 8)
+  }, [gene, pathways])
+
+  const hasAny = rnaIds.length > 0 || gene.monomer_id || complexIds.length > 0 || pathwayMetabolites.length > 0
+  if (!hasAny) return null
+
+  return (
+    <section className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Model state IDs</h3>
+      <div className="grid gap-2 text-xs">
+        {rnaIds.length > 0 && <StateIdRow label="mRNA" ids={rnaIds} tone="blue" />}
+        {gene.monomer_id && (
+          <StateIdRow
+            label="Protein"
+            ids={[gene.monomer_id]}
+            tone="emerald"
+            detail={gene.monomer_name ?? undefined}
+          />
+        )}
+        {complexIds.length > 0 && <StateIdRow label="Complex" ids={complexIds} tone="amber" />}
+        {pathwayMetabolites.length > 0 && (
+          <StateIdRow label="Pathway metabolites" ids={pathwayMetabolites} tone="violet" />
+        )}
+      </div>
+    </section>
+  )
+}
+
+function StateIdRow({
+  label,
+  ids,
+  tone,
+  detail,
+}: {
+  label: string
+  ids: string[]
+  tone: 'blue' | 'emerald' | 'amber' | 'violet'
+  detail?: string
+}) {
+  const toneClass = {
+    blue: 'bg-blue-50 text-blue-700 border-blue-100',
+    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    amber: 'bg-amber-50 text-amber-700 border-amber-100',
+    violet: 'bg-violet-50 text-violet-700 border-violet-100',
+  }[tone]
+
+  return (
+    <div className="grid grid-cols-[88px_1fr] gap-2">
+      <span className="text-gray-400">{label}</span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap gap-1">
+          {ids.map((id) => (
+            <span key={id} className={'rounded border px-1.5 py-0.5 font-mono ' + toneClass}>
+              {id}
+            </span>
+          ))}
+        </div>
+        {detail && <p className="mt-0.5 text-gray-400">{detail}</p>}
+      </div>
+    </div>
+  )
+}
+
+function pathwayMatchesForGene(gene: GeneDetail, pathways: AAPathway[]): PathwayMatch[] {
+  const identifiers = geneIdentifiers(gene)
+  if (identifiers.size === 0) return []
+
+  return pathways.flatMap((pathway): PathwayMatch[] => {
+    const forward = parseList(pathway.enzymes).some((enzyme) => identifiers.has(normalizeId(enzyme)))
+    const reverse = parseList(pathway.reverse_enzymes).some((enzyme) => identifiers.has(normalizeId(enzyme)))
+    const annotated = parseAnnotatedGenes(pathway.notes).some((symbol) => normalizeId(symbol) === normalizeId(gene.symbol))
+
+    if (!forward && !reverse && !annotated) return []
+    return [{
+      pathway,
+      role: forward && reverse ? 'Forward/reverse' : forward ? 'Forward' : reverse ? 'Reverse' : 'Annotated',
+    }]
+  })
+}
+
 function geneIdentifiers(gene: GeneDetail): Set<string> {
   const identifiers = new Set<string>([normalizeId(gene.symbol)])
   if (gene.monomer_id) identifiers.add(normalizeId(gene.monomer_id))
@@ -325,6 +395,23 @@ function parseList(value: string): string[] {
     .split(/[,;]/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0 && !['none', 'nan', 'null', '{}'].includes(item.toLowerCase()))
+}
+
+function parseObjectKeys(value: string): string[] {
+  if (!value || value.trim() === '{}') return []
+  try {
+    const parsed = JSON.parse(value)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.keys(parsed)
+    }
+  } catch {
+    return []
+  }
+  return []
+}
+
+function uniqueList(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
 }
 
 function parseAnnotatedGenes(notes: string): string[] {
@@ -391,18 +478,6 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
     <div>
       <p className="mb-0.5 text-xs uppercase tracking-wide text-gray-400">{label}</p>
       {children}
-    </div>
-  )
-}
-
-function ProductRow({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return (
-    <div>
-      <p className="text-xs uppercase tracking-wide text-gray-400">{label}</p>
-      <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-xs text-emerald-700">
-        {value}
-      </span>
-      {detail && <p className="mt-0.5 text-xs text-gray-400">{detail}</p>}
     </div>
   )
 }
