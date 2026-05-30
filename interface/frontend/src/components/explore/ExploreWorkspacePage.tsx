@@ -1,13 +1,14 @@
 import { Link } from 'react-router-dom'
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import { GeneCatalogPage } from '../genes/GeneCatalogPage'
 import { GenomeContextRail } from '../genes/GenomeContextRail'
 import { TFNetworkMini } from '../genes/TFNetworkMini'
 import { CategoryBadge, DirectionBadge } from '../common/Badge'
+import { getAAPathways } from '../../api/client'
 import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
-import type { GeneDetail } from '../../types'
+import type { AAPathway, GeneDetail } from '../../types'
 
 export function ExploreWorkspacePage() {
   const {
@@ -19,10 +20,25 @@ export function ExploreWorkspacePage() {
     setSelectedCondition,
   } = useUrlWorkspaceState()
   const { gene: selectedGeneDetail, loading: detailLoading } = useGeneDetail(selectedGene)
+  const [aaPathways, setAAPathways] = useState<AAPathway[]>([])
   const [leftPct, setLeftPct] = useState(57)
   const [isDragging, setIsDragging] = useState(false)
   const dragging = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let mounted = true
+    getAAPathways()
+      .then((pathways) => {
+        if (mounted) setAAPathways(pathways)
+      })
+      .catch(() => {
+        if (mounted) setAAPathways([])
+      })
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   const stopDragging = () => {
     dragging.current = false
@@ -85,6 +101,7 @@ export function ExploreWorkspacePage() {
         >
           <SelectedGeneSummary
             gene={selectedGeneDetail}
+            aaPathways={aaPathways}
             loading={detailLoading}
             selectedGene={selectedGene}
             onSelectGene={(symbol) => setSelectedGene(symbol, { replace: false })}
@@ -97,11 +114,13 @@ export function ExploreWorkspacePage() {
 
 function SelectedGeneSummary({
   gene,
+  aaPathways,
   loading,
   selectedGene,
   onSelectGene,
 }: {
   gene: GeneDetail | null
+  aaPathways: AAPathway[]
   loading: boolean
   selectedGene: string | null
   onSelectGene: (symbol: string) => void
@@ -184,6 +203,8 @@ function SelectedGeneSummary({
           )}
         </div>
 
+        <PathwayContext gene={gene} pathways={aaPathways} />
+
         {gene.left_end_pos != null && (
           <div className="mt-2">
             <GenomeContextRail
@@ -212,6 +233,122 @@ function SelectedGeneSummary({
       </div>
     </div>
   )
+}
+
+interface PathwayMatch {
+  pathway: AAPathway
+  role: 'Forward' | 'Reverse' | 'Forward/reverse' | 'Annotated'
+}
+
+function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPathway[] }) {
+  const matches = useMemo(() => {
+    const identifiers = geneIdentifiers(gene)
+    if (identifiers.size === 0) return []
+
+    return pathways.flatMap((pathway): PathwayMatch[] => {
+      const forward = parseList(pathway.enzymes).some((enzyme) => identifiers.has(normalizeId(enzyme)))
+      const reverse = parseList(pathway.reverse_enzymes).some((enzyme) => identifiers.has(normalizeId(enzyme)))
+      const annotated = parseAnnotatedGenes(pathway.notes).some((symbol) => normalizeId(symbol) === normalizeId(gene.symbol))
+
+      if (!forward && !reverse && !annotated) return []
+      return [{
+        pathway,
+        role: forward && reverse ? 'Forward/reverse' : forward ? 'Forward' : reverse ? 'Reverse' : 'Annotated',
+      }]
+    })
+  }, [gene, pathways])
+
+  if (matches.length === 0) return null
+
+  return (
+    <section className="mt-3 rounded-lg border border-amber-100 bg-amber-50/50 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-900">Pathway context</h3>
+        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-amber-700">
+          {matches.length} match{matches.length === 1 ? '' : 'es'}
+        </span>
+      </div>
+      <div className="grid gap-2">
+        {matches.slice(0, 4).map(({ pathway, role }) => (
+          <div key={pathway.amino_acid + role} className="rounded-md border border-amber-100 bg-white px-2.5 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-sm font-semibold text-gray-900">{pathway.amino_acid}</span>
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                {role}
+              </span>
+            </div>
+            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-500">
+              <span>
+                kcat <span className="font-mono text-gray-700">{formatKineticValue(pathway.kcat, 's^-1')}</span>
+              </span>
+              <span>
+                Ki <span className="font-mono text-gray-700">{formatKiRange(pathway)}</span>
+              </span>
+            </div>
+            {pathway.notes && (
+              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{pathway.notes}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function geneIdentifiers(gene: GeneDetail): Set<string> {
+  const identifiers = new Set<string>([normalizeId(gene.symbol)])
+  if (gene.monomer_id) identifiers.add(normalizeId(gene.monomer_id))
+
+  for (const complexId of parseJsonList(gene.complex_ids)) {
+    identifiers.add(normalizeId(complexId))
+  }
+
+  return identifiers
+}
+
+function parseJsonList(value: string): string[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    if (Array.isArray(parsed)) {
+      return parsed.flatMap((item) => (typeof item === 'string' ? [item] : []))
+    }
+  } catch {
+    // Fall through to tolerant parsing for legacy flat-file values.
+  }
+  return parseList(value)
+}
+
+function parseList(value: string): string[] {
+  return value
+    .replace(/[\[\]"']/g, '')
+    .split(/[,;]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && !['none', 'nan', 'null', '{}'].includes(item.toLowerCase()))
+}
+
+function parseAnnotatedGenes(notes: string): string[] {
+  return Array.from(notes.matchAll(/\(([^)]+)\)/g)).flatMap((match) =>
+    match[1]
+      .split(/[,;]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )
+}
+
+function normalizeId(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function formatKineticValue(value: number | null, unit: string): string {
+  if (value == null) return 'n/a'
+  return `${value.toLocaleString()} ${unit}`
+}
+
+function formatKiRange(pathway: AAPathway): string {
+  if (pathway.ki_lower == null && pathway.ki_upper == null) return 'n/a'
+  if (pathway.ki_lower === pathway.ki_upper) return `${pathway.ki_lower} mM`
+  return `${pathway.ki_lower ?? 'n/a'}-${pathway.ki_upper ?? 'n/a'} mM`
 }
 
 function ContextChip({

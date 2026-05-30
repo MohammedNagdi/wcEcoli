@@ -17,7 +17,6 @@ interface NavGroup {
 const ICON_EXPLORE = 'M10 2v2m0 12v2M4 10h2m8 0h2m-1.5-5.5L13 6m-5.5 8.5L6 16m9.5.5L14 15M7.5 4.5L6 6m8 8l-1.5 1.5'
 const ICON_NETWORK = 'M5 5h2v2H5zm6 6h2v2h-2zm6-6h2v2h-2zM7 6h4m2 0h4M6 7v4m8 0v-4m-3 4l-2 2'
 const ICON_GENOME = 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 3v2m0 10v2m7-7h-2M5 12H3'
-const ICON_PATHWAYS = 'M4 4h4v4H4zm8 0h4v4h-4zm-4 8h4v4H8zM6 8v2h2m4-2v2h-2m-2 4v2'
 const ICON_EXPERIMENTS = 'M9 3h2v5l3 4v4a1 1 0 01-1 1H7a1 1 0 01-1-1v-4l3-4V3zm-2 5h6m-5 4h4'
 const ICON_RESULTS = 'M4 18h16M4 14l4-4 3 2 5-6 4 4'
 const ICON_ML = 'M12 4a3 3 0 100 6 3 3 0 000-6zm-5 9a5 5 0 0110 0M4 17h16M8 13v4m8-4v4'
@@ -35,7 +34,6 @@ const NAV_GROUPS: NavGroup[] = [
       { path: '/', label: 'Workspace', icon: ICON_EXPLORE },
       { path: '/genome', label: 'Genome Map', icon: ICON_GENOME },
       { path: '/network', label: 'Network', icon: ICON_NETWORK },
-      { path: '/pathways', label: 'Pathways', icon: ICON_PATHWAYS },
     ],
   },
   {
@@ -50,8 +48,14 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Analyze',
     items: [
       { path: '/results', label: 'Results', icon: ICON_RESULTS },
+    ],
+  },
+  {
+    id: 'applications',
+    label: 'Applications',
+    items: [
+      { path: '/design', label: 'Genome Design', icon: ICON_DESIGN },
       { path: '/ml', label: 'ML', icon: ICON_ML },
-      { path: '/design', label: 'Design', icon: ICON_DESIGN },
     ],
   },
 ]

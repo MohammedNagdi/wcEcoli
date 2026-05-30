@@ -81,7 +81,7 @@ export function CommandSearch({ open, onClose }: Props) {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search genes, proteins, pathways..."
+              placeholder="Search genes, proteins, or IDs..."
               className="flex-1 text-sm outline-none placeholder-gray-400"
               autoComplete="off"
               spellCheck={false}
