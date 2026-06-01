@@ -884,7 +884,13 @@ def _backup_user_tables(db_path: Path) -> dict[str, list[tuple]]:
     """
     import sqlite3
 
-    USER_TABLES = ["experiments", "simulation_jobs", "simulation_results", "user_timelines"]
+    USER_TABLES = [
+        "experiments",
+        "simulation_jobs",
+        "simulation_results",
+        "user_timelines",
+        "builder_section_drafts",
+    ]
     backup: dict[str, list[tuple]] = {}
 
     if not db_path.exists():

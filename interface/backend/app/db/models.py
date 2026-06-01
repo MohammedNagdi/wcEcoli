@@ -88,6 +88,20 @@ class UserTimeline(SQLModel, table=True):
     created_at: str = ""                         # ISO timestamp
 
 
+class BuilderSectionDraft(SQLModel, table=True):
+    __tablename__ = "builder_section_drafts"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    section: str = Field(index=True)             # media | mediaRecipe | condition | tfCondition | timeline
+    name: str = Field(index=True)                # user-owned draft label within a section
+    payload: str = "{}"                          # JSON snapshot of the section state
+    status: str = "draft"                        # draft | published
+    created_at: str = ""                         # ISO timestamp
+    updated_at: str = ""                         # ISO timestamp
+    published_at: str = ""                       # ISO timestamp
+    published_name: str = ""                     # canonical name after publish
+
+
 class Variant(SQLModel, table=True):
     __tablename__ = "variants"
 

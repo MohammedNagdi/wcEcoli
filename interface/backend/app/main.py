@@ -255,6 +255,8 @@ from app.routers.molecules import router as molecules_router  # noqa: E402
 from app.routers.ml import router as ml_router  # noqa: E402
 from app.routers.design import router as design_router  # noqa: E402
 from app.routers.media_recipes import router as media_recipes_router  # noqa: E402
+from app.routers.condition_catalog import router as condition_catalog_router  # noqa: E402
+from app.routers.builder_drafts import router as builder_drafts_router  # noqa: E402
 from app.routers.user_timelines import router as user_timelines_router  # noqa: E402
 
 app.include_router(genes_router)
@@ -266,4 +268,6 @@ app.include_router(molecules_router)
 app.include_router(ml_router)
 app.include_router(design_router)
 app.include_router(media_recipes_router)
+app.include_router(condition_catalog_router)
+app.include_router(builder_drafts_router)
 app.include_router(user_timelines_router)
