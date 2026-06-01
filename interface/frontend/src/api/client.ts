@@ -6,6 +6,7 @@
 import type {
   Gene, GeneDetail, GeneSearchResult, CategoryCount,
   TFNetwork, TFNode, AAPathway, Condition, Timeline, MediaRecipe, UserTimeline, Variant,
+  BuilderDraft, BuilderDraftCollection, BuilderDraftSection,
   VariantDetail, Experiment, ExperimentCreate,
   BatchRequest, BatchResponse, BatchSummary, BatchDetail, BatchRunResponse,
   SimulationJob, SimulationResult, RunJobRequest, RunResponse, ResultsResponse,
@@ -15,7 +16,7 @@ import type {
   TrainRequest, TrainResponse, DataSummary,
   DesignOverview, EssentialityStats,
   ComparisonResponse, FailedJobSummary,
-  WildtypeDelta,
+  WildtypeDelta, ConditionCatalog,
 } from '../types'
 
 const BASE = '/api'
@@ -67,10 +68,6 @@ export async function searchGenes(q: string, limit = 20): Promise<Gene[]> {
 
 export async function getGene(symbol: string): Promise<GeneDetail> {
   return fetchJSON(`/genes/${encodeURIComponent(symbol)}`)
-}
-
-export async function getGeneNeighbors(symbol: string, window = 5000): Promise<Gene[]> {
-  return fetchJSON(`/genes/neighbors?symbol=${encodeURIComponent(symbol)}&window=${window}`)
 }
 
 export async function getCategories(): Promise<CategoryCount[]> {
@@ -133,6 +130,10 @@ export async function getMediaRecipes(): Promise<MediaRecipe[]> {
   return fetchJSON('/media-recipes')
 }
 
+export async function getConditionCatalog(): Promise<ConditionCatalog> {
+  return fetchJSON('/condition-catalog')
+}
+
 export async function getUserTimelines(): Promise<UserTimeline[]> {
   return fetchJSON('/user-timelines')
 }
@@ -142,6 +143,44 @@ export async function saveUserTimeline(name: string, definition: string): Promis
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, definition }),
+  })
+}
+
+export async function getBuilderDrafts(): Promise<BuilderDraftCollection> {
+  return fetchJSON('/builder-drafts')
+}
+
+export async function createBuilderDraft(
+  section: BuilderDraftSection,
+  name: string,
+  payload: Record<string, unknown>,
+): Promise<BuilderDraft> {
+  return fetchJSON(`/builder-drafts/${section}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, payload }),
+  })
+}
+
+export async function updateBuilderDraft(
+  section: BuilderDraftSection,
+  draftId: number,
+  name: string,
+  payload: Record<string, unknown>,
+): Promise<BuilderDraft> {
+  return fetchJSON(`/builder-drafts/${section}/${draftId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, payload }),
+  })
+}
+
+export async function publishBuilderDraft(
+  section: BuilderDraftSection,
+  draftId: number,
+): Promise<BuilderDraft> {
+  return fetchJSON(`/builder-drafts/${section}/${draftId}/publish`, {
+    method: 'POST',
   })
 }
 
