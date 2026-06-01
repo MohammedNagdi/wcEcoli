@@ -101,9 +101,22 @@ interface Props {
   conditions: Condition[]
   onChange: (timelineStr: string) => void
   maxSec?: number
+  initialDefinition?: string
+  showLibrarySave?: boolean
+  entryNounSingular?: string
+  entryNounPlural?: string
 }
 
-export function TimelineComposer({ mediaRecipes, conditions, onChange, maxSec = 10800 }: Props) {
+export function TimelineComposer({
+  mediaRecipes,
+  conditions,
+  onChange,
+  maxSec = 10800,
+  initialDefinition = '',
+  showLibrarySave = true,
+  entryNounSingular = 'timeline',
+  entryNounPlural = 'timelines',
+}: Props) {
   const [selectedMediaId, setSelectedMediaId] = useState('')
   const [events, setEvents] = useState<TLEvent[]>([])
   const [hoverPct, setHoverPct] = useState<number | null>(null)
@@ -181,11 +194,20 @@ export function TimelineComposer({ mediaRecipes, conditions, onChange, maxSec = 
 
   useEffect(() => {
     if (mediaRecipes.length > 0 && events.length === 0) {
+      const seededEvents = initialDefinition
+        ? parseDefinition(initialDefinition, knownMediaIds, maxSec)
+        : []
+      if (seededEvents.length > 0) {
+        setSelectedMediaId(seededEvents[0].mediaId)
+        mutate(seededEvents)
+        return
+      }
+
       const initialMediaId = mediaRecipes.find(r => r.media_id === 'minimal')?.media_id || mediaRecipes[0].media_id
       setSelectedMediaId(initialMediaId)
       mutate([{ id: uid(), timeSec: 0, mediaId: initialMediaId }])
     }
-  }, [mediaRecipes, events.length, mutate])
+  }, [mediaRecipes, events.length, initialDefinition, knownMediaIds, maxSec, mutate])
 
   const timeFromPointer = (clientX: number) => {
     if (!barRef.current) return 0
@@ -345,14 +367,14 @@ export function TimelineComposer({ mediaRecipes, conditions, onChange, maxSec = 
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
+      <div className={`grid gap-3 ${showLibrarySave ? 'md:grid-cols-[1fr_1fr]' : ''}`}>
         <div className="rounded-lg border border-gray-200">
           <button
             type="button"
             onClick={() => setPresetOpen(o => !o)}
             className="flex w-full items-center justify-between gap-3 bg-gray-50 px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
           >
-            <span>Load preset timeline</span>
+            <span>{`Load preset ${entryNounSingular}`}</span>
             <span className={`shrink-0 transition-transform ${presetOpen ? 'rotate-180' : ''}`}>⌄</span>
           </button>
           {loadedPreset && (
@@ -396,7 +418,7 @@ export function TimelineComposer({ mediaRecipes, conditions, onChange, maxSec = 
                   </optgroup>
                 )}
                 {!!userTimelines.length && (
-                  <optgroup label="My saved timelines">
+                  <optgroup label={`My saved ${entryNounPlural}`}>
                     {userTimelines.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
                   </optgroup>
                 )}
@@ -414,35 +436,37 @@ export function TimelineComposer({ mediaRecipes, conditions, onChange, maxSec = 
           )}
         </div>
 
-        <div className="rounded-lg border border-gray-200 px-4 py-3">
-          <p className="mb-2 text-xs font-medium text-gray-600">Save this timeline for later</p>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={timelineName}
-              onChange={e => { setTimelineName(e.target.value); setSaveStatus('idle'); setSaveError('') }}
-              placeholder="e.g. carbon shift test"
-              className="min-w-0 flex-1 rounded border border-gray-200 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400"
-            />
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={!timelineName.trim() || saveStatus === 'saving'}
-              className="whitespace-nowrap rounded bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {saveStatus === 'saving' ? 'Saving...' : 'Save timeline'}
-            </button>
+        {showLibrarySave && (
+          <div className="rounded-lg border border-gray-200 px-4 py-3">
+            <p className="mb-2 text-xs font-medium text-gray-600">{`Save this ${entryNounSingular} for later`}</p>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={timelineName}
+                onChange={e => { setTimelineName(e.target.value); setSaveStatus('idle'); setSaveError('') }}
+                placeholder="e.g. carbon shift test"
+                className="min-w-0 flex-1 rounded border border-gray-200 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400"
+              />
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!timelineName.trim() || saveStatus === 'saving'}
+                className="whitespace-nowrap rounded bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {saveStatus === 'saving' ? 'Saving...' : `Save ${entryNounSingular}`}
+              </button>
+            </div>
+            {saveStatus === 'saved' && <p className="mt-2 text-xs text-emerald-600">Saved. It is now available in presets.</p>}
+            {saveStatus === 'error' && <p className="mt-2 text-xs text-red-500">{saveError}</p>}
           </div>
-          {saveStatus === 'saved' && <p className="mt-2 text-xs text-emerald-600">Saved. It is now available in presets.</p>}
-          {saveStatus === 'error' && <p className="mt-2 text-xs text-red-500">{saveError}</p>}
-        </div>
+        )}
       </div>
 
       <div className="rounded-lg border border-gray-200 px-4 py-3">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-medium text-gray-600">Media vials</p>
-            <p className="text-xs text-gray-400">Search or pick a common vial, then drag it onto the timeline or click the bar.</p>
+            <p className="text-xs text-gray-400">{`Search or pick a common vial, then drag it onto the ${entryNounSingular} or click the bar.`}</p>
           </div>
           <span className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-500">
             {mediaRecipes.length} vials
@@ -598,7 +622,7 @@ export function TimelineComposer({ mediaRecipes, conditions, onChange, maxSec = 
               onPointerUp={finishMarkerDrag}
               onPointerCancel={finishMarkerDrag}
               className={`absolute top-2 z-10 flex max-w-[150px] -translate-x-1/2 touch-none items-center gap-1 rounded-full border-2 border-white px-2 py-1 text-[11px] font-medium text-white shadow transition-transform ${ev.timeSec === 0 ? 'cursor-not-allowed opacity-90' : isDragging ? 'scale-110 cursor-grabbing ring-2 ring-white/70' : 'cursor-grab hover:scale-105 active:cursor-grabbing'}`}
-              title={ev.timeSec === 0 ? 'Starting vial is fixed at 0s' : 'Drag left or right to adjust shift time. Crossing another shift will reorder the timeline.'}
+              title={ev.timeSec === 0 ? 'Starting vial is fixed at 0s' : `Drag left or right to adjust shift time. Crossing another shift will reorder the ${entryNounSingular}.`}
               style={{ left: `${(ev.timeSec / maxSec) * 100}%`, backgroundColor: HEX_COLORS[colorIdx(ev.mediaId)] }}
             >
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white" />
