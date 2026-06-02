@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 
 WORKDIR /app
+ENV PYTHONPATH=/app
 
 # Install Docker CLI (needed by sim_worker to launch simulation containers)
 RUN apt-get update \
@@ -19,7 +20,7 @@ RUN apt-get update \
 COPY pyproject.toml .
 RUN pip install --no-cache-dir hatchling \
     && mkdir -p app && touch app/__init__.py \
-    && pip install --no-cache-dir . \
+    && pip install --no-cache-dir ".[dev]" \
     && rm -rf app
 
 COPY app/ app/
