@@ -1,16 +1,497 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
-  getVariants, getVariantDetail, getConditions, getTimelines,
+  getVariants, getVariantDetail, getConditions, getMediaRecipes,
   createExperiment, searchGenes, getGene,
 } from '../../api/client'
 import type {
-  Variant, VariantDetail, Condition, Timeline, Gene, GeneDetail, ExperimentCreate,
+  Variant, VariantDetail, Condition, MediaRecipe, Gene, GeneDetail, ExperimentCreate,
 } from '../../types'
 import { SearchInput } from '../common/SearchInput'
-import { HelpTip, HelpNote } from '../common/HelpTip'
+import { HelpTip } from '../common/HelpTip'
 import { variantLabel } from '../../utils/labels'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
+import { TimelineComposer } from './TimelineComposer'
+
+type TimelineBehavior = 'composer' | 'internal_override' | 'internal_conditional_override'
+
+type IndexGuide = {
+  current: string | null
+  invalid: boolean
+  items: string[]
+}
+
+const AMINO_ACID_INDEX_LABELS = [
+  'L-ALPHA-ALANINE',
+  'ARG',
+  'ASN',
+  'L-ASPARTATE',
+  'CYS',
+  'GLT',
+  'GLN',
+  'GLY',
+  'HIS',
+  'ILE',
+  'LEU',
+  'LYS',
+  'MET',
+  'PHE',
+  'PRO',
+  'SER',
+  'THR',
+  'TRP',
+  'TYR',
+  'L-SELENOCYSTEINE',
+  'VAL',
+]
+
+const REMOVE_AAS_SHIFT_SINGLE_AAS = AMINO_ACID_INDEX_LABELS.filter(
+  (aminoAcid) => aminoAcid !== 'CYS' && aminoAcid !== 'L-SELENOCYSTEINE',
+)
+
+const PPGPP_FACTORS = [0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2]
+const PPGPP_CONDITION_INDICES = [0, 2]
+const NEW_GENE_EXPRESSION_FACTORS = [0, 7, 8, 9, 10]
+const NEW_GENE_TRANSLATION_EFFICIENCIES = [10, 5, 1, 0.1, 0]
+
+function getMinValidIndex(variantDetail: VariantDetail | null): number | undefined {
+  return variantDetail?.parameter_hints.min_valid_index
+    ?? variantDetail?.parameter_hints.index_range?.[0]
+}
+
+function getMaxValidIndex(variantDetail: VariantDetail | null): number | undefined {
+  return variantDetail?.parameter_hints.max_valid_index
+    ?? variantDetail?.parameter_hints.index_range?.[1]
+}
+
+function formatConditionLabel(condition: Condition | undefined, index: number): string {
+  if (!condition) return `${index}: condition index ${index}`
+  if (condition.nutrients) return `${index}: ${condition.name} (${condition.nutrients})`
+  return `${index}: ${condition.name}`
+}
+
+function describeAminoAcidIndex(variantType: string, index: number): string | null {
+  const aminoAcid = AMINO_ACID_INDEX_LABELS[index]
+  if (!aminoAcid) return null
+
+  switch (variantType) {
+    case 'add_one_aa':
+      return index === 19
+        ? `${index}: control (${aminoAcid} is already present in minimal media)`
+        : `${index}: add ${aminoAcid} to minimal media`
+    case 'remove_one_aa':
+      return index === 19
+        ? `${index}: control (${aminoAcid} must remain available in rich media)`
+        : `${index}: remove ${aminoAcid} from rich media`
+    case 'add_one_aa_shift':
+      return index === 19
+        ? `${index}: control (${aminoAcid} is already present before and after the shift)`
+        : `${index}: shift from minimal media to minimal media plus ${aminoAcid}`
+    case 'remove_one_aa_shift':
+      return index === 19
+        ? `${index}: control (${aminoAcid} must remain available in rich media)`
+        : `${index}: shift from rich media to rich media without ${aminoAcid}`
+    default:
+      return null
+  }
+}
+
+function findMatchingIndexOption(index: number, items: string[]): string | null {
+  for (const item of items) {
+    let match = item.match(/^(\-?\d+)\s*:\s*(.+)$/)
+    if (match) {
+      const exactIndex = Number(match[1])
+      if (index === exactIndex) {
+        return item
+      }
+      continue
+    }
+
+    match = item.match(/^(\-?\d+)\s*-\s*(\-?\d+)\s*:\s*(.+)$/)
+    if (match) {
+      const start = Number(match[1])
+      const end = Number(match[2])
+      if (index >= start && index <= end) {
+        return `${index}: ${match[3]}`
+      }
+      continue
+    }
+
+    match = item.match(/^(\-?\d+)\+\s*:\s*(.+)$/)
+    if (match) {
+      const start = Number(match[1])
+      if (index >= start) {
+        return `${index}: ${match[2]}`
+      }
+      continue
+    }
+
+    match = item.match(/^(\-?\d+)\s*\/\s*(\-?\d+)\s*:\s*(.+)$/)
+    if (match) {
+      const first = Number(match[1])
+      const second = Number(match[2])
+      if (index === first || index === second) {
+        return `${index}: ${match[3]}`
+      }
+      continue
+    }
+
+    match = item.match(/^(\-?\d+).*?\-\s*(\-?\d+)(?:\s|$)/)
+    if (match) {
+      const start = Number(match[1])
+      const end = Number(match[2])
+      if (index >= start && index <= end) {
+        return `${index}: valid documented option in range ${start}-${end}`
+      }
+    }
+  }
+
+  return null
+}
+
+function getFallbackCurrentSelection(
+  index: number,
+  variantDetail: VariantDetail | null,
+  items: string[],
+): { current: string; invalid: boolean } {
+  const matchedOption = findMatchingIndexOption(index, items)
+  if (matchedOption) {
+    return { current: matchedOption, invalid: false }
+  }
+
+  const minIndex = getMinValidIndex(variantDetail)
+  const maxIndex = getMaxValidIndex(variantDetail)
+  if (minIndex !== undefined || maxIndex !== undefined) {
+    if ((minIndex !== undefined && index < minIndex) || (maxIndex !== undefined && index > maxIndex)) {
+      const allowedRange = minIndex !== undefined && maxIndex !== undefined
+        ? `${minIndex}-${maxIndex}`
+        : minIndex !== undefined
+          ? `>= ${minIndex}`
+          : `<= ${maxIndex}`
+      return {
+        current: `${index}: not a valid option for this experiment (allowed range ${allowedRange})`,
+        invalid: true,
+      }
+    }
+
+    return {
+      current: variantDetail?.parameter_hints.index_meaning
+        ? `${index}: ${variantDetail.parameter_hints.index_meaning}`
+        : `${index}: valid parameter index`,
+      invalid: false,
+    }
+  }
+
+  if (items.length > 0) {
+    return {
+      current: `${index}: not one of the documented options below`,
+      invalid: true,
+    }
+  }
+
+  return {
+    current: variantDetail?.parameter_hints.index_meaning
+      ? `${index}: ${variantDetail.parameter_hints.index_meaning}`
+      : `${index}: selected parameter index`,
+    invalid: false,
+  }
+}
+
+function decodeNewGeneRemainder(remainder: number): { expressionLabel: string; translationLabel: string } | null {
+  if (remainder === 0) {
+    return {
+      expressionLabel: 'control remainder (no induced new-gene expression)',
+      translationLabel: 'runtime keeps the control translation setting',
+    }
+  }
+
+  if (remainder < 0) return null
+
+  const translationIndex = remainder % NEW_GENE_TRANSLATION_EFFICIENCIES.length
+  const expressionIndex = translationIndex === 0
+    ? Math.floor(remainder / NEW_GENE_TRANSLATION_EFFICIENCIES.length)
+    : Math.floor(remainder / NEW_GENE_TRANSLATION_EFFICIENCIES.length) + 1
+
+  if (expressionIndex <= 0 || expressionIndex >= NEW_GENE_EXPRESSION_FACTORS.length) {
+    return null
+  }
+
+  const expressionFactor = 10 ** (NEW_GENE_EXPRESSION_FACTORS[expressionIndex] - 1)
+  return {
+    expressionLabel: `expression ${expressionFactor.toExponential(0)}x`,
+    translationLabel: `translation efficiency ${NEW_GENE_TRANSLATION_EFFICIENCIES[translationIndex]}`,
+  }
+}
+
+function getParameterIndexGuide(
+  variantType: string,
+  variantIndex: number,
+  conditions: Condition[],
+  variantDetail: VariantDetail | null,
+): IndexGuide | null {
+  switch (variantType) {
+    case 'wildtype':
+      return {
+        current: '0: control run with no variant changes',
+        invalid: false,
+        items: ['0: control run with no variant changes'],
+      }
+    case 'condition':
+      if (!conditions[variantIndex]) {
+        return {
+          current: `${variantIndex}: not a valid condition index`,
+          invalid: true,
+          items: conditions.map((condition, index) => formatConditionLabel(condition, index)),
+        }
+      }
+      return {
+        current: formatConditionLabel(conditions[variantIndex], variantIndex),
+        invalid: false,
+        items: conditions.map((condition, index) => formatConditionLabel(condition, index)),
+      }
+    case 'ppgpp_conc': {
+      const items = PPGPP_CONDITION_INDICES.flatMap((conditionIndex) => {
+        const conditionLabel = conditions[conditionIndex]?.name || `condition ${conditionIndex}`
+        return PPGPP_FACTORS.map((factor, factorIndex) => {
+          const index = conditionIndex === PPGPP_CONDITION_INDICES[0]
+            ? factorIndex
+            : PPGPP_FACTORS.length + factorIndex
+          return `${index}: ${conditionLabel}, ${factor}x baseline ppGpp`
+        })
+      })
+
+      return {
+        current: items[variantIndex] || `${variantIndex}: not a valid ppGpp index`,
+        invalid: !items[variantIndex],
+        items,
+      }
+    }
+    case 'add_one_aa':
+    case 'remove_one_aa':
+    case 'add_one_aa_shift':
+    case 'remove_one_aa_shift': {
+      const items = AMINO_ACID_INDEX_LABELS.map((_, index) => describeAminoAcidIndex(variantType, index) || `${index}: amino acid index ${index}`)
+      return {
+        current: items[variantIndex] || `${variantIndex}: not a valid amino acid index`,
+        invalid: !items[variantIndex],
+        items,
+      }
+    }
+    case 'remove_aas_shift': {
+      const items = [
+        '0: rich-media control (all amino acids remain available)',
+        '1: shift to the 12-amino-acid media set',
+        '2: shift to the 6-amino-acid media set',
+        '3: minimal-media control branch (no internal shift timeline; composer or selected condition remains in control)',
+        ...REMOVE_AAS_SHIFT_SINGLE_AAS.map((aminoAcid, offset) => `${offset + 4}: shift to media with only ${aminoAcid}`),
+        '23: shift to no amino acids',
+      ]
+      return {
+        current: items[variantIndex] || `${variantIndex}: not a valid remove_aas_shift option`,
+        invalid: !items[variantIndex],
+        items,
+      }
+    }
+    case 'tf_activity': {
+      const tfNames = variantDetail?.parameter_hints.tf_names || []
+      const controlPeriod = variantDetail?.parameter_hints.control_period
+      const maxExactIndex = variantDetail?.parameter_hints.max_exact_index ?? tfNames.length * 2
+      const items = variantDetail?.parameter_hints.index_options || [
+        '0: control',
+        'Odd indices activate a TF; even indices inactivate that same TF.',
+      ]
+
+      if (variantIndex < 0) {
+        return {
+          current: `${variantIndex}: not a valid tf_activity option`,
+          invalid: true,
+          items,
+        }
+      }
+
+      if (variantIndex === 0) {
+        return {
+          current: '0: control',
+          invalid: false,
+          items,
+        }
+      }
+
+      if (controlPeriod && variantIndex > maxExactIndex && variantIndex % controlPeriod === 0) {
+        return {
+          current: `${variantIndex}: control (equivalent to index 0 because tf_activity repeats every ${controlPeriod} steps)`,
+          invalid: false,
+          items,
+        }
+      }
+
+      if (tfNames.length > 0 && variantIndex > 0 && variantIndex <= maxExactIndex) {
+        const tfName = tfNames[Math.ceil(variantIndex / 2) - 1]
+        const tfStatus = variantIndex % 2 === 1 ? 'active' : 'inactive'
+        return {
+          current: `${variantIndex}: ${tfName} ${tfStatus}`,
+          invalid: false,
+          items,
+        }
+      }
+
+      const validityHint = controlPeriod
+        ? `use 1-${maxExactIndex} for explicit TF states or multiples of ${controlPeriod} for control`
+        : 'use the documented TF activity indices below'
+      return {
+        current: `${variantIndex}: not a valid tf_activity option (${validityHint})`,
+        invalid: true,
+        items,
+      }
+    }
+    case 'sinusoidal_media': {
+      const minValidIndex = variantDetail?.parameter_hints.min_valid_index ?? 1
+      return {
+        current: variantIndex < minValidIndex
+          ? `${variantIndex}: not a valid sinusoidal period (must be >= ${minValidIndex} minute)`
+          : `${variantIndex}: oscillation period of ${variantIndex} minute(s)`,
+        invalid: variantIndex < minValidIndex,
+        items: variantDetail?.parameter_hints.index_options || ['1+: oscillation period in minutes'],
+      }
+    }
+    case 'new_gene_internal_shift': {
+      const conditionStride = variantDetail?.parameter_hints.condition_stride ?? 1000
+      const conditionNames = variantDetail?.parameter_hints.condition_names || conditions.map((condition) => condition.name)
+      const [minRemainder, maxRemainder] = variantDetail?.parameter_hints.valid_remainder_range || [0, 20]
+      const maxValidIndex = variantDetail?.parameter_hints.max_valid_index
+      const conditionIndex = Math.floor(variantIndex / conditionStride)
+      const remainder = variantIndex % conditionStride
+
+      if (variantIndex < 0) {
+        return {
+          current: `${variantIndex}: not a valid new_gene_internal_shift option`,
+          invalid: true,
+          items: variantDetail?.parameter_hints.index_options || [],
+        }
+      }
+
+      if (maxValidIndex !== undefined && variantIndex > maxValidIndex) {
+        return {
+          current: `${variantIndex}: not a valid new_gene_internal_shift option (maximum supported index is ${maxValidIndex})`,
+          invalid: true,
+          items: variantDetail?.parameter_hints.index_options || [],
+        }
+      }
+
+      if (conditionIndex >= conditionNames.length) {
+        return {
+          current: `${variantIndex}: not a valid new_gene_internal_shift option (condition block ${conditionIndex} is not defined)`,
+          invalid: true,
+          items: variantDetail?.parameter_hints.index_options || [],
+        }
+      }
+
+      if (remainder < minRemainder || remainder > maxRemainder) {
+        return {
+          current: `${variantIndex}: not a valid new_gene_internal_shift option (valid remainders are ${minRemainder}-${maxRemainder} within each condition block)`,
+          invalid: true,
+          items: variantDetail?.parameter_hints.index_options || [],
+        }
+      }
+
+      const decodedRemainder = decodeNewGeneRemainder(remainder)
+      return {
+        current: variantIndex === 0
+          ? '0: control (new gene expression knocked out)'
+          : `${variantIndex}: ${conditionNames[conditionIndex]}, ${decodedRemainder?.expressionLabel || `remainder ${remainder}`}, ${decodedRemainder?.translationLabel || 'encoded translation setting'}`,
+        invalid: false,
+        items: variantDetail?.parameter_hints.index_options || [
+          '0: control (new gene expression knocked out)',
+          'For positive values, floor(index / 1000) selects the condition block in runtime order.',
+          'Valid remainders are 0-20 within each condition block.',
+        ],
+      }
+    }
+    default:
+      if (variantDetail?.parameter_hints.index_options?.length) {
+        const fallback = getFallbackCurrentSelection(
+          variantIndex,
+          variantDetail,
+          variantDetail.parameter_hints.index_options,
+        )
+        return {
+          current: fallback.current,
+          invalid: fallback.invalid,
+          items: variantDetail.parameter_hints.index_options,
+        }
+      }
+      if (variantDetail?.parameter_hints.index_meaning) {
+        const items = [variantDetail.parameter_hints.index_meaning]
+        if (variantDetail.parameter_hints.index_range) {
+          items.push(
+            `Allowed range: ${variantDetail.parameter_hints.index_range[0]}-${variantDetail.parameter_hints.index_range[1]}`,
+          )
+        }
+        const fallback = getFallbackCurrentSelection(variantIndex, variantDetail, items)
+        return {
+          current: fallback.current,
+          invalid: fallback.invalid,
+          items,
+        }
+      }
+      return null
+  }
+}
+
+function getTimelineBehavior(variantDetail: VariantDetail | null): TimelineBehavior {
+  return variantDetail?.parameter_hints.timeline_behavior || 'composer'
+}
+
+function isConditionalOverrideActive(variantType: string, variantIndex: number): boolean | null {
+  switch (variantType) {
+    case 'remove_aas_shift':
+      return variantIndex !== 3
+    case 'tf_activity':
+      return variantIndex !== 0
+    default:
+      return null
+  }
+}
+
+function getConditionTimelinePreview(index: number, conditions: Condition[]): string | null {
+  const condition = conditions[index]
+  return condition?.nutrients ? `0 ${condition.nutrients}` : null
+}
+
+function getEffectiveTimelinePreview(
+  variantType: string,
+  variantIndex: number,
+  conditions: Condition[],
+  composedTimeline: string,
+): string | null {
+  switch (variantType) {
+    case 'timelines':
+      return composedTimeline || null
+    case 'condition':
+      return getConditionTimelinePreview(variantIndex, conditions)
+    case 'remove_one_aa':
+      return '0 minimal_plus_amino_acids'
+    case 'add_one_aa_shift':
+      return '0 minimal, 600 minimal_plus_<selected amino acid>'
+    case 'remove_one_aa_shift':
+      return '0 minimal_plus_amino_acids, 600 variant_specific_media'
+    case 'remove_aas_shift':
+      if (variantIndex === 3) return composedTimeline || null
+      if (variantIndex === 0) return '0 minimal_plus_amino_acids'
+      if (variantIndex === 1) return '0 minimal_plus_amino_acids, 600 minimal_plus_12_amino_acids'
+      if (variantIndex === 2) return '0 minimal_plus_amino_acids, 600 minimal_plus_6_amino_acids'
+      if (variantIndex === 23) return '0 minimal_plus_amino_acids, 600 minimal'
+      return '0 minimal_plus_amino_acids, 600 variant_specific_media'
+    case 'tf_activity':
+      return variantIndex === 0 ? (composedTimeline || null) : '0 <TF-specific nutrient condition>'
+    case 'sinusoidal_media':
+      return 'Initialization: 0 minimal_GLC_2mM; runtime environment then follows sinusoidal mixing between the configured media.'
+    case 'new_gene_internal_shift':
+      return getConditionTimelinePreview(Math.floor(variantIndex / 1000), conditions)
+    default:
+      return null
+  }
+}
 
 export function ExperimentDesigner() {
   const navigate = useNavigate()
@@ -31,7 +512,7 @@ export function ExperimentDesigner() {
   // Reference data
   const [variants, setVariants] = useState<Variant[]>([])
   const [conditions, setConditions] = useState<Condition[]>([])
-  const [timelines, setTimelines] = useState<Timeline[]>([])
+  const [mediaRecipes, setMediaRecipes] = useState<MediaRecipe[]>([])
 
   // Form state
   const [name, setName] = useState('')
@@ -45,7 +526,6 @@ export function ExperimentDesigner() {
   const [seeds, setSeeds] = useState(1)
   const [generations, setGenerations] = useState(1)
   const [lengthSec, setLengthSec] = useState(10800)
-  const [includeWildtype, setIncludeWildtype] = useState(!!inferredVariant)
 
   // Gene search
   const [geneQuery, setGeneQuery] = useState(prefillGene)
@@ -59,11 +539,30 @@ export function ExperimentDesigner() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const timelineBehavior = getTimelineBehavior(variantDetail)
+  const hideVariantIndex = Boolean(variantDetail?.parameter_hints.hide_index)
+  const timelineNotice = variantDetail?.parameter_hints.timeline_notice || ''
+  const conditionalOverrideActive = isConditionalOverrideActive(variantType, variantIndex)
+  const effectiveTimelinePreview = getEffectiveTimelinePreview(
+    variantType,
+    variantIndex,
+    conditions,
+    timeline,
+  )
+  const minVariantIndex = getMinValidIndex(variantDetail)
+  const maxVariantIndex = getMaxValidIndex(variantDetail)
+  const parameterIndexGuide = getParameterIndexGuide(
+    variantType,
+    variantIndex,
+    conditions,
+    variantDetail,
+  )
+
   // Load reference data
   useEffect(() => {
     getVariants().then(setVariants)
     getConditions().then(setConditions)
-    getTimelines().then(setTimelines)
+    getMediaRecipes().then(setMediaRecipes)
   }, [])
 
   // Auto-select variant if prefilled
@@ -76,7 +575,6 @@ export function ExperimentDesigner() {
   useEffect(() => {
     if (!selectedGene || geneSymbol) return
     setVariantType((current) => current || 'gene_knockout')
-    setIncludeWildtype(true)
     setGeneSymbol(selectedGene)
     setGeneQuery(selectedGene)
   }, [geneSymbol, selectedGene])
@@ -157,7 +655,6 @@ export function ExperimentDesigner() {
         timeline,
         gene_symbol: geneSymbol,
         sim_params: JSON.stringify({ seeds, generations, length_sec: lengthSec }),
-        include_wildtype: includeWildtype,
       }
       const experiment = await createExperiment(data)
       const nextParams = new URLSearchParams({
@@ -202,7 +699,6 @@ export function ExperimentDesigner() {
               setVariantIndex(0)
               setGeneSymbol('')
               setGeneQuery('')
-              setIncludeWildtype(e.target.value === 'gene_knockout')
             }}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
                        focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
@@ -265,92 +761,19 @@ export function ExperimentDesigner() {
                 {' '}&rarr; KO index <span className="font-mono">{variantIndex}</span>
               </p>
             )}
-
-            {/* Gene Impact Preview */}
-            {geneDetail && geneSymbol && (
-              <div className="mt-4 bg-gray-50 rounded-lg p-4 border border-gray-100">
-                <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Knockout impact preview</h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-blue-500" />
-                    <span className="text-gray-500">Protein:</span>
-                    <span className="font-mono text-xs">{geneDetail.monomer_id ? geneDetail.monomer_name || geneDetail.monomer_id : 'none'}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-green-500" />
-                    <span className="text-gray-500">mRNA:</span>
-                    <span className="font-mono text-xs">
-                      {(() => {
-                        try { const ids = JSON.parse(geneDetail.rna_ids); return Array.isArray(ids) ? ids.length + ' transcript' + (ids.length > 1 ? 's' : '') : '1 transcript' }
-                        catch { return geneDetail.rna_ids ? '1 transcript' : 'none' }
-                      })()}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-purple-500" />
-                    <span className="text-gray-500">Complexes:</span>
-                    <span className="font-mono text-xs">
-                      {(() => {
-                        try { const ids = JSON.parse(geneDetail.complex_ids); return Array.isArray(ids) ? ids.length : 0 }
-                        catch { return 0 }
-                      })()}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-orange-500" />
-                    <span className="text-gray-500">TF targets:</span>
-                    <span className="font-mono text-xs">{geneDetail.regulates.length || 'none'}</span>
-                  </div>
-                </div>
-
-                {/* Multi-TU warning */}
-                {(() => {
-                  try {
-                    const rnaIds = JSON.parse(geneDetail.rna_ids)
-                    if (Array.isArray(rnaIds) && rnaIds.length > 1) {
-                      return (
-                        <div className="mt-3 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-800">
-                          <span className="font-semibold">&#9888; Multi-TU gene:</span>{' '}
-                          {geneSymbol} has {rnaIds.length} transcription units. The knockout zeros all of them,
-                          which may affect co-transcribed genes on the same operon.
-                        </div>
-                      )
-                    }
-                  } catch {}
-                  return null
-                })()}
-
-                {/* High-impact TF warning */}
-                {geneDetail.regulates.length > 10 && (
-                  <div className="mt-3 bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-xs text-blue-800">
-                    <span className="font-semibold">&#9889; Hub TF:</span>{' '}
-                    {geneSymbol} regulates {geneDetail.regulates.length} downstream genes.
-                    This knockout will have broad transcriptional effects.
-                  </div>
-                )}
-
-                {!geneDetail.is_mechanistic && (
-                  <div className="mt-3 bg-gray-100 border border-gray-200 rounded-md px-3 py-2 text-xs text-gray-600">
-                    <span className="font-semibold">Note:</span>{' '}
-                    {geneSymbol} is not a mechanistic gene. Its protein will drop to zero, but
-                    the model may not capture downstream metabolic effects.
-                  </div>
-                )}
-              </div>
-            )}
           </section>
         )}
 
         {/* --- Parameter index (for non-gene-knockout) --- */}
-        {variantType && variantType !== 'gene_knockout' && variantDetail && (
+        {variantType && variantType !== 'gene_knockout' && variantDetail && !hideVariantIndex && (
           <section className="bg-white rounded-lg border border-gray-200 p-5">
             <h2 className="text-sm font-medium text-gray-700 mb-3">Parameter index</h2>
             <input
               type="number"
               value={variantIndex}
               onChange={(e) => setVariantIndex(Number(e.target.value))}
-              min={variantDetail.parameter_hints.index_range?.[0] ?? 0}
-              max={variantDetail.parameter_hints.index_range?.[1] ?? 9999}
+              min={minVariantIndex}
+              max={maxVariantIndex}
               className="w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono
                          focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
             />
@@ -359,70 +782,30 @@ export function ExperimentDesigner() {
                 {variantDetail.parameter_hints.index_meaning}
               </p>
             )}
+            {parameterIndexGuide && (
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p className="text-xs font-medium text-gray-700">Index guide</p>
+                {parameterIndexGuide.current && (
+                  <p className={`text-xs mt-1 ${parameterIndexGuide.invalid ? 'text-amber-700' : 'text-gray-600'}`}>
+                    Current selection: <span className="font-mono">{parameterIndexGuide.current}</span>
+                  </p>
+                )}
+                <details className="mt-2 group">
+                  <summary className="cursor-pointer select-none text-xs font-medium text-brand-700 marker:text-brand-600">
+                    Show index options ({parameterIndexGuide.items.length})
+                  </summary>
+                  <div className="mt-2 grid gap-1 md:grid-cols-2">
+                    {parameterIndexGuide.items.map((item) => (
+                      <p key={item} className="text-xs text-gray-500 leading-relaxed">
+                        {item}
+                      </p>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            )}
           </section>
         )}
-
-        {/* --- Growth environment --- */}
-        <section className="bg-white rounded-lg border border-gray-200 p-5">
-          <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
-            Growth environment
-            <HelpTip text="Controls the nutrient environment. The 'Condition' sets the static media composition for the entire simulation. The 'Timeline' overrides this with dynamic media shifts at specified timepoints. If both are set, the timeline takes precedence." />
-          </h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">
-                Condition
-                <HelpTip text="The nutrient media the cell grows in. 'Basal' = glucose minimal media. Times shown are expected doubling times, not simulation durations." position="right" />
-              </label>
-              <select
-                value={condition}
-                onChange={(e) => {
-                  setCondition(e.target.value)
-                  setSelectedCondition(e.target.value)
-                }}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
-              >
-                {conditions.map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {c.name}{c.doubling_time ? ` — ~${c.doubling_time.toFixed(0)} min doubling` : ''}
-                  </option>
-                ))}
-              </select>
-              {condition && condition !== 'basal' && !timeline && (
-                <p className="text-xs text-emerald-600 mt-1.5 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
-                  Simulation will use <strong>{condition}</strong> media
-                </p>
-              )}
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">
-                Timeline (optional)
-                <HelpTip text="Dynamic media shifts over time, e.g. switch from minimal to amino-acid-supplemented media at t=1200s. Overrides the static condition if set." position="right" />
-              </label>
-              <select
-                value={timeline}
-                onChange={(e) => setTimeline(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
-              >
-                <option value="">None (use condition above)</option>
-                {timelines.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name.replace(/^\d+_/, '').replace(/_/g, ' ')}
-                  </option>
-                ))}
-              </select>
-              {timeline && condition !== 'basal' && (
-                <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>
-                  Timeline overrides the condition setting
-                </p>
-              )}
-            </div>
-          </div>
-        </section>
 
         {/* --- Simulation parameters --- */}
         <section className="bg-white rounded-lg border border-gray-200 p-5">
@@ -472,29 +855,80 @@ export function ExperimentDesigner() {
           </div>
         </section>
 
-        {/* --- Wildtype control --- */}
-        {variantType && (
-          <section className="bg-white rounded-lg border border-gray-200 p-5">
-            <div className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                id="include-wt"
-                checked={includeWildtype}
-                onChange={(e) => setIncludeWildtype(e.target.checked)}
-                className="mt-0.5 rounded border-gray-300"
-              />
-              <div>
-                <label htmlFor="include-wt" className="text-sm font-medium text-gray-700 flex items-center gap-1.5 cursor-pointer">
-                  Include wildtype control
-                  <HelpTip text="Automatically creates (or reuses) a wildtype baseline experiment with the same growth condition. This lets you compare KO results against a matched control on the results page." />
-                </label>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  A matched wildtype run for <span className="font-mono">{condition}</span> will be created automatically.
-                </p>
-              </div>
+        {/* --- Growth environment / Timeline composer --- */}
+        <section className="bg-white rounded-lg border border-gray-200 p-5">
+          <h2 className="text-sm font-medium text-gray-700 mb-4 flex items-center gap-1.5">
+            Timeline composer
+            <HelpTip text="Select a media vial from the palette, then click on the time axis to schedule environment shifts. Events are sorted by time and passed directly to the simulation as a raw event string. At least one event (the starting media) is required." />
+          </h2>
+          {variantType === 'timelines' && (
+            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <p className="font-medium">This experiment uses the composed timeline directly.</p>
+              <p className="mt-1 text-blue-800">{timelineNotice}</p>
             </div>
-          </section>
-        )}
+          )}
+          {timelineBehavior === 'internal_override' && timelineNotice && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-medium">This experiment presets its timeline internally.</p>
+              <p className="mt-1 text-amber-800">{timelineNotice}</p>
+              {effectiveTimelinePreview && (
+                <p className="mt-2 font-mono text-xs text-amber-900 break-all">
+                  Effective timeline: {effectiveTimelinePreview}
+                </p>
+              )}
+            </div>
+          )}
+          {timelineBehavior === 'internal_conditional_override' && timelineNotice && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-medium">
+                {conditionalOverrideActive === false
+                  ? 'This selected branch can use the composed timeline.'
+                  : 'This experiment can override the composed timeline internally.'}
+              </p>
+              <p className="mt-1 text-amber-800">{timelineNotice}</p>
+              {effectiveTimelinePreview && conditionalOverrideActive !== false && (
+                <p className="mt-2 font-mono text-xs text-amber-900 break-all">
+                  Expected internal timeline: {effectiveTimelinePreview}
+                </p>
+              )}
+            </div>
+          )}
+          <TimelineComposer
+            mediaRecipes={mediaRecipes}
+            conditions={conditions}
+            onChange={setTimeline}
+            maxSec={lengthSec}
+          />
+        </section>
+
+        {/* --- Name & description --- */}
+        <section className="bg-white rounded-lg border border-gray-200 p-5">
+          <h2 className="text-sm font-medium text-gray-700 mb-3">Experiment details</h2>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. rpoB knockout in minimal media"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Description (optional)</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={2}
+                placeholder="What do you expect to observe?"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none
+                           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+              />
+            </div>
+          </div>
+        </section>
 
         {/* --- Summary + save --- */}
         <section className="bg-brand-50 rounded-lg border border-brand-200 p-5">
@@ -508,42 +942,25 @@ export function ExperimentDesigner() {
                 <span className="font-mono">{geneSymbol}</span>
               </>
             )}
-            <span className="text-brand-500">Condition:</span>
-            <span>{condition}</span>
             {timeline && (
               <>
                 <span className="text-brand-500">Timeline:</span>
-                <span>{timeline}</span>
+                <span className="font-mono text-xs break-all">
+                  {timeline.length > 60 ? timeline.slice(0, 60) + '…' : timeline}
+                </span>
+              </>
+            )}
+            {effectiveTimelinePreview && timelineBehavior !== 'composer' && (
+              <>
+                <span className="text-brand-500">Effective timeline:</span>
+                <span className="font-mono text-xs break-all">{effectiveTimelinePreview}</span>
               </>
             )}
             <span className="text-brand-500">Replicates:</span>
             <span>{seeds} seed{seeds > 1 ? 's' : ''} &times; {generations} gen</span>
             <span className="text-brand-500">Max duration:</span>
             <span>{lengthSec}s ({(lengthSec / 3600).toFixed(1)} hr)</span>
-            <span className="text-brand-500">WT control:</span>
-            <span>{includeWildtype ? 'Yes — matched baseline' : 'No'}</span>
           </div>
-
-          {/* Cost estimator */}
-          {(() => {
-            const totalRuns = seeds * (includeWildtype ? 2 : 1)
-            const estMinPerGen = 20  // ~20 min/gen typical
-            const estTotal = totalRuns * generations * estMinPerGen
-            const estHrs = estTotal / 60
-            return (
-              <div className="mt-3 pt-3 border-t border-brand-200 flex items-center gap-2">
-                <svg className="w-4 h-4 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-xs text-brand-600">
-                  Est. compute: ~{estHrs < 1 ? `${estTotal} min` : `${estHrs.toFixed(1)} hr`}
-                  <span className="text-brand-400 ml-1">
-                    ({totalRuns} run{totalRuns > 1 ? 's' : ''} &times; {generations} gen &times; ~{estMinPerGen} min/gen)
-                  </span>
-                </span>
-              </div>
-            )
-          })()}
         </section>
 
         <div className="flex gap-3 justify-end pb-8">

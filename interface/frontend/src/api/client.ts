@@ -5,7 +5,8 @@
 
 import type {
   Gene, GeneDetail, GeneSearchResult, CategoryCount,
-  TFNetwork, TFNode, AAPathway, Condition, Timeline, Variant,
+  TFNetwork, TFNode, AAPathway, Condition, Timeline, MediaRecipe, UserTimeline, Variant,
+  BuilderDraft, BuilderDraftCollection, BuilderDraftSection,
   VariantDetail, Experiment, ExperimentCreate,
   BatchRequest, BatchResponse, BatchSummary, BatchDetail, BatchRunResponse,
   SimulationJob, SimulationResult, RunJobRequest, RunResponse, ResultsResponse,
@@ -15,7 +16,7 @@ import type {
   TrainRequest, TrainResponse, DataSummary,
   DesignOverview, EssentialityStats,
   ComparisonResponse, FailedJobSummary,
-  WildtypeDelta,
+  WildtypeDelta, ConditionCatalog,
 } from '../types'
 
 const BASE = '/api'
@@ -69,16 +70,34 @@ export async function getGene(symbol: string): Promise<GeneDetail> {
   return fetchJSON(`/genes/${encodeURIComponent(symbol)}`)
 }
 
-export async function getGeneNeighbors(symbol: string, window = 5000): Promise<Gene[]> {
-  return fetchJSON(`/genes/neighbors?symbol=${encodeURIComponent(symbol)}&window=${window}`)
-}
-
 export async function getCategories(): Promise<CategoryCount[]> {
   return fetchJSON('/genes/categories')
 }
 
 export async function getGeneByKoIndex(koIndex: number): Promise<Gene> {
   return fetchJSON(`/genes/by-ko-index/${koIndex}`)
+}
+
+export async function getGeneNeighbors(symbol: string, window = 5000): Promise<Gene[]> {
+  const focalGene = await getGene(symbol)
+  if (focalGene.left_end_pos == null || focalGene.right_end_pos == null) {
+    return []
+  }
+
+  const focalLeft = Math.min(focalGene.left_end_pos, focalGene.right_end_pos)
+  const focalRight = Math.max(focalGene.left_end_pos, focalGene.right_end_pos)
+  const minPosition = focalLeft - window
+  const maxPosition = focalRight + window
+
+  const data = await getGenes({ page_size: 5000 })
+  return data.genes
+    .filter((gene) => gene.left_end_pos != null && gene.right_end_pos != null)
+    .filter((gene) => {
+      const geneLeft = Math.min(gene.left_end_pos ?? 0, gene.right_end_pos ?? 0)
+      const geneRight = Math.max(gene.left_end_pos ?? 0, gene.right_end_pos ?? 0)
+      return geneRight >= minPosition && geneLeft <= maxPosition
+    })
+    .sort((leftGene, rightGene) => (leftGene.left_end_pos ?? 0) - (rightGene.left_end_pos ?? 0))
 }
 
 // --- TF Network ---
@@ -105,6 +124,64 @@ export async function getConditions(): Promise<Condition[]> {
 
 export async function getTimelines(): Promise<Timeline[]> {
   return fetchJSON('/timelines')
+}
+
+export async function getMediaRecipes(): Promise<MediaRecipe[]> {
+  return fetchJSON('/media-recipes')
+}
+
+export async function getConditionCatalog(): Promise<ConditionCatalog> {
+  return fetchJSON('/condition-catalog')
+}
+
+export async function getUserTimelines(): Promise<UserTimeline[]> {
+  return fetchJSON('/user-timelines')
+}
+
+export async function saveUserTimeline(name: string, definition: string): Promise<UserTimeline> {
+  return fetchJSON('/user-timelines', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, definition }),
+  })
+}
+
+export async function getBuilderDrafts(): Promise<BuilderDraftCollection> {
+  return fetchJSON('/builder-drafts')
+}
+
+export async function createBuilderDraft(
+  section: BuilderDraftSection,
+  name: string,
+  payload: Record<string, unknown>,
+): Promise<BuilderDraft> {
+  return fetchJSON(`/builder-drafts/${section}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, payload }),
+  })
+}
+
+export async function updateBuilderDraft(
+  section: BuilderDraftSection,
+  draftId: number,
+  name: string,
+  payload: Record<string, unknown>,
+): Promise<BuilderDraft> {
+  return fetchJSON(`/builder-drafts/${section}/${draftId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, payload }),
+  })
+}
+
+export async function publishBuilderDraft(
+  section: BuilderDraftSection,
+  draftId: number,
+): Promise<BuilderDraft> {
+  return fetchJSON(`/builder-drafts/${section}/${draftId}/publish`, {
+    method: 'POST',
+  })
 }
 
 export async function getVariants(): Promise<Variant[]> {

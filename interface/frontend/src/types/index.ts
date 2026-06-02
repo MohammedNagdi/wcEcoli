@@ -73,6 +73,104 @@ export interface Timeline {
   definition: string
 }
 
+export interface MediaRecipe {
+  id: number
+  media_id: string          // key used in timeline event strings, e.g. "minimal_acetate"
+  base_media: string        // base stock, e.g. "MIX0-57"
+  added_media: string       // supplemental stock, e.g. "5X_supplement_EZ"
+  ingredients: string       // raw string like '["ACETATE"]'
+}
+
+export interface UserTimeline {
+  id: number
+  name: string
+  definition: string        // raw event string e.g. "0 minimal, 1200 minimal_acetate"
+  created_at: string
+}
+
+export type BuilderDraftSection = 'media' | 'mediaRecipe' | 'condition' | 'tfCondition' | 'timeline'
+
+export interface BuilderDraft {
+  id: number
+  section: BuilderDraftSection
+  name: string
+  payload: Record<string, unknown>
+  status: string
+  created_at: string
+  updated_at: string
+  published_at: string
+  published_name: string
+}
+
+export interface BuilderDraftCollection {
+  media: BuilderDraft[]
+  mediaRecipe: BuilderDraft[]
+  condition: BuilderDraft[]
+  tfCondition: BuilderDraft[]
+  timeline: BuilderDraft[]
+}
+
+export interface MediaStockRow {
+  molecule_id: string
+  concentration: string
+}
+
+export interface MediaStock {
+  name: string
+  rows: MediaStockRow[]
+}
+
+export interface EnvironmentMolecule {
+  molecule_id: string
+  exchange_molecule_location: string
+  formula_weight: string
+}
+
+export interface MediaRecipeRecord {
+  media_id: string
+  base_media: string
+  base_media_volume: string
+  added_media: string
+  added_media_volume: string
+  ingredients: string
+  ingredients_weight: string
+  ingredients_counts: string
+  ingredients_volume: string
+}
+
+export interface ConditionRecord {
+  condition: string
+  nutrients: string
+  genotype_perturbations: string
+  doubling_time: string
+  active_tfs: string
+  inactive_tfs: string
+}
+
+export interface TfConditionRecord {
+  tf: string
+  active_tf: string
+  active_nutrients: string
+  active_genotype_perturbations: string
+  inactive_nutrients: string
+  inactive_genotype_perturbations: string
+  tf_type: string
+}
+
+export interface TimelineRecord {
+  timeline: string
+  events: string
+}
+
+export interface ConditionCatalog {
+  media_stocks: MediaStock[]
+  environment_molecules: EnvironmentMolecule[]
+  media_recipes: MediaRecipeRecord[]
+  conditions: ConditionRecord[]
+  tf_conditions: TfConditionRecord[]
+  timelines: TimelineRecord[]
+}
+
 export interface Variant {
   name: string
   docstring: string
@@ -84,7 +182,20 @@ export interface VariantDetail extends Variant {
   parameter_hints: {
     index_meaning?: string
     index_range?: [number, number]
+    min_valid_index?: number
+    max_valid_index?: number
+    max_exact_index?: number
+    index_options?: string[]
+    control_period?: number
+    condition_stride?: number
+    condition_count?: number
+    valid_remainder_range?: [number, number]
+    tf_names?: string[]
+    condition_names?: string[]
     supports_gene_lookup?: boolean
+    hide_index?: boolean
+    timeline_behavior?: 'composer' | 'internal_override' | 'internal_conditional_override'
+    timeline_notice?: string
   }
 }
 

@@ -39,6 +39,8 @@ services:
       - SIM_OUTPUT_DIR=/data/out
       - DOCKER_IMAGE=wcecoli-sim:latest
       - SIM_OUTPUT_VOLUME=interface_sim-output
+      - WCECOLI_HOST_RECONSTRUCTION=${PWD}/../reconstruction
+      - WCECOLI_HOST_MODELS=${PWD}/../models
     depends_on:
       - api
     restart: unless-stopped

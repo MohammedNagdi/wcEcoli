@@ -34,8 +34,24 @@ class Settings(BaseSettings):
         return self.reconstruction_path / "ecoli" / "flat" / "condition" / "condition_defs.tsv"
 
     @property
+    def tf_condition_tsv(self) -> Path:
+        return self.reconstruction_path / "ecoli" / "flat" / "condition" / "tf_condition.tsv"
+
+    @property
+    def environment_molecules_tsv(self) -> Path:
+        return self.reconstruction_path / "ecoli" / "flat" / "condition" / "environment_molecules.tsv"
+
+    @property
     def timelines_def_tsv(self) -> Path:
         return self.reconstruction_path / "ecoli" / "flat" / "condition" / "timelines_def.tsv"
+
+    @property
+    def media_recipes_tsv(self) -> Path:
+        return self.reconstruction_path / "ecoli" / "flat" / "condition" / "media_recipes.tsv"
+
+    @property
+    def condition_media_dir(self) -> Path:
+        return self.reconstruction_path / "ecoli" / "flat" / "condition" / "media"
 
     @property
     def proteins_tsv(self) -> Path:

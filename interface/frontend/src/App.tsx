@@ -6,6 +6,7 @@ import { TFNetworkPage } from './components/network/TFNetworkPage'
 import { ExperimentListPage } from './components/experiments/ExperimentListPage'
 import { ExperimentDesigner } from './components/experiments/ExperimentDesigner'
 import { BatchCreator } from './components/experiments/BatchCreator'
+import { EnvironmentBuilderPage } from './components/experiments/EnvironmentBuilderPage'
 import { ExperimentGuidePage } from './components/experiments/ExperimentGuidePage'
 import { ResultsPage } from './components/results/ResultsPage'
 import { ResultsBrowserPage } from './components/results/ResultsBrowserPage'
@@ -29,6 +30,8 @@ export default function App() {
         <Route path="/experiments" element={<ExperimentListPage />} />
         <Route path="/experiments/new" element={<ExperimentDesigner />} />
         <Route path="/experiments/batch" element={<BatchCreator />} />
+        <Route path="/environment-builder" element={<EnvironmentBuilderPage />} />
+        <Route path="/experiments/environment-builder" element={<EnvironmentBuilderPage />} />
         <Route path="/guide" element={<ExperimentGuidePage />} />
         <Route path="/results" element={<ResultsBrowserPage />} />
         <Route path="/results/compare" element={<ComparisonDashboard />} />

@@ -22,10 +22,12 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, col, create_engine, select
 
 from app.config import settings
 from app.db.models import Experiment, SimulationJob, SimulationResult, Timeline
+from app.services.timelines import infer_condition_from_timeline
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,14 +73,27 @@ def _run_docker(
     """Run a command inside the wcEcoli Docker container."""
     import os
     output_volume = os.environ.get("SIM_OUTPUT_VOLUME", "interface_sim-output")
+    host_reconstruction_path = os.environ.get("WCECOLI_HOST_RECONSTRUCTION", "").strip()
+    host_models_path = os.environ.get("WCECOLI_HOST_MODELS", "").strip()
 
     docker_cmd = [
         "docker", "run", "--rm",
         "-v", output_volume + ":/wcEcoli/out:rw",
         "-e", "PYTHONPATH=/wcEcoli",
         "-w", "/wcEcoli",
-        settings.docker_image,
-    ] + args
+    ]
+
+    if host_reconstruction_path:
+        docker_cmd.extend([
+            "-v", host_reconstruction_path + ":/wcEcoli/reconstruction:ro",
+        ])
+
+    if host_models_path:
+        docker_cmd.extend([
+            "-v", host_models_path + ":/wcEcoli/models:ro",
+        ])
+
+    docker_cmd.extend([settings.docker_image] + args)
 
     logger.info("[%s] %s", phase_label, " ".join(docker_cmd))
     log_buffer.append("--- " + phase_label + " ---")
@@ -215,9 +230,24 @@ def execute_job(engine, job_id: int):
         session.add(job)
         session.commit()
 
+        variant_type = job.variant_type
+        variant_start = str(job.variant_index)
+        variant_end = str(job.variant_index)
+        if job.variant_type == "timelines":
+            # The UI now treats the timelines experiment as composer-driven.
+            # Execute the sim as wildtype so the externally supplied timeline
+            # remains the controlling environment timeline.
+            variant_type = "wildtype"
+            variant_start = "0"
+            variant_end = "0"
+            log_buffer.append(
+                "Variant 'timelines' is composer-driven in the interface; "
+                "executing as wildtype with the supplied timeline."
+            )
+
         sim_args = [
             "python", "runscripts/manual/runSim.py", run_id,
-            "--variant", job.variant_type, str(job.variant_index), str(job.variant_index),
+            "--variant", variant_type, variant_start, variant_end,
             "--seed", str(job.seed),
             "--generations", str(job.generations),
         ]
@@ -227,6 +257,16 @@ def execute_job(engine, job_id: int):
             # (e.g. "0 minimal, 1200 minimal_plus_amino_acids"), not
             # the timeline name (e.g. "000002_add_aa").  Resolve via DB.
             timeline_events = _resolve_timeline(session, job.timeline)
+            inferred_condition = infer_condition_from_timeline(session, timeline_events, job.condition or "basal")
+            if inferred_condition != job.condition:
+                logger.info(
+                    "Job %d: inferred initial condition '%s' from timeline",
+                    job.id,
+                    inferred_condition,
+                )
+                job.condition = inferred_condition
+                session.add(job)
+                session.commit()
             sim_args.extend(["--timeline", timeline_events])
         elif job.condition and job.condition != "basal":
             # Non-basal condition with no explicit timeline: convert
@@ -304,17 +344,7 @@ def _ingest_results(
     log_buffer.append("Found " + str(len(sim_outs)) + " simOut directories")
 
     if not sim_outs:
-        log_buffer.append("WARNING: No simOut directories found — creating placeholder result")
-        result = SimulationResult(
-            job_id=job.id,
-            experiment_id=job.experiment_id,
-            seed=job.seed,
-            generation=0,
-            created_at=_now(),
-        )
-        session.add(result)
-        session.commit()
-        return
+        raise RuntimeError("Simulation completed without producing any simOut directories")
 
     for sim_out_path in sim_outs:
         path_info = parse_sim_out_path(sim_out_path)
@@ -440,11 +470,12 @@ def poll_loop():
     logger.info("Docker image: %s", settings.docker_image)
     logger.info("Output directory: %s", settings.sim_output_dir)
 
-    # Fix any experiments stuck in stale states from prior crashes
-    _repair_stale_statuses(engine)
-
     while not _shutdown:
         try:
+            # Under docker compose, the worker can start before the API has
+            # finished creating the SQLite schema on first boot.
+            _repair_stale_statuses(engine)
+
             with Session(engine) as session:
                 job = session.exec(
                     select(SimulationJob)
@@ -458,6 +489,17 @@ def poll_loop():
                 execute_job(engine, job.id)
             else:
                 time.sleep(settings.worker_poll_interval)
+
+        except OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                logger.info(
+                    "Database schema not ready yet; retrying in %ds",
+                    settings.worker_poll_interval,
+                )
+                time.sleep(settings.worker_poll_interval)
+                continue
+            logger.exception("Worker database error")
+            time.sleep(settings.worker_poll_interval)
 
         except Exception:
             logger.exception("Worker loop error")

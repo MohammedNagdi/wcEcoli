@@ -102,7 +102,7 @@ class ConditionOut(BaseModel):
 @router.get("/conditions", response_model=list[ConditionOut])
 def list_conditions(session: Session = Depends(get_session)):
     """List all growth conditions."""
-    conditions = session.exec(select(Condition).order_by(Condition.name)).all()
+    conditions = session.exec(select(Condition).order_by(Condition.id)).all()
     return [ConditionOut.model_validate(c, from_attributes=True) for c in conditions]
 
 

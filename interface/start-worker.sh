@@ -21,6 +21,8 @@ export DATABASE_PATH="$SCRIPT_DIR/backend/data/wcecoli.db"
 export WCECOLI_ROOT="$REPO_ROOT"
 export SIM_OUTPUT_DIR="$REPO_ROOT/out"
 export DOCKER_IMAGE="wcecoli-sim:latest"
+export WCECOLI_HOST_RECONSTRUCTION="$REPO_ROOT/reconstruction"
+export WCECOLI_HOST_MODELS="$REPO_ROOT/models"
 export PYTHONPATH="$REPO_ROOT"
 
 cd "$SCRIPT_DIR/backend"
