@@ -14,6 +14,7 @@ the job status through its lifecycle:
 
 import json
 import logging
+import shutil
 import signal
 import subprocess
 import sys
@@ -62,6 +63,22 @@ def _make_run_id(job: SimulationJob, experiment: Experiment) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     label = experiment.gene_symbol or experiment.variant_type
     return ts + "_" + label + "_job" + str(job.id)
+
+
+def _make_batch_parca_run_id(batch_id: str) -> str:
+    """Create a stable shared ParCa directory for all jobs in a batch."""
+    safe_batch_id = "".join(ch if ch.isalnum() else "_" for ch in batch_id)
+    return "batch_" + safe_batch_id + "_parca"
+
+
+def _parca_run_id_for_experiment(run_id: str, experiment: Experiment) -> str:
+    """Return the ParCa directory to use for this experiment.
+
+    Standalone experiments keep their job run directory. Batch experiments
+    deliberately share one stable batch-level ParCa directory so each batch
+    pays the ParCa cost once while each job keeps isolated simulation output.
+    """
+    return _make_batch_parca_run_id(experiment.batch_id) if experiment.batch_id else run_id
 
 
 def _run_docker(
@@ -121,6 +138,34 @@ def _parca_cached(sim_dir: str) -> bool:
     """Check if Parca output already exists for this run directory."""
     kb_path = settings.sim_output_dir / sim_dir / "kb" / "simData.cPickle"
     return kb_path.exists()
+
+
+def _prepare_shared_parca_kb(job_run_id: str, parca_run_id: str, log_buffer: deque):
+    """Expose a batch-level ParCa kb/ directory inside a job output directory."""
+    job_path = settings.sim_output_dir / job_run_id
+    job_path.mkdir(parents=True, exist_ok=True)
+    kb_path = job_path / "kb"
+
+    if kb_path.is_symlink():
+        if kb_path.exists():
+            log_buffer.append("Using shared batch ParCa kb: " + parca_run_id)
+            return
+        kb_path.unlink()
+
+    if kb_path.exists():
+        if _parca_cached(job_run_id):
+            raise RuntimeError(
+                "Job already has a private ParCa kb; restart this job to use shared batch ParCa"
+            )
+        raise RuntimeError("Job kb directory exists but does not contain simData.cPickle")
+
+    relative_target = Path("..") / parca_run_id / "kb"
+    try:
+        kb_path.symlink_to(relative_target, target_is_directory=True)
+        log_buffer.append("Linked job kb to shared batch ParCa: " + str(relative_target))
+    except OSError as exc:
+        log_buffer.append("Could not link shared ParCa kb, copying instead: " + str(exc))
+        shutil.copytree(settings.sim_output_dir / parca_run_id / "kb", kb_path)
 
 
 def _resolve_timeline(session: Session, timeline_name: str) -> str:
@@ -217,8 +262,17 @@ def execute_job(engine, job_id: int):
 
         # Build run directory name
         run_id = _make_run_id(job, experiment)
+        parca_run_id = _parca_run_id_for_experiment(run_id, experiment)
         job.sim_dir = run_id
         job.started_at = _now()
+        if experiment.batch_id:
+            log_buffer.append("Batch ParCa mode enabled: " + parca_run_id)
+            logger.info(
+                "Job %d: batch ParCa mode enabled for batch %s (%s)",
+                job_id,
+                experiment.batch_id,
+                parca_run_id,
+            )
 
         # Update experiment status to running
         experiment.status = "running"
@@ -232,18 +286,29 @@ def execute_job(engine, job_id: int):
         session.add(job)
         session.commit()
 
-        if _parca_cached(run_id):
-            log_buffer.append("Parca output cached — skipping")
-            logger.info("Job %d: Parca cached, skipping", job_id)
+        if _parca_cached(parca_run_id):
+            if experiment.batch_id:
+                log_buffer.append("Batch ParCa output cached — skipping")
+                logger.info("Job %d: batch ParCa cached, skipping (%s)", job_id, parca_run_id)
+            else:
+                log_buffer.append("Parca output cached — skipping")
+                logger.info("Job %d: Parca cached, skipping", job_id)
         else:
             result = _run_docker(
-                ["python", "runscripts/manual/runParca.py", run_id],
-                run_id,
+                ["python", "runscripts/manual/runParca.py", parca_run_id],
+                parca_run_id,
                 log_buffer,
                 "parca",
             )
             if result.returncode != 0:
                 _fail_job(session, job, log_buffer, "Parca failed")
+                return
+
+        if parca_run_id != run_id:
+            try:
+                _prepare_shared_parca_kb(run_id, parca_run_id, log_buffer)
+            except Exception as exc:
+                _fail_job(session, job, log_buffer, "Shared ParCa setup failed: " + str(exc))
                 return
 
         # Phase 2: Simulation

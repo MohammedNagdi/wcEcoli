@@ -198,6 +198,67 @@ class RuntimeContractsTest(unittest.TestCase):
 			SimulationJob(variant_type='gene_knockout', variant_index=884)
 		))
 
+	def test_batch_jobs_share_one_parca_directory(self):
+		experiment = SimpleNamespace(batch_id='batch-123')
+		self.assertEqual(
+			'batch_batch_123_parca',
+			sim_worker._parca_run_id_for_experiment('job-specific-dir', experiment),
+		)
+		self.assertEqual(
+			'job-specific-dir',
+			sim_worker._parca_run_id_for_experiment(
+				'job-specific-dir',
+				SimpleNamespace(batch_id=''),
+			),
+		)
+
+	def test_shared_batch_parca_kb_is_linked_into_job_directory(self):
+		log_buffer = deque(maxlen=20)
+
+		with TemporaryDirectory() as tmpdir:
+			original_sim_output_dir = sim_worker.settings.sim_output_dir
+			sim_worker.settings.sim_output_dir = Path(tmpdir)
+			try:
+				parca_kb = Path(tmpdir) / 'batch_batch_123_parca' / 'kb'
+				parca_kb.mkdir(parents=True)
+				(parca_kb / 'simData.cPickle').write_text('shared')
+
+				sim_worker._prepare_shared_parca_kb(
+					'20260603_gene_job1',
+					'batch_batch_123_parca',
+					log_buffer,
+				)
+
+				job_kb = Path(tmpdir) / '20260603_gene_job1' / 'kb'
+				self.assertTrue(job_kb.exists())
+				self.assertTrue(sim_worker._parca_cached('20260603_gene_job1'))
+				self.assertIn(
+					'Linked job kb to shared batch ParCa: ../batch_batch_123_parca/kb',
+					list(log_buffer),
+				)
+			finally:
+				sim_worker.settings.sim_output_dir = original_sim_output_dir
+
+	def test_existing_private_batch_job_kb_is_rejected(self):
+		log_buffer = deque(maxlen=20)
+
+		with TemporaryDirectory() as tmpdir:
+			original_sim_output_dir = sim_worker.settings.sim_output_dir
+			sim_worker.settings.sim_output_dir = Path(tmpdir)
+			try:
+				job_kb = Path(tmpdir) / '20260603_gene_job1' / 'kb'
+				job_kb.mkdir(parents=True)
+				(job_kb / 'simData.cPickle').write_text('private')
+
+				with self.assertRaisesRegex(RuntimeError, 'private ParCa kb'):
+					sim_worker._prepare_shared_parca_kb(
+						'20260603_gene_job1',
+						'batch_batch_123_parca',
+						log_buffer,
+					)
+			finally:
+				sim_worker.settings.sim_output_dir = original_sim_output_dir
+
 
 if __name__ == '__main__':
 	unittest.main()
