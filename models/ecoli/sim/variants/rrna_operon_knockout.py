@@ -24,6 +24,35 @@ CONTROL_OUTPUT = dict(
 	desc = "Control simulation"
 	)
 
+RICH_CONDITION_ID = 'with_aa'
+MINIMAL_TO_RICH_TIMELINE_ID = '000028_add_aa_long'
+
+
+def set_condition_by_name(sim_data, condition_id):
+	sim_data.condition = condition_id
+	sim_data.external_state.current_timeline_id = condition_id
+	sim_data.external_state.saved_timelines[condition_id] = [
+		(0, sim_data.conditions[condition_id]["nutrients"])
+		]
+
+
+def set_timeline_by_name(sim_data, timeline_id):
+	saved_timelines = sim_data.external_state.saved_timelines
+	if timeline_id not in saved_timelines:
+		raise ValueError(f'Timeline {timeline_id} is not available in sim_data.')
+
+	sim_data.external_state.current_timeline_id = timeline_id
+
+	# Get possible condition from starting nutrients for proper initialization.
+	nutrients = saved_timelines[timeline_id][0][1]
+	conditions = [cond for cond in sim_data.condition_active_tfs
+		if sim_data.conditions[cond]['nutrients'] == nutrients]
+	if len(conditions) == 1:
+		sim_data.condition = conditions[0]
+	else:
+		print('Warning: could not find mapping from nutrients ({}) to condition.'
+			' Using default condition ({}).'.format(nutrients, sim_data.condition))
+
 
 def rrna_operon_knockout(sim_data, index):
 	if index > 0:
@@ -58,25 +87,11 @@ def rrna_operon_knockout(sim_data, index):
 		# Change media conditions for condition indexes 1 and 2
 		condition_id = sim_data.condition
 		if condition_index == 1:
-			condition_labels = sim_data.ordered_conditions
-			condition_id = condition_labels[1]  # Index for rich media condition
-			sim_data.condition = condition_id
-			sim_data.external_state.current_timeline_id = condition_id
-			sim_data.external_state.saved_timelines[condition_id] = [
-				(0, sim_data.conditions[condition_id]["nutrients"])
-				]
+			condition_id = RICH_CONDITION_ID
+			set_condition_by_name(sim_data, condition_id)
 		elif condition_index == 2:
-			saved_timelines = sim_data.external_state.saved_timelines
-			timeline_ids = sorted(saved_timelines)
-			condition_id = timeline_ids[28]  # Index for minimal-to-rich media shift
-			sim_data.external_state.current_timeline_id = condition_id
-
-			# Get possible condition from starting nutrients for proper
-			# initialization
-			nutrients = saved_timelines[condition_id][0][1]
-			conditions = [cond for cond in sim_data.condition_active_tfs
-				if sim_data.conditions[cond]['nutrients'] == nutrients]
-			sim_data.condition = conditions[0]
+			condition_id = MINIMAL_TO_RICH_TIMELINE_ID
+			set_timeline_by_name(sim_data, condition_id)
 
 		return dict(
 			shortName = f"{'_'.join(rRNA_operons_to_ko)}_rrna_knockout_{condition_id}",

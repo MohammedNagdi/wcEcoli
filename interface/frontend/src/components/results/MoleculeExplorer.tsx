@@ -5,6 +5,8 @@ import {
   getMoleculeIds,
   getMoleculeTimeseries,
   searchMolecules,
+  getResultStateExplorer,
+  getStoichiometryNeighborhood,
   getGene,
 } from '../../api/client'
 import { HelpTip } from '../common/HelpTip'
@@ -12,6 +14,10 @@ import type {
   MoleculeTypeInfo,
   MoleculeTimeseries,
   GeneDetail,
+  ResultStateVariable,
+  ResultStateExplorerResponse,
+  StoichiometryMolecule,
+  StoichiometryNeighborhoodResponse,
 } from '../../types'
 
 // Constants
@@ -20,6 +26,11 @@ const TYPE_LABELS: Record<string, string> = {
   mRNA: 'mRNAs',
   rRNA: 'rRNAs',
   mRNA_cistron: 'mRNA (cistron)',
+  reaction_flux: 'Reaction fluxes',
+  exchange_flux: 'Exchange fluxes',
+  metabolite_delta: 'Metabolite deltas',
+  metabolite_count: 'Metabolite counts',
+  aa_pool: 'AA pools',
 }
 
 const CHART_COLORS = [
@@ -29,10 +40,126 @@ const CHART_COLORS = [
 
 const MAX_SELECTED = 5
 
+const ROLE_LABELS: Record<string, string> = {
+  focus: 'Focus gene',
+  downstream_target: 'Downstream target',
+  upstream_regulator: 'Upstream regulator',
+}
+
+const STATE_TYPE_LABELS: Record<string, string> = {
+  protein: 'Protein',
+  mRNA: 'mRNA',
+  complex: 'Complex',
+  'reaction flux': 'Reaction flux',
+  exchange: 'Exchange flux',
+  metabolite: 'Metabolite',
+  'amino acid pool': 'AA pool',
+}
+
+function formatValue(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return 'n/a'
+  if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 0 })
+  if (Math.abs(value) >= 10) return value.toLocaleString(undefined, { maximumFractionDigits: 1 })
+  return value.toLocaleString(undefined, { maximumFractionDigits: 3 })
+}
+
+function formatDeltaPct(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return 'n/a'
+  const sign = value > 0 ? '+' : ''
+  return sign + value.toFixed(1) + '%'
+}
+
+function variableKey(variable: ResultStateVariable) {
+  return variable.molecule_type + ':' + variable.id
+}
+
 function downsample(points: { time: number; value: number }[], max = 500) {
   if (points.length <= max) return points
   const step = Math.ceil(points.length / max)
   return points.filter((_, i) => i % step === 0)
+}
+
+function compactMoleculeId(id: string) {
+  return id
+    .replace(/\[CCO-CYTOSOL\]$/, '[c]')
+    .replace(/\[CCO-PERI-BAC\]$/, '[p]')
+    .replace(/\[CCO-EXTRACELLULAR\]$/, '[e]')
+}
+
+function formatStoichTerm(molecule: StoichiometryMolecule) {
+  const coefficient = Math.abs(molecule.coefficient)
+  const prefix = coefficient === 1 ? '' : coefficient.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' '
+  return prefix + compactMoleculeId(molecule.id)
+}
+
+function StoichiometryPanel({
+  data,
+}: {
+  data: StoichiometryNeighborhoodResponse | null
+}) {
+  if (!data || data.reactions.length === 0) return null
+
+  return (
+    <div className="rounded-lg border border-cyan-100 bg-cyan-50/40 p-3">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-cyan-900">
+            Stoichiometry neighborhood
+          </div>
+          <p className="mt-0.5 text-xs text-cyan-800">
+            Reconstruction reactions catalyzed by {data.focus_gene}; adjacency only, not causal evidence.
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-cyan-700">
+          {data.reactions.length} reaction{data.reactions.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <div className="space-y-2">
+        {data.reactions.slice(0, 6).map((reaction) => {
+          const reactants = reaction.reactants.map(formatStoichTerm).join(' + ') || 'n/a'
+          const products = reaction.products.map(formatStoichTerm).join(' + ') || 'n/a'
+          const plottableMetabolites = [...reaction.reactants, ...reaction.products]
+            .filter((molecule) => molecule.available_types.length > 0)
+            .length
+          return (
+            <div key={reaction.id} className="rounded-md border border-cyan-100 bg-white p-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-xs font-semibold text-gray-900">{reaction.id}</span>
+                <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
+                  {reaction.direction || 'direction n/a'}
+                </span>
+                {reaction.reaction_flux_available && (
+                  <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                    flux plottable
+                  </span>
+                )}
+                {plottableMetabolites > 0 && (
+                  <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700">
+                    {plottableMetabolites} metabolite output{plottableMetabolites === 1 ? '' : 's'}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 font-mono text-[11px] leading-5 text-gray-700">
+                <span className="text-red-700">{reactants}</span>
+                <span className="px-1.5 text-gray-400">-&gt;</span>
+                <span className="text-emerald-700">{products}</span>
+              </div>
+              <div className="mt-1 truncate text-[11px] text-gray-400">
+                catalysts: {reaction.catalysts.join(', ') || 'n/a'}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {data.reactions.length > 6 && (
+        <p className="mt-2 text-xs text-cyan-700">
+          Showing first 6 of {data.reactions.length}; use reaction search for the rest.
+        </p>
+      )}
+    </div>
+  )
 }
 
 // Shared chart builder
@@ -467,6 +594,263 @@ function ExperimentFocusPanel({
   )
 }
 
+export function ResultStateExplorer({
+  jobId,
+  geneSymbol,
+}: {
+  jobId: number
+  geneSymbol?: string
+}) {
+  const [data, setData] = useState<ResultStateExplorerResponse | null>(null)
+  const [stoichiometry, setStoichiometry] = useState<StoichiometryNeighborhoodResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [plottingKey, setPlottingKey] = useState<string | null>(null)
+  const [plotted, setPlotted] = useState<Record<string, MoleculeTimeseries[]>>({})
+
+  useEffect(() => {
+    if (!geneSymbol) {
+      setData(null)
+      setStoichiometry(null)
+      setError(null)
+      return
+    }
+
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setPlotted({})
+
+    getResultStateExplorer(jobId, geneSymbol)
+      .then((response) => {
+        if (!cancelled) setData(response)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message ?? 'Failed to load result state explorer')
+          setData(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    getStoichiometryNeighborhood(jobId, geneSymbol)
+      .then((response) => {
+        if (!cancelled) setStoichiometry(response)
+      })
+      .catch(() => {
+        if (!cancelled) setStoichiometry(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [jobId, geneSymbol])
+
+  const togglePlot = (variable: ResultStateVariable) => {
+    const key = variableKey(variable)
+    if (plotted[key]) {
+      setPlotted((prev) => {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+      return
+    }
+
+    setPlottingKey(key)
+    getMoleculeTimeseries(jobId, variable.molecule_type, [variable.id])
+      .then((response) => {
+        setPlotted((prev) => ({ ...prev, [key]: response.molecules }))
+      })
+      .catch(() => {
+        setPlotted((prev) => ({ ...prev, [key]: [] }))
+      })
+      .finally(() => setPlottingKey(null))
+  }
+
+  if (!geneSymbol) return null
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+        <div className="flex items-center gap-2 text-gray-400 text-sm">
+          <div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+          Resolving result-linked state variables...
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+        <p className="text-sm text-red-600">State explorer unavailable: {error}</p>
+      </div>
+    )
+  }
+
+  if (!data || data.variables.length === 0) return null
+
+  const availableVariables = data.variables.filter((variable) => variable.available)
+  const topVariables = availableVariables.slice(0, 16)
+  const regulatoryEdges = data.edges.filter((edge) => edge.edge_type === 'regulates')
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
+      <div className="px-4 py-3 border-b border-gray-100 bg-slate-50">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+              Result state explorer
+              <HelpTip
+                text="Maps the selected result gene to model state variables that can be plotted directly. Rows are grouped by biological role and ranked by absolute final-value delta versus the matching wildtype job when one is available."
+                position="bottom"
+              />
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Focus <span className="font-mono font-medium">{data.focus_gene}</span>
+              {' '}to mRNAs, proteins, complexes, and regulatory-neighborhood genes.
+            </p>
+          </div>
+          <div className="text-right text-xs text-gray-400">
+            <div>{availableVariables.length} plottable state variable{availableVariables.length === 1 ? '' : 's'}</div>
+            <div>{data.wt_job_id ? 'WT job #' + data.wt_job_id : 'No WT comparison'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-4">
+        <StoichiometryPanel data={stoichiometry} />
+
+        {regulatoryEdges.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Regulatory links</div>
+            <div className="flex flex-wrap gap-1.5">
+              {regulatoryEdges.slice(0, 12).map((edge, index) => {
+                const source = edge.source.replace(/^gene:/, '')
+                const target = edge.target.replace(/^gene:/, '')
+                const isActivation = edge.regulation === 'activation'
+                return (
+                  <span
+                    key={edge.source + edge.target + index}
+                    className={'inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs ' + (
+                      isActivation
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        : 'border-red-200 bg-red-50 text-red-800'
+                    )}
+                  >
+                    <span className="font-mono">{source}</span>
+                    <span>{isActivation ? 'activates' : 'represses'}</span>
+                    <span className="font-mono">{target}</span>
+                    {edge.log2fc != null && (
+                      <span className="text-[10px] opacity-70">
+                        {edge.log2fc > 0 ? '+' : ''}{edge.log2fc.toFixed(1)}
+                      </span>
+                    )}
+                  </span>
+                )
+              })}
+              {regulatoryEdges.length > 12 && (
+                <span className="text-xs text-gray-400 py-1">
+                  +{regulatoryEdges.length - 12} more
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-medium text-gray-500">Recommended state variables</div>
+            <div className="text-xs text-gray-400">
+              final value vs WT delta
+            </div>
+          </div>
+          <div className="border border-gray-200 rounded-lg overflow-x-auto">
+            <div className="min-w-[760px]">
+              <div className="grid grid-cols-[1.1fr_1fr_1.4fr_0.9fr_0.9fr_auto] gap-3 bg-gray-50 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                <span>Role</span>
+                <span>Gene</span>
+                <span>State variable</span>
+                <span className="text-right">Final</span>
+                <span className="text-right">Delta</span>
+                <span />
+              </div>
+              {topVariables.map((variable) => {
+                const key = variableKey(variable)
+                const series = plotted[key]
+                const datasets = series ? buildChartData(series) : []
+                const unit = series?.[0]?.unit ?? 'molecules'
+                const isFocus = variable.role === 'focus'
+                const deltaClass = variable.delta_pct == null
+                  ? 'text-gray-400'
+                  : Math.abs(variable.delta_pct) < 1
+                  ? 'text-gray-500'
+                  : variable.delta_pct > 0
+                  ? 'text-red-600'
+                  : 'text-emerald-600'
+                return (
+                  <div key={key + variable.role} className="border-t border-gray-100 first:border-t-0">
+                    <div className={'grid grid-cols-[1.1fr_1fr_1.4fr_0.9fr_0.9fr_auto] gap-3 px-3 py-2 text-xs items-center ' + (isFocus ? 'bg-amber-50/60' : 'bg-white')}>
+                      <span className="text-gray-500">{ROLE_LABELS[variable.role] ?? variable.role}</span>
+                      <span className="font-mono font-medium text-bio-gene">{variable.gene_symbol}</span>
+                      <span className="min-w-0">
+                        <span className="inline-flex max-w-full items-center gap-1.5">
+                          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
+                            {STATE_TYPE_LABELS[variable.display_type] ?? variable.display_type}
+                          </span>
+                          <span className="truncate font-mono text-gray-800">{variable.id}</span>
+                        </span>
+                      </span>
+                      <span className="text-right font-mono text-gray-700">{formatValue(variable.final_value)}</span>
+                      <span className={'text-right font-mono font-medium ' + deltaClass}>
+                        {formatDeltaPct(variable.delta_pct)}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!variable.available || plottingKey === key}
+                        onClick={() => togglePlot(variable)}
+                        className={'rounded px-2 py-1 text-xs font-medium transition-colors ' + (
+                          variable.available
+                            ? plotted[key]
+                              ? 'bg-gray-900 text-white'
+                              : 'bg-brand-50 text-brand-700 hover:bg-brand-100'
+                            : 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                        )}
+                      >
+                        {plottingKey === key ? 'Loading' : plotted[key] ? 'Hide' : 'Plot'}
+                      </button>
+                    </div>
+                    {series && (
+                      <div className="px-3 pb-3 bg-white">
+                        {datasets.length > 0 ? (
+                          <MoleculeChart datasets={datasets} unit={unit} />
+                        ) : (
+                          <p className="text-xs text-gray-400 py-3">
+                            No trajectory was returned for {variable.id}.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        {data.unavailable_count > 0 && (
+          <p className="text-xs text-gray-400">
+            {data.unavailable_count} linked state variable{data.unavailable_count === 1 ? '' : 's'} are cataloged but not exposed as plottable molecule outputs for this job.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Main Molecule Explorer
 export function MoleculeExplorer({
   jobId,
@@ -589,10 +973,7 @@ export function MoleculeExplorer({
       )}
 
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <button
-          onClick={() => setExplorerOpen(!explorerOpen)}
-          className="w-full px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between hover:bg-gray-100 transition-colors"
-        >
+        <div className="w-full px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
           <div className="text-left">
             <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
               Molecule Explorer
@@ -602,10 +983,17 @@ export function MoleculeExplorer({
               Search and plot any of the {totalCount} tracked proteins, mRNAs, and rRNAs
             </p>
           </div>
-          <span className={'text-gray-400 transition-transform ' + (explorerOpen ? 'rotate-180' : '')}>
-            &#9660;
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setExplorerOpen(!explorerOpen)}
+            className="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            aria-label={explorerOpen ? 'Collapse molecule explorer' : 'Expand molecule explorer'}
+          >
+            <span className={'block transition-transform ' + (explorerOpen ? 'rotate-180' : '')}>
+              &#9660;
+            </span>
+          </button>
+        </div>
 
         {explorerOpen && (
           <div className="p-4">

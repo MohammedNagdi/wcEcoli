@@ -122,6 +122,13 @@ def list_timelines(session: Session = Depends(get_session)):
 
 # --- Variants ---
 
+INTERNAL_VARIANT_NAMES = {
+    "apply_variant",
+    "template",
+    "template_internal_shift",
+}
+
+
 class VariantOut(BaseModel):
     name: str
     docstring: str
@@ -130,6 +137,10 @@ class VariantOut(BaseModel):
 
 @router.get("/variants", response_model=list[VariantOut])
 def list_variants(session: Session = Depends(get_session)):
-    """List all simulation variant types."""
+    """List user-facing simulation variant types."""
     variants = session.exec(select(Variant).order_by(Variant.name)).all()
-    return [VariantOut.model_validate(v, from_attributes=True) for v in variants]
+    return [
+        VariantOut.model_validate(v, from_attributes=True)
+        for v in variants
+        if v.name not in INTERNAL_VARIANT_NAMES
+    ]

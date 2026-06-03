@@ -180,6 +180,13 @@ export function MLPage() {
         </p>
       </div>
 
+      <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p className="font-medium">Application scope</p>
+        <p className="mt-1">
+          ML models are most meaningful after the platform accumulates enough completed, condition-diverse simulation results. Use the current page as a data-readiness and prototype-training surface, not a finalized biological predictor.
+        </p>
+      </div>
+
       {/* Data overview cards */}
       {loading ? (
         <div className="text-center py-8 text-gray-400">

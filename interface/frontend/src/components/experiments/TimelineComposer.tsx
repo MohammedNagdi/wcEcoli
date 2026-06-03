@@ -364,6 +364,12 @@ export function TimelineComposer({
   })
 
   const ticks = Array.from({ length: Math.floor(maxSec / TICK_INTERVAL_SEC) + 1 }, (_, i) => i * TICK_INTERVAL_SEC)
+  const markerLeft = (timeSec: number) => {
+    const pct = (timeSec / maxSec) * 100
+    if (timeSec <= 0) return '2rem'
+    if (timeSec >= maxSec) return 'calc(100% - 2rem)'
+    return `min(max(${pct}%, 2rem), calc(100% - 2rem))`
+  }
 
   return (
     <div className="space-y-4">
@@ -623,7 +629,7 @@ export function TimelineComposer({
               onPointerCancel={finishMarkerDrag}
               className={`absolute top-2 z-10 flex max-w-[150px] -translate-x-1/2 touch-none items-center gap-1 rounded-full border-2 border-white px-2 py-1 text-[11px] font-medium text-white shadow transition-transform ${ev.timeSec === 0 ? 'cursor-not-allowed opacity-90' : isDragging ? 'scale-110 cursor-grabbing ring-2 ring-white/70' : 'cursor-grab hover:scale-105 active:cursor-grabbing'}`}
               title={ev.timeSec === 0 ? 'Starting vial is fixed at 0s' : `Drag left or right to adjust shift time. Crossing another shift will reorder the ${entryNounSingular}.`}
-              style={{ left: `${(ev.timeSec / maxSec) * 100}%`, backgroundColor: HEX_COLORS[colorIdx(ev.mediaId)] }}
+              style={{ left: markerLeft(ev.timeSec), backgroundColor: HEX_COLORS[colorIdx(ev.mediaId)] }}
             >
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white" />
               <span className="truncate">{fmtSec(markerTime)}</span>
@@ -642,8 +648,11 @@ export function TimelineComposer({
             t === 0 ? null : (
             <span
               key={t}
-              className={`absolute text-xs text-gray-400 ${t === 0 ? 'translate-x-0' : '-translate-x-1/2'}`}
-              style={{ left: `${(t / maxSec) * 100}%` }}
+              className="absolute text-xs text-gray-400"
+              style={{
+                left: t >= maxSec ? '100%' : `${(t / maxSec) * 100}%`,
+                transform: t >= maxSec ? 'translateX(-100%)' : 'translateX(-50%)',
+              }}
             >
               {fmtSec(t)}
             </span>

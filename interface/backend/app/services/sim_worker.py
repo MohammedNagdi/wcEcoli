@@ -181,6 +181,29 @@ def _resolve_condition_timeline(session: Session, condition_name: str) -> str:
 
 # ── Main job execution ───────────────────────────────────────────────────────
 
+ENVIRONMENT_MANAGED_VARIANTS = {
+    "condition",
+    "add_one_aa",
+    "remove_one_aa",
+    "add_one_aa_shift",
+    "remove_one_aa_shift",
+    "remove_aas_shift",
+    "ppgpp_conc",
+    "sinusoidal_media",
+    "new_gene_internal_shift",
+}
+
+
+def _variant_manages_environment(job: SimulationJob) -> bool:
+    if job.variant_type in ENVIRONMENT_MANAGED_VARIANTS:
+        return True
+    if job.variant_type == "tf_activity" and job.variant_index != 0:
+        return True
+    if job.variant_type in {"rrna_location", "rrna_orientation", "rrna_operon_knockout"}:
+        return job.variant_index != 0
+    return False
+
+
 def execute_job(engine, job_id: int):
     """Execute a single simulation job through the full pipeline."""
     log_buffer: deque[str] = deque(maxlen=settings.log_tail_lines)
@@ -251,7 +274,12 @@ def execute_job(engine, job_id: int):
             "--seed", str(job.seed),
             "--generations", str(job.generations),
         ]
-        if job.timeline:
+        if _variant_manages_environment(job):
+            log_buffer.append(
+                "Variant '" + job.variant_type + "' manages the model environment; "
+                "skipping external condition/timeline arguments."
+            )
+        elif job.timeline:
             # Explicit timeline takes precedence over condition.
             # The --timeline CLI flag expects the raw events string
             # (e.g. "0 minimal, 1200 minimal_plus_amino_acids"), not

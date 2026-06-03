@@ -22,8 +22,12 @@ from wholecell.utils import units
 
 
 FACTORS = [0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2]
-CONDITIONS = [0, 2]  # minimal and minimal+AA
+CONDITIONS = ['basal', 'with_aa']  # minimal and minimal+AA
 BASE_FACTOR = [1, 0.4]  # factors that correspond to expected concentration in CONDITIONS
+
+
+def condition_index(sim_data, condition_label):
+	return sim_data.ordered_conditions.index(condition_label)
 
 
 class ppGpp():
@@ -46,9 +50,9 @@ def split_index(index):
 	return CONDITIONS[condition_index], FACTORS[factor_index]
 
 def ppgpp_conc(sim_data, index):
-	condition_index, factor = split_index(index)
+	condition_label, factor = split_index(index)
 
-	_, sim_data = condition(sim_data, condition_index)
+	_, sim_data = condition(sim_data, condition_index(sim_data, condition_label))
 	control_conc = sim_data.growth_rate_parameters.get_ppGpp_conc(sim_data.doubling_time)
 	new_conc = factor * control_conc
 

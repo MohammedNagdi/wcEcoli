@@ -125,6 +125,13 @@ export function DesignPage() {
         </p>
       </div>
 
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p className="font-medium">Application scope</p>
+        <p className="mt-1">
+          This page is useful when a sufficiently broad knockout result library exists. Treat current calls as exploratory summaries until condition-rich simulation batches support a dedicated minimal-genome design workflow.
+        </p>
+      </div>
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <SummaryCard label="Total genes" value={overview.total_genes} />

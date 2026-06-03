@@ -234,6 +234,7 @@ function SelectedGeneSummary({
 interface PathwayMatch {
   pathway: AAPathway
   role: 'Forward' | 'Reverse' | 'Forward/reverse' | 'Annotated'
+  evidence: string[]
 }
 
 function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPathway[] }) {
@@ -250,7 +251,7 @@ function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPath
         </span>
       </div>
       <div className="grid gap-2">
-        {matches.slice(0, 4).map(({ pathway, role }) => (
+        {matches.slice(0, 4).map(({ pathway, role, evidence }) => (
           <div key={pathway.amino_acid + role} className="rounded-md border border-amber-100 bg-white px-2.5 py-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-sm font-semibold text-gray-900">{pathway.amino_acid}</span>
@@ -258,6 +259,15 @@ function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPath
                 {role}
               </span>
             </div>
+            {evidence.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {evidence.slice(0, 3).map((item) => (
+                  <span key={item} className="rounded-full border border-amber-100 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-500">
               <span>
                 kcat <span className="font-mono text-gray-700">{formatKineticValue(pathway.kcat, 's^-1')}</span>
@@ -353,14 +363,22 @@ function pathwayMatchesForGene(gene: GeneDetail, pathways: AAPathway[]): Pathway
   if (identifiers.size === 0) return []
 
   return pathways.flatMap((pathway): PathwayMatch[] => {
-    const forward = parseList(pathway.enzymes).some((enzyme) => identifiers.has(normalizeId(enzyme)))
-    const reverse = parseList(pathway.reverse_enzymes).some((enzyme) => identifiers.has(normalizeId(enzyme)))
-    const annotated = parseAnnotatedGenes(pathway.notes).some((symbol) => normalizeId(symbol) === normalizeId(gene.symbol))
+    const forwardHits = parseList(pathway.enzymes).filter((enzyme) => identifiers.has(normalizeId(enzyme)))
+    const reverseHits = parseList(pathway.reverse_enzymes).filter((enzyme) => identifiers.has(normalizeId(enzyme)))
+    const annotatedHits = parseAnnotatedGenes(pathway.notes).filter((symbol) => normalizeId(symbol) === normalizeId(gene.symbol))
+    const forward = forwardHits.length > 0
+    const reverse = reverseHits.length > 0
+    const annotated = annotatedHits.length > 0
 
     if (!forward && !reverse && !annotated) return []
     return [{
       pathway,
       role: forward && reverse ? 'Forward/reverse' : forward ? 'Forward' : reverse ? 'Reverse' : 'Annotated',
+      evidence: [
+        ...forwardHits.map((enzyme) => `enzyme: ${enzyme}`),
+        ...reverseHits.map((enzyme) => `reverse: ${enzyme}`),
+        ...annotatedHits.map((symbol) => `note: ${symbol}`),
+      ],
     }]
   })
 }

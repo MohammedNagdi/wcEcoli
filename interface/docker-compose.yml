@@ -7,7 +7,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app
-      - ../reconstruction:/data/reconstruction:ro
+      - ../reconstruction:/data/reconstruction:rw
       - ../models:/data/models:ro
       - api-db:/app/data
       - sim-output:/data/out:ro

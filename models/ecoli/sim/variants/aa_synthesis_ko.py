@@ -13,8 +13,12 @@ Expected variant indices (depends on the enzymes in sim_data.process.metabolism.
 from .condition import condition
 
 
+def condition_index(sim_data, condition_label):
+	return sim_data.ordered_conditions.index(condition_label)
+
+
 def aa_synthesis_ko(sim_data, index):
-	_, sim_data = condition(sim_data, 2)
+	_, sim_data = condition(sim_data, condition_index(sim_data, 'with_aa'))
 
 	metabolism = sim_data.process.metabolism
 	complexation = sim_data.process.complexation

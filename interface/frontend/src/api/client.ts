@@ -6,13 +6,14 @@
 import type {
   Gene, GeneDetail, GeneSearchResult, CategoryCount,
   TFNetwork, TFNode, AAPathway, Condition, Timeline, MediaRecipe, UserTimeline, Variant,
-  BuilderDraft, BuilderDraftCollection, BuilderDraftSection,
+  BuilderDraft, BuilderDraftCollection, BuilderDraftSection, BuilderPublishPreview,
   VariantDetail, Experiment, ExperimentCreate,
   BatchRequest, BatchResponse, BatchSummary, BatchDetail, BatchRunResponse,
   SimulationJob, SimulationResult, RunJobRequest, RunResponse, ResultsResponse,
   ExperimentAggregation,
   FeatureExtractionResponse,
-  MoleculeListResponse, MoleculeIdsResponse, MoleculeTimeseriesResponse,
+  MoleculeListResponse, MoleculeIdsResponse, MoleculeTimeseriesResponse, ResultStateExplorerResponse,
+  StoichiometryNeighborhoodResponse,
   TrainRequest, TrainResponse, DataSummary,
   DesignOverview, EssentialityStats,
   ComparisonResponse, FailedJobSummary,
@@ -184,6 +185,13 @@ export async function publishBuilderDraft(
   })
 }
 
+export async function previewBuilderDraft(
+  section: BuilderDraftSection,
+  draftId: number,
+): Promise<BuilderPublishPreview> {
+  return fetchJSON(`/builder-drafts/${section}/${draftId}/preview`)
+}
+
 export async function getVariants(): Promise<Variant[]> {
   return fetchJSON('/variants')
 }
@@ -337,6 +345,20 @@ export async function searchMolecules(
   query: string
 ): Promise<{ query: string; results: Record<string, string[]>; total_matches: number }> {
   return fetchJSON(`/jobs/${jobId}/molecules/search?q=${encodeURIComponent(query)}`)
+}
+
+export async function getResultStateExplorer(
+  jobId: number,
+  gene: string
+): Promise<ResultStateExplorerResponse> {
+  return fetchJSON(`/jobs/${jobId}/state-explorer?gene=${encodeURIComponent(gene)}`)
+}
+
+export async function getStoichiometryNeighborhood(
+  jobId: number,
+  gene: string
+): Promise<StoichiometryNeighborhoodResponse> {
+  return fetchJSON(`/jobs/${jobId}/stoichiometry-neighborhood?gene=${encodeURIComponent(gene)}`)
 }
 
 // --- Features (ML) ---

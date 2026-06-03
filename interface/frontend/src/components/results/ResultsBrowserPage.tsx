@@ -312,6 +312,7 @@ export function ResultsBrowserPage() {
   const doneCount = jobs.filter((j) => j.status === 'done').length
   const activeCount = jobs.filter((j) => isActive(j.status)).length
   const failedCount = jobs.filter((j) => j.status === 'failed').length
+  const recentHistory = [...jobs].sort((a, b) => b.id - a.id).slice(0, 6)
 
   // Group jobs by experiment
   const experimentGroups = new Map<number, SimulationJob[]>()
@@ -415,6 +416,61 @@ export function ResultsBrowserPage() {
           <p className="text-2xl font-semibold text-red-600">{failedCount}</p>
         </div>
       </div>
+
+      {jobs.length > 0 && (
+        <section className="mb-6 rounded-lg border border-gray-200 bg-white">
+          <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Run history</h2>
+              <p className="text-xs text-gray-400">Recent local jobs, grouped like analysis artifacts so users can trace result provenance.</p>
+            </div>
+            <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500">
+              {jobs.length} artifact{jobs.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {recentHistory.map((job) => {
+              const exp = experiments.get(job.experiment_id)
+              return (
+                <div key={job.id} className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[1fr,120px,120px,90px] md:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-gray-400">job #{job.id}</span>
+                      <p className="truncate font-medium text-gray-900">{exp?.name ?? 'Experiment #' + job.experiment_id}</p>
+                      {exp?.gene_symbol && (
+                        <span className="rounded bg-green-50 px-1.5 py-0.5 font-mono text-xs text-green-700">{exp.gene_symbol}</span>
+                      )}
+                    </div>
+                    <p className="mt-1 truncate text-xs text-gray-400">
+                      {variantLabel(job.variant_type)} - {job.condition || exp?.condition || 'basal'} - seed {job.seed}
+                    </p>
+                  </div>
+                  <span className={'w-fit rounded px-2 py-1 text-xs font-medium ' + (
+                    JOB_STATUS_COLORS[job.status] ?? 'bg-gray-100 text-gray-600'
+                  )}>
+                    {statusLabel(job.status)}
+                  </span>
+                  <span className="text-xs text-gray-400">{formatDate(job.started_at)}</span>
+                  <div className="text-right">
+                    {job.status === 'done' ? (
+                      <Link
+                        to={'/results/' + job.id}
+                        className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        Open
+                      </Link>
+                    ) : job.status === 'failed' && job.error_message ? (
+                      <span className="text-xs text-red-400" title={job.error_message}>Error</span>
+                    ) : (
+                      <span className="text-xs text-gray-300">Pending</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {loading ? (
         <div className="text-center py-12 text-gray-400">

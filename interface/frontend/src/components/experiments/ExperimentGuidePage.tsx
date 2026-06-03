@@ -366,6 +366,12 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORY_ORDER = ['core', 'amino_acid', 'ppgpp', 'ribosome', 'metabolism', 'advanced'] as const
 
+const INTERNAL_VARIANTS = new Set([
+  'apply_variant',
+  'template',
+  'template_internal_shift',
+])
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -389,6 +395,7 @@ export function ExperimentGuidePage() {
       groups[cat] = []
     }
     for (const v of variants) {
+      if (INTERNAL_VARIANTS.has(v.name)) continue
       const docs = VARIANT_DOCS[v.name]
       const cat = docs?.category ?? 'advanced'
       if (!groups[cat]) groups[cat] = []

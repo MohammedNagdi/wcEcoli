@@ -14,6 +14,9 @@ import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 
 const VIEW_SIZE = 800
 const CENTER = 400
+const MIN_ZOOM = 1
+const MAX_ZOOM = 16
+const FOCUS_ZOOM = 8
 const FORWARD_INNER_R = 300
 const FORWARD_OUTER_R = 340
 const REVERSE_INNER_R = 260
@@ -54,6 +57,7 @@ export function CircularGenomeMap({
 }: Props) {
   const { setWorkspaceUrlState } = useUrlWorkspaceState()
   const containerRef = useRef<HTMLDivElement>(null)
+  const mapFrameRef = useRef<HTMLDivElement>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -125,11 +129,12 @@ export function CircularGenomeMap({
       : (FORWARD_INNER_R + FORWARD_OUTER_R) / 2
     const arcX = CENTER + focusRadius * Math.cos(midAngle)
     const arcY = CENTER + focusRadius * Math.sin(midAngle)
-    const targetZoom = 8
-    setZoom(targetZoom)
-    setPan({
-      x: (CENTER - arcX) * targetZoom,
-      y: (CENTER - arcY) * targetZoom,
+    window.requestAnimationFrame(() => {
+      setZoom(FOCUS_ZOOM)
+      setPan({
+        x: (CENTER - arcX) * FOCUS_ZOOM,
+        y: (CENTER - arcY) * FOCUS_ZOOM,
+      })
     })
     hasAppliedFocusRef.current = focusGene
   }, [focusGene, positionedGenes])
@@ -139,12 +144,27 @@ export function CircularGenomeMap({
     if (!container) return
 
     const handleNativeWheel = (event: globalThis.WheelEvent) => {
-      event.preventDefault()
+      if (event.cancelable) event.preventDefault()
       event.stopPropagation()
-      const factor = Math.exp(-event.deltaY * 0.002)
+      const rect = mapFrameRef.current?.getBoundingClientRect()
+      const point = rect
+        ? {
+            x: ((event.clientX - rect.left) / rect.width) * VIEW_SIZE,
+            y: ((event.clientY - rect.top) / rect.height) * VIEW_SIZE,
+          }
+        : { x: CENTER, y: CENTER }
+      const normalizedDelta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
+      const factor = Math.exp(-normalizedDelta * 0.0015)
       setZoom((current) => {
-        const next = Math.min(16, Math.max(1, current * factor))
-        if (next === 1) setPan({ x: 0, y: 0 })
+        const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current * factor))
+        const ratio = current === 0 ? 1 : next / current
+        setPan((currentPan) => {
+          if (next === MIN_ZOOM) return { x: 0, y: 0 }
+          return {
+            x: currentPan.x - (point.x - CENTER) * (ratio - 1),
+            y: currentPan.y - (point.y - CENTER) * (ratio - 1),
+          }
+        })
         return next
       })
     }
@@ -172,7 +192,7 @@ export function CircularGenomeMap({
   }
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
-    if (zoom <= 1 || event.button !== 0) return
+    if (zoom <= MIN_ZOOM || event.button !== 0) return
     event.currentTarget.setPointerCapture(event.pointerId)
     setDrag({
       x: event.clientX,
@@ -205,7 +225,10 @@ export function CircularGenomeMap({
       }`}
       style={{ overscrollBehavior: 'contain', touchAction: 'none' }}
     >
-      <div className={`relative mx-auto aspect-square overflow-hidden rounded-xl ${compact ? 'h-full max-h-[420px] max-w-full' : 'h-full max-w-full'} ${palette.wrapperCls}`}>
+      <div
+        ref={mapFrameRef}
+        className={`relative mx-auto aspect-square overflow-hidden rounded-xl ${compact ? 'h-full max-h-[420px] max-w-full' : 'h-full max-w-full'} ${palette.wrapperCls}`}
+      >
         <svg
           viewBox={`0 0 ${VIEW_SIZE} ${VIEW_SIZE}`}
           className={`h-full w-full select-none ${zoom > 1 ? 'cursor-grab' : ''} ${
@@ -221,7 +244,7 @@ export function CircularGenomeMap({
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
               transformOrigin: `${CENTER}px ${CENTER}px`,
-              transition: drag ? 'none' : 'transform 120ms ease-out',
+              transition: drag ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
             <GenomeTicks posText={palette.posText} />
@@ -298,7 +321,7 @@ export function CircularGenomeMap({
 
       <div className="absolute left-4 top-4 flex items-center gap-2 rounded-md bg-gray-950/70 px-2.5 py-1.5 text-xs text-gray-300">
         <span>{zoom.toFixed(1)}x</span>
-        {zoom > 1 && (
+        {zoom > MIN_ZOOM && (
           <button
             onClick={() => {
               setZoom(1)

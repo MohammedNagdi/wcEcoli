@@ -13,7 +13,7 @@ import {
   Filler,
 } from 'chart.js'
 import { getJob, getJobTimeseries, getExperiment, getGeneByKoIndex, getWtDelta } from '../../api/client'
-import { MoleculeExplorer } from './MoleculeExplorer'
+import { MoleculeExplorer, ResultStateExplorer } from './MoleculeExplorer'
 import { HelpTip, HelpNote } from '../common/HelpTip'
 import type { SimulationJob, ResultsResponse, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
@@ -363,6 +363,10 @@ export function ResultsPage() {
             <strong>Model depth:</strong>{' '}The wcEcoli model tracks transcription, translation, and degradation for all 4,749 E. coli genes, but only ~1,500 have <em>mechanistic downstream effects</em> (enzymatic reactions, TF regulation, complex formation). The remaining genes are passengers: their mRNA and protein levels are simulated, but knocking them out may not visibly alter growth rate.
           </HelpNote>
           <div className="mt-3" />
+          <ResultStateExplorer
+            jobId={job.id}
+            geneSymbol={resolvedGeneSymbol}
+          />
           <MoleculeExplorer
             jobId={job.id}
             geneSymbol={resolvedGeneSymbol}

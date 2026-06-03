@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app.db.models import BuilderSectionDraft
 from app.main import get_session
-from app.services.builder_publish import publish_builder_draft
+from app.services.builder_publish import preview_builder_draft, publish_builder_draft
 
 router = APIRouter(prefix="/api/builder-drafts", tags=["builder-drafts"])
 
@@ -43,6 +43,20 @@ class BuilderDraftCollectionOut(BaseModel):
     condition: list[BuilderDraftOut] = Field(default_factory=list)
     tfCondition: list[BuilderDraftOut] = Field(default_factory=list)
     timeline: list[BuilderDraftOut] = Field(default_factory=list)
+
+
+class BuilderPublishPreviewChange(BaseModel):
+    file: str
+    action: str
+    rows: list[str] = Field(default_factory=list)
+
+
+class BuilderPublishPreviewOut(BaseModel):
+    section: BuilderSectionName
+    draft_id: int
+    draft_name: str
+    changes: list[BuilderPublishPreviewChange] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 def _now_iso() -> str:
@@ -190,6 +204,20 @@ def delete_builder_section_draft(
 
     session.delete(draft)
     session.commit()
+
+
+@router.get("/{section}/{draft_id}/preview", response_model=BuilderPublishPreviewOut)
+def preview_builder_section_draft(
+    section: str,
+    draft_id: int,
+    session: Session = Depends(get_session),
+):
+    normalized_section = _require_valid_section(section)
+    draft = session.get(BuilderSectionDraft, draft_id)
+    if not draft or draft.section != normalized_section:
+        raise HTTPException(status_code=404, detail="Builder draft not found.")
+
+    return preview_builder_draft(session, draft)
 
 
 @router.post("/{section}/{draft_id}/publish", response_model=BuilderDraftOut)

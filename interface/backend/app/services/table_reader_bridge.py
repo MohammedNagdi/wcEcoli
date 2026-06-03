@@ -339,7 +339,9 @@ class SimOutReader:
         """List available molecule IDs for a given type.
 
         Args:
-            molecule_type: One of 'protein', 'mRNA', 'rRNA', 'mRNA_cistron'
+            molecule_type: One of 'protein', 'mRNA', 'rRNA', 'mRNA_cistron',
+                'reaction_flux', 'exchange_flux', 'metabolite_delta',
+                'metabolite_count', or 'aa_pool'
         """
         attr_map = {
             "protein":       ("MonomerCounts", "monomerIds"),
@@ -347,6 +349,11 @@ class SimOutReader:
             "rRNA":          ("RNACounts",     "rRNA_ids"),
             "mRNA_cistron":  ("RNACounts",     "mRNA_cistron_ids"),
             "rRNA_cistron":  ("RNACounts",     "rRNA_cistron_ids"),
+            "reaction_flux": ("FBAResults",    "reactionIDs"),
+            "exchange_flux": ("FBAResults",    "externalMoleculeIDs"),
+            "metabolite_delta": ("FBAResults", "metaboliteNames"),
+            "metabolite_count": ("EnzymeKinetics", "metaboliteNames"),
+            "aa_pool":       ("GrowthLimits",  "aaIds"),
         }
         if molecule_type not in attr_map:
             raise ValueError(
@@ -406,6 +413,36 @@ class SimOutReader:
                 "column": "mRNA_cistron_counts",
                 "ids_attr": "mRNA_cistron_ids",
                 "unit": "molecules",
+            },
+            "reaction_flux": {
+                "table": "FBAResults",
+                "column": "reactionFluxes",
+                "ids_attr": "reactionIDs",
+                "unit": "mmol/gDCW/h",
+            },
+            "exchange_flux": {
+                "table": "FBAResults",
+                "column": "externalExchangeFluxes",
+                "ids_attr": "externalMoleculeIDs",
+                "unit": "mmol/gDCW/h",
+            },
+            "metabolite_delta": {
+                "table": "FBAResults",
+                "column": "deltaMetabolites",
+                "ids_attr": "metaboliteNames",
+                "unit": "counts",
+            },
+            "metabolite_count": {
+                "table": "EnzymeKinetics",
+                "column": "metaboliteCountsFinal",
+                "ids_attr": "metaboliteNames",
+                "unit": "counts",
+            },
+            "aa_pool": {
+                "table": "GrowthLimits",
+                "column": "aaPoolSize",
+                "ids_attr": "aaIds",
+                "unit": "counts",
             },
         }
 
@@ -485,6 +522,11 @@ class SimOutReader:
             "mRNA_cistron": ("RNACounts", "mRNA_cistron_ids",
                              ["mRNA_cistron_counts", "full_mRNA_cistron_counts",
                               "partial_mRNA_cistron_counts"]),
+            "reaction_flux": ("FBAResults", "reactionIDs", ["reactionFluxes"]),
+            "exchange_flux": ("FBAResults", "externalMoleculeIDs", ["externalExchangeFluxes"]),
+            "metabolite_delta": ("FBAResults", "metaboliteNames", ["deltaMetabolites"]),
+            "metabolite_count": ("EnzymeKinetics", "metaboliteNames", ["metaboliteCountsFinal"]),
+            "aa_pool": ("GrowthLimits", "aaIds", ["aaPoolSize"]),
         }
 
         if molecule_type not in type_info:

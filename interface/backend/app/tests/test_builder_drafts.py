@@ -151,6 +151,82 @@ def test_duplicate_names_conflict_within_section_only():
         tempdir.cleanup()
 
 
+def test_preview_media_publish_reports_rows_without_writing_files():
+    tempdir, client = _build_client()
+    root = Path(tempdir.name)
+    media_path = root / 'ecoli' / 'flat' / 'condition' / 'media' / 'PREVIEW_MIX.tsv'
+    environment_path = root / 'ecoli' / 'flat' / 'condition' / 'environment_molecules.tsv'
+    original_environment = environment_path.read_text(encoding='utf-8')
+
+    try:
+        with _SettingsOverride(root):
+            draft = client.post(
+                "/api/builder-drafts/media",
+                json={
+                    "name": "preview-medium",
+                    "payload": {
+                        "mode": "create",
+                        "draft_name": "PREVIEW_MIX",
+                        "rows": [
+                            {"molecule_id": "GLC", "concentration": "20"},
+                            {"molecule_id": "PREVIEW_SRC", "concentration": "5"},
+                        ],
+                        "environment_rows": [
+                            {
+                                "molecule_id": "PREVIEW_SRC",
+                                "exchange_molecule_location": "[p]",
+                                "formula_weight": "None",
+                            }
+                        ],
+                    },
+                },
+            ).json()
+
+            preview = client.get(f"/api/builder-drafts/media/{draft['id']}/preview")
+            assert preview.status_code == 200
+            payload = preview.json()
+            assert payload["section"] == "media"
+            assert payload["draft_name"] == "preview-medium"
+            assert payload["warnings"] == []
+
+            changes = {change["file"]: change for change in payload["changes"]}
+            assert changes["condition/environment_molecules.tsv"]["action"] == "append"
+            assert "PREVIEW_SRC\t[p]\tNone" in changes["condition/environment_molecules.tsv"]["rows"]
+            assert changes["condition/media/PREVIEW_MIX.tsv"]["action"] == "create"
+            assert "GLC\t20" in changes["condition/media/PREVIEW_MIX.tsv"]["rows"]
+
+            assert not media_path.exists()
+            assert environment_path.read_text(encoding='utf-8') == original_environment
+    finally:
+        tempdir.cleanup()
+
+
+def test_preview_media_publish_surfaces_existing_file_warning():
+    tempdir, client = _build_client()
+    try:
+        with _SettingsOverride(Path(tempdir.name)):
+            draft = client.post(
+                "/api/builder-drafts/media",
+                json={
+                    "name": "duplicate-medium",
+                    "payload": {
+                        "mode": "create",
+                        "draft_name": "MIX0-57",
+                        "rows": [{"molecule_id": "GLC", "concentration": "10"}],
+                    },
+                },
+            ).json()
+
+            preview = client.get(f"/api/builder-drafts/media/{draft['id']}/preview")
+            assert preview.status_code == 200
+            payload = preview.json()
+            assert payload["changes"][0]["file"] == "condition/media/MIX0-57.tsv"
+            assert payload["changes"][0]["action"] == "create"
+            assert payload["warnings"] == ["Growth medium 'MIX0-57' already exists and publish will be rejected."]
+    finally:
+        tempdir.cleanup()
+
+
 def test_publish_flow_updates_files_and_marks_draft_published():
     tempdir, client = _build_client()
     root = Path(tempdir.name)

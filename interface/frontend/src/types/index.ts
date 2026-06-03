@@ -110,6 +110,20 @@ export interface BuilderDraftCollection {
   timeline: BuilderDraft[]
 }
 
+export interface BuilderPublishPreviewChange {
+  file: string
+  action: string
+  rows: string[]
+}
+
+export interface BuilderPublishPreview {
+  section: BuilderDraftSection
+  draft_id: number
+  draft_name: string
+  changes: BuilderPublishPreviewChange[]
+  warnings: string[]
+}
+
 export interface MediaStockRow {
   molecule_id: string
   concentration: string
@@ -191,11 +205,22 @@ export interface VariantDetail extends Variant {
     condition_count?: number
     valid_remainder_range?: [number, number]
     tf_names?: string[]
+    tf_state_details?: Record<string, {
+      active_molecule?: string
+      active_nutrients?: string
+      active_perturbations?: string
+      inactive_nutrients?: string
+      inactive_perturbations?: string
+      tf_type?: string
+    }>
     condition_names?: string[]
     supports_gene_lookup?: boolean
     hide_index?: boolean
     timeline_behavior?: 'composer' | 'internal_override' | 'internal_conditional_override'
     timeline_notice?: string
+    environment_lock?: 'fixed' | 'conditional' | 'tf_state'
+    fixed_condition?: string
+    fixed_timeline?: string
   }
 }
 
@@ -657,4 +682,70 @@ export interface MoleculeTimeseriesResponse {
   job_id: number
   molecule_type: string
   molecules: MoleculeTimeseries[]
+}
+
+export interface ResultStateVariable {
+  id: string
+  molecule_type: string
+  display_type: string
+  role: string
+  gene_symbol: string
+  gene_name: string | null
+  available: boolean
+  final_value: number | null
+  wt_final_value: number | null
+  delta: number | null
+  delta_pct: number | null
+  rank_score: number | null
+}
+
+export interface ResultStateNode {
+  id: string
+  label: string
+  node_type: string
+  role: string
+  available: boolean
+}
+
+export interface ResultStateEdge {
+  source: string
+  target: string
+  edge_type: string
+  label: string
+  log2fc: number | null
+  regulation: string
+}
+
+export interface ResultStateExplorerResponse {
+  job_id: number
+  wt_job_id: number | null
+  focus_gene: string
+  variables: ResultStateVariable[]
+  nodes: ResultStateNode[]
+  edges: ResultStateEdge[]
+  unavailable_count: number
+}
+
+export interface StoichiometryMolecule {
+  id: string
+  coefficient: number
+  role: 'reactant' | 'product'
+  available_types: string[]
+}
+
+export interface StoichiometryReaction {
+  id: string
+  direction: string
+  catalysts: string[]
+  reactants: StoichiometryMolecule[]
+  products: StoichiometryMolecule[]
+  reaction_flux_available: boolean
+}
+
+export interface StoichiometryNeighborhoodResponse {
+  job_id: number
+  focus_gene: string
+  enzyme_ids: string[]
+  reactions: StoichiometryReaction[]
+  note: string
 }

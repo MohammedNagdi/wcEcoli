@@ -4,12 +4,14 @@ import {
   createBuilderDraft,
   getBuilderDrafts,
   getConditionCatalog,
+  previewBuilderDraft,
   publishBuilderDraft,
   updateBuilderDraft,
 } from '../../api/client'
 import type {
   BuilderDraft,
   BuilderDraftCollection,
+  BuilderPublishPreview,
   Condition,
   ConditionCatalog,
   ConditionRecord,
@@ -258,6 +260,15 @@ function SectionStatus({ saved, dirty }: { saved: boolean; dirty: boolean }) {
   return <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${classes}`}>{label}</span>
 }
 
+function publishActionClasses(action: string) {
+  const normalized = action.toLowerCase()
+  if (normalized.includes('reject') || normalized.includes('conflict')) return 'bg-red-50 text-red-700 border-red-100'
+  if (normalized.includes('create')) return 'bg-blue-50 text-blue-700 border-blue-100'
+  if (normalized.includes('append')) return 'bg-emerald-50 text-emerald-700 border-emerald-100'
+  if (normalized.includes('update')) return 'bg-amber-50 text-amber-700 border-amber-100'
+  return 'bg-white text-slate-500 border-slate-200'
+}
+
 function SectionSaveActions({
   saved,
   dirty,
@@ -285,7 +296,7 @@ function SectionSaveActions({
           disabled={publishDisabled || publishing || saving}
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {publishing ? 'Publishing...' : 'Publish'}
+          {publishing ? 'Reviewing...' : 'Publish'}
         </button>
       )}
       <button
@@ -658,6 +669,11 @@ export function EnvironmentBuilderPage() {
   const [timelineSeedVersion, setTimelineSeedVersion] = useState(0)
 
   const [savedSnapshots, setSavedSnapshots] = useState<Partial<Record<SaveSectionKey, string>>>({})
+  const [previewSection, setPreviewSection] = useState<SaveSectionKey | null>(null)
+  const [publishPreview, setPublishPreview] = useState<BuilderPublishPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
+  const [pendingPublishDraft, setPendingPublishDraft] = useState<BuilderDraft | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -816,10 +832,14 @@ export function EnvironmentBuilderPage() {
 
   useEffect(() => {
     if (conditionMode === 'create') {
-      setDraftCondition((current) => ({
-        ...current,
-        nutrients: currentMediaRecipeId || current.nutrients,
-      }))
+      setDraftCondition((current) => {
+        const nutrients = currentMediaRecipeId || current.nutrients
+        if (current.nutrients === nutrients) return current
+        return {
+          ...current,
+          nutrients,
+        }
+      })
       return
     }
     if (!compatibleConditions.length) {
@@ -845,7 +865,10 @@ export function EnvironmentBuilderPage() {
   useEffect(() => {
     if (tfConditionMode === 'create') return
     const compatibleKeys = new Set(compatibleTfConditions.map((row) => `${row.tf}|${row.active_tf}|${row.active_nutrients}|${row.inactive_nutrients}`))
-    setSelectedExistingTfKeys((current) => current.filter((key) => compatibleKeys.has(key)))
+    setSelectedExistingTfKeys((current) => {
+      const next = current.filter((key) => compatibleKeys.has(key))
+      return next.length === current.length ? current : next
+    })
   }, [compatibleTfConditions, tfConditionMode])
 
   const filteredEnvironmentMolecules = useMemo(() => {
@@ -1141,8 +1164,12 @@ export function EnvironmentBuilderPage() {
     }
   }
 
-  async function publishSection(section: SaveSectionKey) {
+  async function requestPublishSection(section: SaveSectionKey) {
     setPublishingSection(section)
+    setPreviewLoading(true)
+    setPreviewError('')
+    setPublishPreview(null)
+    setPendingPublishDraft(null)
     setActionMessage(null)
     try {
       const draft = !builderDrafts[section] || isDirty(section)
@@ -1151,7 +1178,29 @@ export function EnvironmentBuilderPage() {
       if (!draft) {
         throw new Error(`No ${SECTION_LABELS[section]} draft is available to publish.`)
       }
-      const publishedDraft = await publishBuilderDraft(section, draft.id)
+      const preview = await previewBuilderDraft(section, draft.id)
+      setPendingPublishDraft(draft)
+      setPublishPreview(preview)
+      setPreviewSection(section)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Failed to preview ${SECTION_LABELS[section]} publish.`
+      setPreviewSection(section)
+      setPreviewError(message)
+      setActionMessage({ type: 'error', text: message })
+    } finally {
+      setPublishingSection(null)
+      setPreviewLoading(false)
+    }
+  }
+
+  async function confirmPublishSection() {
+    if (!previewSection || !pendingPublishDraft) return
+    const section = previewSection
+    setPublishingSection(section)
+    setPreviewError('')
+    setActionMessage(null)
+    try {
+      const publishedDraft = await publishBuilderDraft(section, pendingPublishDraft.id)
       const nextCatalog = await getConditionCatalog()
       setCatalog(nextCatalog)
       setBuilderDrafts((current) => ({
@@ -1162,12 +1211,24 @@ export function EnvironmentBuilderPage() {
         type: 'success',
         text: `Published ${SECTION_LABELS[section]} as ${publishedDraft.published_name || publishedDraft.name}.`,
       })
+      setPreviewSection(null)
+      setPublishPreview(null)
+      setPendingPublishDraft(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : `Failed to publish ${SECTION_LABELS[section]}.`
+      setPreviewError(message)
       setActionMessage({ type: 'error', text: message })
     } finally {
       setPublishingSection(null)
     }
+  }
+
+  function closePublishPreview() {
+    if (publishingSection) return
+    setPreviewSection(null)
+    setPublishPreview(null)
+    setPreviewError('')
+    setPendingPublishDraft(null)
   }
 
   function isSaved(section: SaveSectionKey) {
@@ -1363,7 +1424,7 @@ export function EnvironmentBuilderPage() {
         dirty={isDirty(section)}
         saving={savingSection === section}
         onSave={() => { void saveSection(section) }}
-        onPublish={canPublishSection(section) ? () => { void publishSection(section) } : undefined}
+        onPublish={canPublishSection(section) ? () => { void requestPublishSection(section) } : undefined}
         publishing={publishingSection === section}
         publishDisabled={!canPublishSection(section) || (draft?.status === 'published' && !isDirty(section))}
       />
@@ -2187,6 +2248,102 @@ export function EnvironmentBuilderPage() {
           : 'border border-emerald-200 bg-emerald-50 text-emerald-700'
         }`}>
           {actionMessage.text}
+        </div>
+      )}
+
+      {previewSection && (publishPreview || previewError) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-8">
+          <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="border-b border-slate-100 px-5 py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Publish review</p>
+                  <h2 className="mt-1 text-lg font-semibold text-slate-950">{SECTION_LABELS[previewSection]}</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {publishPreview
+                      ? <>Review the reconstruction rows that will be written for draft <span className="font-mono text-slate-700">{publishPreview.draft_name}</span>.</>
+                      : 'Review failed before any reconstruction write was attempted.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closePublishPreview}
+                  disabled={Boolean(publishingSection)}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {previewError && (
+                <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {previewError}
+                </div>
+              )}
+
+              {publishPreview?.warnings.length ? (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-950">Warnings</p>
+                  <ul className="mt-2 space-y-1 text-sm text-amber-900">
+                    {publishPreview.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <div className="space-y-4">
+                {(publishPreview?.changes || []).map((change) => (
+                  <div key={`${change.file}-${change.action}`} className="rounded-xl border border-slate-200 bg-slate-50">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+                      <div>
+                        <p className="font-mono text-sm font-semibold text-slate-900">{change.file}</p>
+                        <p className="mt-0.5 text-xs text-slate-400">
+                          {change.rows.length} row{change.rows.length === 1 ? '' : 's'} staged for publish
+                        </p>
+                      </div>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-medium uppercase tracking-wide ${publishActionClasses(change.action)}`}>
+                        {change.action}
+                      </span>
+                    </div>
+                    <div className="max-h-56 overflow-auto p-4">
+                      <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-700">
+                        {change.rows.join('\n')}
+                      </pre>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
+              <p className="text-sm text-slate-500">
+                {publishPreview
+                  ? 'Confirming publishes these rows into the local reconstruction catalog and refreshes dropdown options.'
+                  : 'Fix the draft inputs or dependency chain, then review publish again.'}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={closePublishPreview}
+                  disabled={Boolean(publishingSection)}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void confirmPublishSection() }}
+                  disabled={Boolean(publishingSection) || previewLoading || !publishPreview}
+                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {publishingSection ? 'Publishing...' : 'Confirm publish'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
