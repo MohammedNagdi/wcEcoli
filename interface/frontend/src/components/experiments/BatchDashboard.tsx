@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { getBatches, getBatchDetail, runBatch } from '../../api/client'
+import { cancelBatch, deleteBatch, getBatches, getBatchDetail, resumeBatch, runBatch } from '../../api/client'
 import { statusLabel } from '../../utils/labels'
+import { ConfirmDialog } from '../common/ConfirmDialog'
 import type { BatchSummary, BatchDetail, Experiment } from '../../types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -13,15 +14,20 @@ const STATUS_COLORS: Record<string, string> = {
   ingesting:    'bg-blue-50 text-blue-700',
   done:         'bg-green-50 text-green-700',
   failed:       'bg-red-50 text-red-700',
+  cancelled:    'bg-gray-100 text-gray-600',
 }
 
-export function BatchDashboard() {
+export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: string }) {
   const [batches, setBatches] = useState<BatchSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [runningBatchId, setRunningBatchId] = useState<string | null>(null)
+  const [cancellingBatchId, setCancellingBatchId] = useState<string | null>(null)
+  const [resumingBatchId, setResumingBatchId] = useState<string | null>(null)
   const [runResult, setRunResult] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [expandedDetail, setExpandedDetail] = useState<BatchDetail | null>(null)
+  const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<BatchSummary | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchBatches = async () => {
@@ -42,6 +48,18 @@ export function BatchDashboard() {
     setLoading(true)
     fetchBatches().finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (!initialExpandedId) return
+    setExpandedId(initialExpandedId)
+    getBatchDetail(initialExpandedId).then(setExpandedDetail).catch(() => setExpandedDetail(null))
+  }, [initialExpandedId])
+
+  useEffect(() => {
+    if (!runResult) return
+    const timer = setTimeout(() => setRunResult(null), 5000)
+    return () => clearTimeout(timer)
+  }, [runResult])
 
   // Poll while any batch has active experiments
   useEffect(() => {
@@ -74,6 +92,34 @@ export function BatchDashboard() {
     }
   }
 
+  const handleCancel = async (batchId: string) => {
+    setCancellingBatchId(batchId)
+    setRunResult(null)
+    try {
+      const resp = await cancelBatch(batchId)
+      setRunResult(resp.message)
+      await fetchBatches()
+    } catch (e: any) {
+      setRunResult(`Error: ${e.message}`)
+    } finally {
+      setCancellingBatchId(null)
+    }
+  }
+
+  const handleResume = async (batchId: string) => {
+    setResumingBatchId(batchId)
+    setRunResult(null)
+    try {
+      const resp = await resumeBatch(batchId)
+      setRunResult(resp.message)
+      await fetchBatches()
+    } catch (e: any) {
+      setRunResult(`Error: ${e.message}`)
+    } finally {
+      setResumingBatchId(null)
+    }
+  }
+
   const handleToggleExpand = async (batchId: string) => {
     if (expandedId === batchId) {
       setExpandedId(null)
@@ -86,6 +132,34 @@ export function BatchDashboard() {
       setExpandedDetail(detail)
     } catch {
       setExpandedDetail(null)
+    }
+  }
+
+  const handleDelete = async (batch: BatchSummary) => {
+    setDeleteTarget(batch)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    const batch = deleteTarget
+    setDeletingBatchId(batch.batch_id)
+    setRunResult(null)
+    try {
+      await deleteBatch(batch.batch_id)
+      if (expandedId === batch.batch_id) {
+        setExpandedId(null)
+        setExpandedDetail(null)
+      }
+      setRunResult(`Deleted batch "${batch.name}".`)
+      setDeleteTarget(null)
+      await fetchBatches()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error'
+      setRunResult(message.includes('409')
+        ? 'Error: Cannot delete a batch with queued or running jobs. Let it finish or cancel active jobs first.'
+        : `Error: ${message}`)
+    } finally {
+      setDeletingBatchId(null)
     }
   }
 
@@ -103,7 +177,7 @@ export function BatchDashboard() {
       <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
         <p className="text-gray-500 font-medium mb-1">No batches yet</p>
         <p className="text-sm text-gray-400 mb-4">
-          Create a batch of gene knockout experiments to get started.
+          Create a batch of typed experiments to get started.
         </p>
         <Link
           to="/experiments/batch"
@@ -132,12 +206,30 @@ export function BatchDashboard() {
           key={batch.batch_id}
           batch={batch}
           onRun={handleRun}
+          onCancel={handleCancel}
+          onResume={handleResume}
+          onDelete={handleDelete}
           onToggleExpand={handleToggleExpand}
           isRunning={runningBatchId === batch.batch_id}
+          isCancelling={cancellingBatchId === batch.batch_id}
+          isResuming={resumingBatchId === batch.batch_id}
+          isDeleting={deletingBatchId === batch.batch_id}
           isExpanded={expandedId === batch.batch_id}
           detail={expandedId === batch.batch_id ? expandedDetail : null}
         />
       ))}
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete batch"
+        message={`Delete "${deleteTarget?.name || 'this batch'}"? Experiments, jobs, and results will be removed.`}
+        confirmLabel="Delete batch"
+        destructive
+        busy={deletingBatchId === deleteTarget?.batch_id}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (deletingBatchId == null) setDeleteTarget(null)
+        }}
+      />
     </div>
   )
 }
@@ -146,24 +238,38 @@ export function BatchDashboard() {
 function BatchCard({
   batch,
   onRun,
+  onCancel,
+  onResume,
+  onDelete,
   onToggleExpand,
   isRunning,
+  isCancelling,
+  isResuming,
+  isDeleting,
   isExpanded,
   detail,
 }: {
   batch: BatchSummary
   onRun: (id: string) => void
+  onCancel: (id: string) => void
+  onResume: (id: string) => void
+  onDelete: (batch: BatchSummary) => void
   onToggleExpand: (id: string) => void
   isRunning: boolean
+  isCancelling: boolean
+  isResuming: boolean
+  isDeleting: boolean
   isExpanded: boolean
   detail: BatchDetail | null
 }) {
-  const { total, done, failed, running, queued, draft } = batch
-  const completedPct = total > 0 ? Math.round(((done + failed) / total) * 100) : 0
+  const { total, done, failed, running, queued, draft, cancelled } = batch
+  const completedPct = total > 0 ? Math.round(((done + failed + cancelled) / total) * 100) : 0
 
   const isActive = running > 0 || queued > 0
   const allDone = draft === 0 && queued === 0 && running === 0
   const hasDraft = draft > 0
+  const hasStopped = cancelled > 0
+  const actionBusy = isRunning || isCancelling || isResuming || isDeleting
 
   const formatDate = (iso: string) => {
     if (!iso) return '—'
@@ -196,6 +302,9 @@ function BatchCard({
               {allDone && done > 0 && (
                 <span className="text-xs text-green-600 font-medium">Complete</span>
               )}
+              {hasStopped && !isActive && (
+                <span className="text-xs text-gray-600 font-medium">Stopped</span>
+              )}
             </div>
             <p className="text-xs text-gray-400 mt-0.5 ml-5">
               {formatDate(batch.created_at)} · {total} experiment{total !== 1 ? 's' : ''}
@@ -215,9 +324,9 @@ function BatchCard({
             {hasDraft && (
               <button
                 onClick={() => onRun(batch.batch_id)}
-                disabled={isRunning}
+                disabled={actionBusy}
                 className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  isRunning
+                  actionBusy
                     ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     : 'bg-brand-600 hover:bg-brand-700 text-white'
                 }`}
@@ -232,6 +341,43 @@ function BatchCard({
                 )}
               </button>
             )}
+            {isActive && (
+              <button
+                onClick={() => onCancel(batch.batch_id)}
+                disabled={actionBusy}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                  actionBusy
+                    ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'border-amber-200 bg-white text-amber-700 hover:bg-amber-50'
+                }`}
+              >
+                {isCancelling ? 'Stopping...' : 'Stop queue'}
+              </button>
+            )}
+            {hasStopped && (
+              <button
+                onClick={() => onResume(batch.batch_id)}
+                disabled={actionBusy}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                  actionBusy
+                    ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'border-green-200 bg-white text-green-700 hover:bg-green-50'
+                }`}
+              >
+                {isResuming ? 'Resuming...' : `Resume (${cancelled})`}
+              </button>
+            )}
+            <button
+              onClick={() => onDelete(batch)}
+              disabled={actionBusy}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                actionBusy
+                  ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'border-red-200 bg-white text-red-600 hover:bg-red-50'
+              }`}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </button>
           </div>
         </div>
 
@@ -250,6 +396,13 @@ function BatchCard({
                 className="bg-red-400 transition-all duration-500"
                 style={{ width: `${(failed / total) * 100}%` }}
                 title={`${failed} failed`}
+              />
+            )}
+            {cancelled > 0 && (
+              <div
+                className="bg-gray-300 transition-all duration-500"
+                style={{ width: `${(cancelled / total) * 100}%` }}
+                title={`${cancelled} stopped`}
               />
             )}
             {running > 0 && (
@@ -278,6 +431,11 @@ function BatchCard({
             {failed > 0 && (
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-red-400" /> {failed} failed
+              </span>
+            )}
+            {cancelled > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-gray-300" /> {cancelled} stopped
               </span>
             )}
             {running > 0 && (

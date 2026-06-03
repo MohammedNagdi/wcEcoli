@@ -727,6 +727,12 @@ export function EnvironmentBuilderPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!actionMessage) return
+    const timer = setTimeout(() => setActionMessage(null), 5000)
+    return () => clearTimeout(timer)
+  }, [actionMessage])
+
   const mediaStocks = catalog?.media_stocks || []
   const environmentMolecules = catalog?.environment_molecules || []
   const allMediaRecipes = catalog?.media_recipes || []

@@ -82,6 +82,7 @@ export const STATUS_LABELS: Record<string, string> = {
   ingesting: 'Ingesting results',
   done: 'Complete',
   failed: 'Failed',
+  cancelled: 'Stopped',
 }
 
 export function statusLabel(raw: string): string {

@@ -5,7 +5,6 @@ import json
 import logging
 import math
 import statistics
-import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -22,6 +21,12 @@ from app.routers.jobs import (
     create_simulation_jobs_for_experiment,
 )
 from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
+from app.services.batches import (
+    BatchRequest,
+    BatchResponse,
+    create_typed_batch,
+    delete_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -738,6 +743,7 @@ class BatchSummary(BaseModel):
     running: int = 0
     done: int = 0
     failed: int = 0
+    cancelled: int = 0
 
 
 class BatchDetail(BaseModel):
@@ -750,6 +756,7 @@ class BatchDetail(BaseModel):
     running: int = 0
     done: int = 0
     failed: int = 0
+    cancelled: int = 0
     experiments: list[ExperimentOut]
 
 
@@ -759,6 +766,78 @@ class BatchRunResponse(BaseModel):
     skipped: int
     total_jobs: int
     message: str
+
+
+class BatchControlResponse(BaseModel):
+    batch_id: str
+    cancelled: int = 0
+    resumed: int = 0
+    queued: int = 0
+    skipped: int = 0
+    total_jobs: int = 0
+    message: str
+
+
+def _batch_status_counts(experiments: list[Experiment]) -> dict[str, int]:
+    status_counts = {
+        "draft": 0,
+        "queued": 0,
+        "running": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0,
+    }
+    for exp in experiments:
+        bucket = exp.status
+        if bucket in ("running_parca", "running_sim", "ingesting"):
+            bucket = "running"
+        if bucket in status_counts:
+            status_counts[bucket] += 1
+    return status_counts
+
+
+def _get_batch_experiments(batch_id: str, session: Session) -> list[Experiment]:
+    experiments = session.exec(
+        select(Experiment).where(Experiment.batch_id == batch_id)
+    ).all()
+    if not experiments:
+        raise HTTPException(404, f"Batch not found: {batch_id}")
+    return experiments
+
+
+def _queue_draft_batch_experiments(
+    batch_id: str,
+    experiments: list[Experiment],
+    session: Session,
+) -> tuple[int, int, int]:
+    queued_count = 0
+    skipped_count = 0
+    total_jobs = 0
+
+    for exp in experiments:
+        if exp.status != "draft":
+            skipped_count += 1
+            continue
+
+        try:
+            params = json.loads(exp.sim_params) if exp.sim_params else {}
+        except Exception:
+            params = {}
+
+        body = RunJobRequest(
+            seeds=params.get("seeds", params.get("seed", 1)),
+            generations=params.get("generations", 1),
+            condition=exp.condition,
+        )
+
+        try:
+            resp = create_simulation_jobs_for_experiment(exp, body, session)
+            total_jobs += len(resp.job_ids)
+            queued_count += 1
+        except HTTPException:
+            skipped_count += 1
+
+    return queued_count, skipped_count, total_jobs
 
 
 @router.get("/batches", response_model=list[BatchSummary])
@@ -774,13 +853,7 @@ def list_batches(session: Session = Depends(get_session)):
 
     result: list[BatchSummary] = []
     for bid, exps in batches.items():
-        status_counts = {"draft": 0, "queued": 0, "running": 0, "done": 0, "failed": 0}
-        for e in exps:
-            bucket = e.status
-            if bucket in ("running_parca", "running_sim", "ingesting"):
-                bucket = "running"
-            if bucket in status_counts:
-                status_counts[bucket] += 1
+        status_counts = _batch_status_counts(exps)
 
         # Derive batch name from first experiment's description or common prefix
         first = min(exps, key=lambda e: e.created_at or "")
@@ -801,20 +874,8 @@ def list_batches(session: Session = Depends(get_session)):
 @router.get("/batches/{batch_id}", response_model=BatchDetail)
 def get_batch_detail(batch_id: str, session: Session = Depends(get_session)):
     """Get full detail for a single batch including all experiments."""
-    experiments = session.exec(
-        select(Experiment).where(Experiment.batch_id == batch_id)
-    ).all()
-
-    if not experiments:
-        raise HTTPException(404, f"Batch not found: {batch_id}")
-
-    status_counts = {"draft": 0, "queued": 0, "running": 0, "done": 0, "failed": 0}
-    for e in experiments:
-        bucket = e.status
-        if bucket in ("running_parca", "running_sim", "ingesting"):
-            bucket = "running"
-        if bucket in status_counts:
-            status_counts[bucket] += 1
+    experiments = _get_batch_experiments(batch_id, session)
+    status_counts = _batch_status_counts(experiments)
 
     first = min(experiments, key=lambda e: e.created_at or "")
     name = first.description or f"Batch ({len(experiments)} experiments)"
@@ -848,40 +909,8 @@ def run_batch(batch_id: str, session: Session = Depends(get_session)):
     Creates simulation jobs for each draft experiment using its sim_params.
     Experiments already queued/running/done are skipped.
     """
-    experiments = session.exec(
-        select(Experiment).where(Experiment.batch_id == batch_id)
-    ).all()
-
-    if not experiments:
-        raise HTTPException(404, f"Batch not found: {batch_id}")
-
-    queued_count = 0
-    skipped_count = 0
-    total_jobs = 0
-
-    for exp in experiments:
-        if exp.status != "draft":
-            skipped_count += 1
-            continue
-
-        # Parse sim_params for seeds/generations
-        try:
-            params = json.loads(exp.sim_params) if exp.sim_params else {}
-        except Exception:
-            params = {}
-
-        body = RunJobRequest(
-            seeds=params.get("seeds", 1),
-            generations=params.get("generations", 1),
-            condition=exp.condition,
-        )
-
-        try:
-            resp = create_simulation_jobs_for_experiment(exp, body, session)
-            total_jobs += len(resp.job_ids)
-            queued_count += 1
-        except HTTPException:
-            skipped_count += 1
+    experiments = _get_batch_experiments(batch_id, session)
+    queued_count, skipped_count, total_jobs = _queue_draft_batch_experiments(batch_id, experiments, session)
 
     return BatchRunResponse(
         batch_id=batch_id,
@@ -890,6 +919,109 @@ def run_batch(batch_id: str, session: Session = Depends(get_session)):
         total_jobs=total_jobs,
         message=f"Queued {queued_count} experiments ({total_jobs} jobs), skipped {skipped_count}",
     )
+
+
+@router.post("/batches/{batch_id}/cancel", response_model=BatchControlResponse)
+def cancel_batch_run(batch_id: str, session: Session = Depends(get_session)):
+    """Stop queued batch work while allowing the currently running job to finish."""
+    experiments = _get_batch_experiments(batch_id, session)
+    experiment_ids = [exp.id for exp in experiments if exp.id is not None]
+    if not experiment_ids:
+        raise HTTPException(404, f"Batch not found: {batch_id}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    pending_jobs = session.exec(
+        select(SimulationJob)
+        .where(col(SimulationJob.experiment_id).in_(experiment_ids))
+        .where(SimulationJob.status == "pending")
+        .order_by(col(SimulationJob.id).asc())
+    ).all()
+
+    for job in pending_jobs:
+        job.status = "cancelled"
+        job.phase = "Cancelled"
+        job.error_message = "Batch cancelled by user"
+        job.finished_at = now
+        session.add(job)
+
+    cancelled_by_experiment: dict[int, list[SimulationJob]] = {}
+    for job in pending_jobs:
+        cancelled_by_experiment.setdefault(job.experiment_id, []).append(job)
+
+    for exp in experiments:
+        if exp.id not in cancelled_by_experiment:
+            continue
+        jobs = session.exec(select(SimulationJob).where(SimulationJob.experiment_id == exp.id)).all()
+        if not any(job.status in ("pending", "running_parca", "running_sim", "ingesting") for job in jobs):
+            exp.status = "cancelled"
+            exp.updated_at = now
+            session.add(exp)
+
+    session.commit()
+    return BatchControlResponse(
+        batch_id=batch_id,
+        cancelled=len(pending_jobs),
+        message=(
+            f"Stopped {len(pending_jobs)} queued job{'' if len(pending_jobs) == 1 else 's'}. "
+            "The current running job will finish."
+        ),
+    )
+
+
+@router.post("/batches/{batch_id}/resume", response_model=BatchControlResponse)
+def resume_batch_run(batch_id: str, session: Session = Depends(get_session)):
+    """Resume jobs stopped by batch cancellation, then queue remaining drafts."""
+    experiments = _get_batch_experiments(batch_id, session)
+    experiment_ids = [exp.id for exp in experiments if exp.id is not None]
+    if not experiment_ids:
+        raise HTTPException(404, f"Batch not found: {batch_id}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    cancelled_jobs = session.exec(
+        select(SimulationJob)
+        .where(col(SimulationJob.experiment_id).in_(experiment_ids))
+        .where(SimulationJob.status == "cancelled")
+        .order_by(col(SimulationJob.id).asc())
+    ).all()
+
+    resumed_experiment_ids = {job.experiment_id for job in cancelled_jobs}
+    for job in cancelled_jobs:
+        job.status = "pending"
+        job.phase = "Queued (resumed)"
+        job.error_message = ""
+        job.log_tail = ""
+        job.started_at = ""
+        job.finished_at = ""
+        job.sim_dir = ""
+        session.add(job)
+
+    for exp in experiments:
+        if exp.id in resumed_experiment_ids and exp.status in ("cancelled", "failed"):
+            exp.status = "queued"
+            exp.updated_at = now
+            session.add(exp)
+
+    session.commit()
+
+    refreshed = _get_batch_experiments(batch_id, session)
+    queued_count, skipped_count, total_jobs = _queue_draft_batch_experiments(batch_id, refreshed, session)
+    return BatchControlResponse(
+        batch_id=batch_id,
+        resumed=len(cancelled_jobs),
+        queued=queued_count,
+        skipped=skipped_count,
+        total_jobs=total_jobs,
+        message=(
+            f"Resumed {len(cancelled_jobs)} stopped job{'' if len(cancelled_jobs) == 1 else 's'} "
+            f"and queued {queued_count} draft experiment{'' if queued_count == 1 else 's'}."
+        ),
+    )
+
+
+@router.delete("/batches/{batch_id}", status_code=204)
+def delete_batch_group(batch_id: str, session: Session = Depends(get_session)):
+    """Delete a batch group and all non-active experiments/jobs/results in it."""
+    delete_batch(batch_id, session)
 
 
 # ── Multi-experiment comparison ────────────────────────────────────────
@@ -1453,199 +1585,10 @@ def get_experiment_results(experiment_id: int, session: Session = Depends(get_se
 
 # --- Batch experiment creation ---
 
-class BatchExperimentItem(BaseModel):
-    """Single item in a batch creation request."""
-    name: str = ""
-    description: str = ""
-    variant_type: str = "gene_knockout"
-    variant_index: int = 0
-    condition: str = "basal"
-    timeline: str = ""
-    sim_params: str = "{}"
-    gene_symbol: str = ""
-
-
-class BatchRequest(BaseModel):
-    """Batch experiment creation request.
-
-    Two modes:
-    1. Explicit list: provide experiments with individual specs.
-    2. Screen shorthand: set screen to a preset name.
-       - all_mechanistic: one experiment per mechanistic gene.
-       - gene_knockout_all: one experiment per mechanistic gene.
-       - gene_knockout_category:<cat>: KO all genes in a category.
-    """
-    experiments: list[BatchExperimentItem] = []
-    screen: str = ""
-    condition: str = "basal"
-    timeline: str = ""
-    sim_params: str = "{}"
-    description: str = ""
-    include_wildtype: bool = False  # Auto-create one WT control per batch
-
-
-class BatchResponse(BaseModel):
-    batch_id: str
-    created: int
-    experiment_ids: list[int]
-    skipped: int = 0
-    skipped_genes: list[str] = []
-
-
 @router.post("/batch", response_model=BatchResponse, status_code=201)
 def create_batch_experiments(
     body: BatchRequest,
     session: Session = Depends(get_session),
 ):
-    """Create multiple experiments in one request."""
-    items: list[BatchExperimentItem] = []
-
-    if body.screen:
-        items = _expand_screen(body, session)
-    elif body.experiments:
-        items = body.experiments
-    else:
-        raise HTTPException(400, "Provide either 'experiments' list or 'screen' name")
-
-    if len(items) > 5000:
-        raise HTTPException(400, f"Batch too large: {len(items)} items (max 5000)")
-
-    batch_id = str(uuid.uuid4())
-
-    variant_cache: dict[str, Variant] = {}
-    for item in items:
-        if item.variant_type not in variant_cache:
-            v = session.exec(
-                select(Variant).where(Variant.name == item.variant_type)
-            ).first()
-            if not v:
-                raise HTTPException(400, f"Unknown variant type: {item.variant_type}")
-            variant_cache[item.variant_type] = v
-
-    existing = set()
-    all_exps = session.exec(select(Experiment)).all()
-    for e in all_exps:
-        existing.add((e.variant_type, e.gene_symbol.lower(), e.condition))
-
-    now = datetime.now(timezone.utc).isoformat()
-    created_ids: list[int] = []
-    skipped_genes: list[str] = []
-
-    for item in items:
-        sim_params = item.sim_params if item.sim_params != "{}" else body.sim_params
-        description = item.description or body.description
-
-        variant_index = item.variant_index
-        gene_symbol = item.gene_symbol
-        if item.variant_type == "gene_knockout" and gene_symbol:
-            gene = session.exec(
-                select(Gene).where(col(Gene.symbol).ilike(gene_symbol))
-            ).first()
-            if not gene:
-                skipped_genes.append(gene_symbol)
-                continue
-            variant_index = gene.ko_index
-            gene_symbol = gene.symbol
-
-        condition, timeline = _normalized_experiment_environment(
-            session,
-            item.variant_type,
-            variant_index,
-            item.condition if item.condition != "basal" else body.condition,
-            item.timeline or body.timeline,
-        )
-
-        dup_key = (item.variant_type, gene_symbol.lower(), condition)
-        if dup_key in existing:
-            skipped_genes.append(gene_symbol + " (exists)")
-            continue
-        existing.add(dup_key)
-
-        name = item.name
-        if not name:
-            if gene_symbol:
-                name = f"KO {gene_symbol}"
-                if condition != "basal":
-                    name += f" ({condition})"
-            else:
-                name = f"{item.variant_type}[{variant_index}]"
-
-        experiment = Experiment(
-            name=name,
-            description=description,
-            variant_type=item.variant_type,
-            variant_index=variant_index,
-            condition=condition,
-            timeline=timeline,
-            sim_params=sim_params,
-            status="draft",
-            created_at=now,
-            updated_at=now,
-            gene_symbol=gene_symbol,
-            batch_id=batch_id,
-        )
-        session.add(experiment)
-        session.flush()
-        created_ids.append(experiment.id)
-
-    # Auto-create wildtype control if requested (one per batch)
-    if body.include_wildtype:
-        wt_id = _find_or_create_wildtype(
-            session, body.condition, body.timeline, body.sim_params, now,
-            batch_id=batch_id,
-        )
-        # Only count it as created if it's a new experiment in this batch
-        wt_exp = session.get(Experiment, wt_id)
-        if wt_exp and wt_exp.batch_id == batch_id:
-            created_ids.append(wt_id)
-
-    session.commit()
-    logger.info("Batch %s created %d experiments (%d skipped)", batch_id, len(created_ids), len(skipped_genes))
-
-    return BatchResponse(
-        batch_id=batch_id,
-        created=len(created_ids),
-        experiment_ids=created_ids,
-        skipped=len(skipped_genes),
-        skipped_genes=skipped_genes[:50],
-    )
-
-
-def _expand_screen(body: BatchRequest, session: Session) -> list[BatchExperimentItem]:
-    """Expand a screen preset into a list of batch items."""
-    screen = body.screen.lower().strip()
-
-    if screen in {"all_mechanistic", "gene_knockout_all"}:
-        genes = session.exec(
-            select(Gene).where(Gene.is_mechanistic == True).order_by(Gene.symbol)
-        ).all()
-        if not genes:
-            raise HTTPException(400, "No mechanistic genes found in database")
-        return [
-            BatchExperimentItem(
-                variant_type="gene_knockout",
-                gene_symbol=g.symbol,
-            )
-            for g in genes
-        ]
-
-    elif screen.startswith("gene_knockout_category:"):
-        category = screen.split(":", 1)[1].strip()
-        genes = session.exec(
-            select(Gene).where(
-                Gene.is_mechanistic == True,
-                col(Gene.category).ilike(f"%{category}%"),
-            ).order_by(Gene.symbol)
-        ).all()
-        if not genes:
-            raise HTTPException(400, f"No mechanistic genes in category matching '{category}'")
-        return [
-            BatchExperimentItem(
-                variant_type="gene_knockout",
-                gene_symbol=g.symbol,
-            )
-            for g in genes
-        ]
-
-    else:
-        raise HTTPException(400, f"Unknown screen preset: '{body.screen}'")
+    """Create a homogeneous typed batch."""
+    return create_typed_batch(body, session)

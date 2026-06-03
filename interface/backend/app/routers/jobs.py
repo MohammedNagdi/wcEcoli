@@ -59,7 +59,7 @@ class RunResponse(BaseModel):
 
 class RunJobRequest(BaseModel):
     condition: str = ""
-    seeds: Optional[int] = None
+    seeds: Optional[int | list[int]] = None
     generations: Optional[int] = None
 
 
@@ -82,7 +82,11 @@ def create_simulation_jobs_for_experiment(
     except json.JSONDecodeError:
         params = {}
 
-    num_seeds = body.seeds if body.seeds is not None else params.get("seeds", 1)
+    seed_spec = body.seeds if body.seeds is not None else params.get("seeds", 1)
+    if isinstance(seed_spec, list):
+        seed_values = [int(seed) for seed in seed_spec]
+    else:
+        seed_values = list(range(int(seed_spec)))
     generations = body.generations if body.generations is not None else params.get("generations", 1)
     timeline = resolve_timeline_definition(session, experiment.timeline) if experiment.timeline else ""
     condition = body.condition or experiment.condition or "basal"
@@ -91,7 +95,7 @@ def create_simulation_jobs_for_experiment(
     now = datetime.now(timezone.utc).isoformat()
 
     job_ids = []
-    for seed in range(num_seeds):
+    for seed in seed_values:
         job = SimulationJob(
             experiment_id=experiment.id,
             status="pending",

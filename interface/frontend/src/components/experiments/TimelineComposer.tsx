@@ -105,6 +105,8 @@ interface Props {
   showLibrarySave?: boolean
   entryNounSingular?: string
   entryNounPlural?: string
+  onPresetLoad?: (preset: { name: string; label: string; definition: string }) => void
+  onPresetClear?: () => void
 }
 
 export function TimelineComposer({
@@ -116,6 +118,8 @@ export function TimelineComposer({
   showLibrarySave = true,
   entryNounSingular = 'timeline',
   entryNounPlural = 'timelines',
+  onPresetLoad,
+  onPresetClear,
 }: Props) {
   const [selectedMediaId, setSelectedMediaId] = useState('')
   const [events, setEvents] = useState<TLEvent[]>([])
@@ -324,7 +328,9 @@ export function TimelineComposer({
       return
     }
     setPresetWarning('')
-    setLoadedPreset({ label: found.label, definition: buildEventString(parsed) })
+    const definition = buildEventString(parsed)
+    setLoadedPreset({ label: found.label, definition })
+    onPresetLoad?.({ name: found.name, label: found.label, definition })
     mutate(parsed)
     setPresetOpen(false)
   }
@@ -334,6 +340,27 @@ export function TimelineComposer({
     const parsed = parseDefinition(loadedPreset.definition, knownMediaIds, maxSec)
     if (!parsed.length) return
     mutate(parsed)
+  }
+
+  const handleClearPreset = () => {
+    const seededEvents = initialDefinition
+      ? parseDefinition(initialDefinition, knownMediaIds, maxSec)
+      : []
+    const defaultEvents = seededEvents.length > 0
+      ? seededEvents
+      : [{
+          id: uid(),
+          timeSec: 0,
+          mediaId: mediaRecipes.find(r => r.media_id === 'minimal')?.media_id || mediaRecipes[0]?.media_id || '',
+        }]
+
+    setLoadedPreset(null)
+    setSelectedPreset('')
+    setPresetWarning('')
+    setPresetOpen(false)
+    setSelectedMediaId(defaultEvents[0]?.mediaId || '')
+    mutate(defaultEvents.filter(event => event.mediaId))
+    onPresetClear?.()
   }
 
   const handleSave = async () => {
@@ -380,12 +407,21 @@ export function TimelineComposer({
             onClick={() => setPresetOpen(o => !o)}
             className="flex w-full items-center justify-between gap-3 bg-gray-50 px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
           >
-            <span>{`Load preset ${entryNounSingular}`}</span>
+            <span>{`${loadedPreset ? 'Change' : 'Load'} preset ${entryNounSingular}`}</span>
             <span className={`shrink-0 transition-transform ${presetOpen ? 'rotate-180' : ''}`}>⌄</span>
           </button>
           {loadedPreset && (
             <div className="border-t border-gray-200 bg-white px-4 py-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleClearPreset}
+                  aria-label={`Remove preset ${entryNounSingular}`}
+                  title={`Remove preset ${entryNounSingular}`}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-xs font-semibold text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                >
+                  x
+                </button>
                 <span className="max-w-[180px] truncate rounded-full bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-700">
                   {loadedPreset.label}
                 </span>
@@ -398,6 +434,13 @@ export function TimelineComposer({
                     unchanged
                   </span>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setPresetOpen(true)}
+                  className="rounded px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
+                >
+                  Change preset
+                </button>
                 {presetModified && (
                   <button
                     type="button"

@@ -1275,6 +1275,12 @@ export function ExperimentDesigner() {
     }
   }, [variantIndex, variantType])
 
+  useEffect(() => {
+    if (!error) return
+    const timer = setTimeout(() => setError(null), 5000)
+    return () => clearTimeout(timer)
+  }, [error])
+
   // Auto-generate name
   useEffect(() => {
     if (variantType === 'gene_knockout' && geneSymbol) {
@@ -1354,6 +1360,12 @@ export function ExperimentDesigner() {
 
   return (
     <div className="mx-auto max-w-[1260px] px-1">
+      <Link
+        to="/experiments"
+        className="mb-4 inline-flex items-center text-sm font-medium text-gray-500 hover:text-gray-800"
+      >
+        ← Back to experiments
+      </Link>
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Design experiment</h1>

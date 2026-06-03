@@ -5,6 +5,7 @@ import { variantLabel, statusLabel } from '../../utils/labels'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
 import { BatchDashboard } from './BatchDashboard'
 import { FailedJobsPanel } from './FailedJobsPanel'
+import { ConfirmDialog } from '../common/ConfirmDialog'
 import type { Experiment } from '../../types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -19,12 +20,25 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 export function ExperimentListPage() {
+  const [searchParams] = useSearchParams()
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [view, setView] = useState<'all' | 'batches' | 'failed'>('all')
-  const [searchParams] = useSearchParams()
+  const [deleteTarget, setDeleteTarget] = useState<Experiment | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [showCreatedMessage, setShowCreatedMessage] = useState(Boolean(searchParams.get('created')))
+  const [createdBatchMessage, setCreatedBatchMessage] = useState(() => {
+    const batchName = searchParams.get('createdBatchName')
+    if (!batchName) return ''
+    const count = searchParams.get('createdBatchCount') || '0'
+    return `Created batch "${batchName}" with ${count} experiment${count === '1' ? '' : 's'}.`
+  })
   const justCreated = searchParams.get('created')
+  const createdBatchName = searchParams.get('createdBatchName')
+  const createdBatchCount = searchParams.get('createdBatchCount')
+  const createdBatchId = searchParams.get('batch')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchAll = async () => {
@@ -38,6 +52,34 @@ export function ExperimentListPage() {
     setLoading(true)
     fetchAll().finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    const requestedView = searchParams.get('view')
+    if (requestedView === 'batches' || searchParams.get('batch')) setView('batches')
+    else if (requestedView === 'failed') setView('failed')
+  }, [searchParams])
+
+  useEffect(() => {
+    if (justCreated) {
+      setShowCreatedMessage(true)
+      const timer = setTimeout(() => setShowCreatedMessage(false), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [justCreated])
+
+  useEffect(() => {
+    if (createdBatchName) {
+      setCreatedBatchMessage(`Created batch "${createdBatchName}" with ${createdBatchCount || '0'} experiment${createdBatchCount === '1' ? '' : 's'}.`)
+      const timer = setTimeout(() => setCreatedBatchMessage(''), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [createdBatchCount, createdBatchName])
+
+  useEffect(() => {
+    if (!deleteError) return
+    const timer = setTimeout(() => setDeleteError(null), 5000)
+    return () => clearTimeout(timer)
+  }, [deleteError])
 
   // Poll while any experiment is active
   useEffect(() => {
@@ -58,14 +100,25 @@ export function ExperimentListPage() {
     }
   }, [experiments])
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm('Delete this experiment and all its jobs/results? This cannot be undone.')) return
+  const handleDelete = (experiment: Experiment) => {
+    setDeleteTarget(experiment)
+    setDeleteError(null)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    const id = deleteTarget.id
+    setDeletingId(id)
+    setDeleteError(null)
     try {
       await deleteExperiment(id)
       setExperiments((prev) => prev.filter((e) => e.id !== id))
       if (selectedId === id) setSelectedId(null)
+      setDeleteTarget(null)
     } catch (e: unknown) {
-      alert('Failed to delete: ' + (e instanceof Error ? e.message : 'unknown error'))
+      setDeleteError('Failed to delete: ' + (e instanceof Error ? e.message : 'unknown error'))
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -105,21 +158,33 @@ export function ExperimentListPage() {
             className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100
                        border border-brand-200 rounded-lg transition-colors"
           >
-            + Batch
+            Batch
           </Link>
           <Link
             to="/experiments/new"
             className="px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700
                        rounded-lg transition-colors"
           >
-            + New experiment
+            New Experiment
           </Link>
         </div>
       </div>
 
-      {justCreated && (
+      {showCreatedMessage && (
         <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm mb-4">
           Experiment saved successfully.
+        </div>
+      )}
+
+      {createdBatchMessage && (
+        <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm mb-4">
+          {createdBatchMessage}
+        </div>
+      )}
+
+      {deleteError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
+          {deleteError}
         </div>
       )}
 
@@ -160,7 +225,7 @@ export function ExperimentListPage() {
       {view === 'failed' ? (
         <FailedJobsPanel />
       ) : view === 'batches' ? (
-        <BatchDashboard />
+        <BatchDashboard initialExpandedId={createdBatchId || undefined} />
       ) : loading ? (
         <div className="text-center py-12 text-gray-400">
           <div className="inline-block w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mr-2" />
@@ -232,7 +297,7 @@ export function ExperimentListPage() {
                   </td>
                   <td className="px-4 py-3">
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleDelete(exp.id) }}
+                      onClick={(e) => { e.stopPropagation(); handleDelete(exp) }}
                       className="text-gray-300 hover:text-red-500 transition-colors"
                       title="Delete"
                     >
@@ -257,6 +322,18 @@ export function ExperimentListPage() {
         onUpdated={handleUpdated}
       />
     )}
+    <ConfirmDialog
+      open={Boolean(deleteTarget)}
+      title="Delete experiment"
+      message={`Delete "${deleteTarget?.name || 'this experiment'}"? Jobs and results will be removed.`}
+      confirmLabel="Delete experiment"
+      destructive
+      busy={deletingId === deleteTarget?.id}
+      onConfirm={confirmDelete}
+      onCancel={() => {
+        if (deletingId == null) setDeleteTarget(null)
+      }}
+    />
     </div>
   )
 }

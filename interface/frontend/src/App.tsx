@@ -5,7 +5,7 @@ import { GeneCatalogPage } from './components/genes/GeneCatalogPage'
 import { TFNetworkPage } from './components/network/TFNetworkPage'
 import { ExperimentListPage } from './components/experiments/ExperimentListPage'
 import { ExperimentDesigner } from './components/experiments/ExperimentDesigner'
-import { BatchCreator } from './components/experiments/BatchCreator'
+import { TypedBatchBuilder } from './components/experiments/TypedBatchBuilder'
 import { EnvironmentBuilderPage } from './components/experiments/EnvironmentBuilderPage'
 import { ExperimentGuidePage } from './components/experiments/ExperimentGuidePage'
 import { ResultsPage } from './components/results/ResultsPage'
@@ -29,7 +29,7 @@ export default function App() {
         <Route path="/pathways" element={<PathwaysPage />} />
         <Route path="/experiments" element={<ExperimentListPage />} />
         <Route path="/experiments/new" element={<ExperimentDesigner />} />
-        <Route path="/experiments/batch" element={<BatchCreator />} />
+        <Route path="/experiments/batch" element={<TypedBatchBuilder />} />
         <Route path="/environment-builder" element={<EnvironmentBuilderPage />} />
         <Route path="/experiments/environment-builder" element={<EnvironmentBuilderPage />} />
         <Route path="/guide" element={<ExperimentGuidePage />} />

@@ -254,25 +254,21 @@ export interface ExperimentCreate {
 
 // --- Batch experiment creation ---
 
-export interface BatchExperimentItem {
-  name?: string
-  description?: string
-  variant_type?: string
+export interface BatchRecord {
   variant_index?: number
-  condition?: string
-  timeline?: string
-  sim_params?: string
   gene_symbol?: string
+  timeline?: string
+  seed: number
+  generations: number
+  sim_params?: string
 }
 
 export interface BatchRequest {
-  experiments?: BatchExperimentItem[]
-  screen?: string
-  condition?: string
-  timeline?: string
-  sim_params?: string
+  name: string
   description?: string
+  variant_type: string
   include_wildtype?: boolean
+  records: BatchRecord[]
 }
 
 export interface BatchResponse {
@@ -293,6 +289,7 @@ export interface BatchSummary {
   running: number
   done: number
   failed: number
+  cancelled: number
 }
 
 export interface BatchDetail extends BatchSummary {
@@ -301,6 +298,16 @@ export interface BatchDetail extends BatchSummary {
 
 export interface BatchRunResponse {
   batch_id: string
+  queued: number
+  skipped: number
+  total_jobs: number
+  message: string
+}
+
+export interface BatchControlResponse {
+  batch_id: string
+  cancelled: number
+  resumed: number
   queued: number
   skipped: number
   total_jobs: number
@@ -365,7 +372,7 @@ export interface RunResponse {
 
 export interface RunJobRequest {
   condition?: string
-  seeds?: number
+  seeds?: number | number[]
   generations?: number
 }
 

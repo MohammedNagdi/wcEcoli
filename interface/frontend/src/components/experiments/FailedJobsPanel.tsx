@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getFailedJobs, retryJob, deleteJobPermanent } from '../../api/client'
+import { ConfirmDialog } from '../common/ConfirmDialog'
 import type { FailedJobSummary } from '../../types'
 
 function formatDate(iso: string): string {
@@ -30,6 +31,7 @@ export function FailedJobsPanel() {
   const [actionInProgress, setActionInProgress] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<FailedJobSummary | null>(null)
 
   const fetchJobs = async () => {
     try {
@@ -43,6 +45,12 @@ export function FailedJobsPanel() {
   }
 
   useEffect(() => { fetchJobs() }, [])
+
+  useEffect(() => {
+    if (!error) return
+    const timer = setTimeout(() => setError(null), 5000)
+    return () => clearTimeout(timer)
+  }, [error])
 
   const handleRetry = async (jobId: number) => {
     setActionInProgress(jobId)
@@ -58,11 +66,18 @@ export function FailedJobsPanel() {
   }
 
   const handleDelete = async (jobId: number) => {
-    if (!confirm('Permanently delete this job and its results? This cannot be undone.')) return
+    const job = jobs.find((item) => item.id === jobId)
+    if (job) setDeleteTarget(job)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    const jobId = deleteTarget.id
     setActionInProgress(jobId)
     setError(null)
     try {
       await deleteJobPermanent(jobId)
+      setDeleteTarget(null)
       await fetchJobs()
     } catch (e: any) {
       setError(e.message || 'Delete failed')
@@ -183,6 +198,18 @@ export function FailedJobsPanel() {
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete failed job"
+        message={`Delete failed job #${deleteTarget?.id || ''}? Results will be removed.`}
+        confirmLabel="Delete job"
+        destructive
+        busy={actionInProgress === deleteTarget?.id}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (actionInProgress == null) setDeleteTarget(null)
+        }}
+      />
     </div>
   )
 }

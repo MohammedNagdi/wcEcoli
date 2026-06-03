@@ -8,7 +8,7 @@ import type {
   TFNetwork, TFNode, AAPathway, Condition, Timeline, MediaRecipe, UserTimeline, Variant,
   BuilderDraft, BuilderDraftCollection, BuilderDraftSection, BuilderPublishPreview,
   VariantDetail, Experiment, ExperimentCreate,
-  BatchRequest, BatchResponse, BatchSummary, BatchDetail, BatchRunResponse,
+  BatchRequest, BatchResponse, BatchSummary, BatchDetail, BatchRunResponse, BatchControlResponse,
   SimulationJob, SimulationResult, RunJobRequest, RunResponse, ResultsResponse,
   ExperimentAggregation,
   FeatureExtractionResponse,
@@ -254,6 +254,21 @@ export async function runBatch(batchId: string): Promise<BatchRunResponse> {
   return fetchJSON(`/experiments/batches/${batchId}/run`, { method: 'POST' })
 }
 
+export async function cancelBatch(batchId: string): Promise<BatchControlResponse> {
+  return fetchJSON(`/experiments/batches/${batchId}/cancel`, { method: 'POST' })
+}
+
+export async function resumeBatch(batchId: string): Promise<BatchControlResponse> {
+  return fetchJSON(`/experiments/batches/${batchId}/resume`, { method: 'POST' })
+}
+
+export async function deleteBatch(batchId: string): Promise<void> {
+  const res = await fetch(`${BASE}/experiments/batches/${batchId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    throw new Error(`Delete failed: ${res.status}: ${await res.text()}`)
+  }
+}
+
 // --- Simulation Jobs ---
 
 export async function runExperiment(
@@ -291,7 +306,8 @@ export async function getExperimentResults(experimentId: number): Promise<Experi
 }
 
 export async function cancelJob(id: number): Promise<void> {
-  await fetch(`${BASE}/jobs/${id}`, { method: 'DELETE' })
+  const res = await fetch(`${BASE}/jobs/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Cancel failed: ${res.status}: ${await res.text()}`)
 }
 
 export async function retryJob(id: number): Promise<SimulationJob> {
@@ -299,7 +315,8 @@ export async function retryJob(id: number): Promise<SimulationJob> {
 }
 
 export async function deleteJobPermanent(id: number): Promise<void> {
-  await fetch(`${BASE}/jobs/${id}/permanent`, { method: 'DELETE' })
+  const res = await fetch(`${BASE}/jobs/${id}/permanent`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}: ${await res.text()}`)
 }
 
 export async function getFailedJobs(): Promise<FailedJobSummary[]> {

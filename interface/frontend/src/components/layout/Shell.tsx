@@ -89,6 +89,11 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/' || location.pathname === '/genes'
+    if (path === '/experiments') {
+      return location.pathname === '/experiments'
+        || location.pathname === '/experiments/new'
+        || location.pathname === '/experiments/batch'
+    }
     return location.pathname.startsWith(path)
   }
 
