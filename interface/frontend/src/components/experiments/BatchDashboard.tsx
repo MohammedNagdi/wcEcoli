@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { cancelBatch, deleteBatch, getBatches, getBatchDetail, resumeBatch, runBatch } from '../../api/client'
+import { cancelBatch, deleteBatch, deleteExperiment, getBatches, getBatchDetail, resumeBatch, runBatch } from '../../api/client'
 import { statusLabel } from '../../utils/labels'
 import { ConfirmDialog } from '../common/ConfirmDialog'
+import { SearchInput } from '../common/SearchInput'
+import { ExperimentDetailPanel } from './ExperimentDetailPanel'
 import type { BatchSummary, BatchDetail, Experiment } from '../../types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -28,6 +30,10 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
   const [expandedDetail, setExpandedDetail] = useState<BatchDetail | null>(null)
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BatchSummary | null>(null)
+  const [selectedExperiment, setSelectedExperiment] = useState<Experiment | null>(null)
+  const [deleteExperimentTarget, setDeleteExperimentTarget] = useState<Experiment | null>(null)
+  const [deletingExperimentId, setDeletingExperimentId] = useState<number | null>(null)
+  const [query, setQuery] = useState('')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchBatches = async () => {
@@ -163,6 +169,52 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
     }
   }
 
+  const handleExperimentUpdated = (updated: Experiment) => {
+    setSelectedExperiment(updated)
+    setExpandedDetail((current) => current
+      ? {
+        ...current,
+        experiments: current.experiments.map((exp) => (exp.id === updated.id ? updated : exp)),
+      }
+      : current)
+  }
+
+  const handleDeleteExperiment = (experiment: Experiment) => {
+    setDeleteExperimentTarget(experiment)
+    setRunResult(null)
+  }
+
+  const confirmDeleteExperiment = async () => {
+    if (!deleteExperimentTarget) return
+    const experiment = deleteExperimentTarget
+    setDeletingExperimentId(experiment.id)
+    setRunResult(null)
+    try {
+      await deleteExperiment(experiment.id)
+      if (selectedExperiment?.id === experiment.id) setSelectedExperiment(null)
+      setExpandedDetail((current) => current
+        ? {
+          ...current,
+          total: Math.max(0, current.total - 1),
+          experiments: current.experiments.filter((exp) => exp.id !== experiment.id),
+        }
+        : current)
+      setDeleteExperimentTarget(null)
+      setRunResult(`Deleted experiment "${experiment.name}".`)
+      await fetchBatches()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error'
+      setRunResult(`Error: ${message}`)
+    } finally {
+      setDeletingExperimentId(null)
+    }
+  }
+
+  const normalizedQuery = query.trim().toLowerCase()
+  const visibleBatches = normalizedQuery
+    ? batches.filter((batch) => batch.name.toLowerCase().includes(normalizedQuery))
+    : batches
+
   if (loading) {
     return (
       <div className="text-center py-12 text-gray-400">
@@ -201,7 +253,36 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
         </div>
       )}
 
-      {batches.map((batch) => (
+      <section className="rounded-lg border border-gray-200 bg-white px-4 py-4">
+        <div className="grid gap-3 sm:grid-cols-[minmax(220px,1fr),auto] sm:items-center">
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search batches..."
+          />
+          <div className="flex items-center justify-between gap-3 text-xs text-gray-400 sm:justify-end">
+            <span>
+              Showing {visibleBatches.length} of {batches.length} batch{batches.length === 1 ? '' : 'es'}
+            </span>
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="font-medium text-brand-600 hover:text-brand-700"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {visibleBatches.length === 0 ? (
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <p className="text-gray-500 font-medium mb-1">No matching batches</p>
+          <p className="text-sm text-gray-400">Adjust the batch name search.</p>
+        </div>
+      ) : visibleBatches.map((batch) => (
         <BatchCard
           key={batch.batch_id}
           batch={batch}
@@ -209,6 +290,8 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
           onCancel={handleCancel}
           onResume={handleResume}
           onDelete={handleDelete}
+          onOpenExperiment={setSelectedExperiment}
+          onDeleteExperiment={handleDeleteExperiment}
           onToggleExpand={handleToggleExpand}
           isRunning={runningBatchId === batch.batch_id}
           isCancelling={cancellingBatchId === batch.batch_id}
@@ -230,6 +313,25 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
           if (deletingBatchId == null) setDeleteTarget(null)
         }}
       />
+      <ConfirmDialog
+        open={Boolean(deleteExperimentTarget)}
+        title="Delete experiment"
+        message={`Delete "${deleteExperimentTarget?.name || 'this experiment'}"? Jobs and results will be removed.`}
+        confirmLabel="Delete experiment"
+        destructive
+        busy={deletingExperimentId === deleteExperimentTarget?.id}
+        onConfirm={confirmDeleteExperiment}
+        onCancel={() => {
+          if (deletingExperimentId == null) setDeleteExperimentTarget(null)
+        }}
+      />
+      {selectedExperiment && (
+        <ExperimentDetailPanel
+          experiment={selectedExperiment}
+          onClose={() => setSelectedExperiment(null)}
+          onUpdated={handleExperimentUpdated}
+        />
+      )}
     </div>
   )
 }
@@ -241,6 +343,8 @@ function BatchCard({
   onCancel,
   onResume,
   onDelete,
+  onOpenExperiment,
+  onDeleteExperiment,
   onToggleExpand,
   isRunning,
   isCancelling,
@@ -254,6 +358,8 @@ function BatchCard({
   onCancel: (id: string) => void
   onResume: (id: string) => void
   onDelete: (batch: BatchSummary) => void
+  onOpenExperiment: (experiment: Experiment) => void
+  onDeleteExperiment: (experiment: Experiment) => void
   onToggleExpand: (id: string) => void
   isRunning: boolean
   isCancelling: boolean
@@ -270,6 +376,19 @@ function BatchCard({
   const hasDraft = draft > 0
   const hasStopped = cancelled > 0
   const actionBusy = isRunning || isCancelling || isResuming || isDeleting
+  const [batchMenuOpen, setBatchMenuOpen] = useState(false)
+  const [openExperimentMenuId, setOpenExperimentMenuId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (openExperimentMenuId == null && !batchMenuOpen) return
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.closest('[data-batch-card-menu]')) setBatchMenuOpen(false)
+      if (!target.closest('[data-batch-experiment-menu]')) setOpenExperimentMenuId(null)
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [batchMenuOpen, openExperimentMenuId])
 
   const formatDate = (iso: string) => {
     if (!iso) return '—'
@@ -367,17 +486,37 @@ function BatchCard({
                 {isResuming ? 'Resuming...' : `Resume (${cancelled})`}
               </button>
             )}
-            <button
-              onClick={() => onDelete(batch)}
-              disabled={actionBusy}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                actionBusy
-                  ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'border-red-200 bg-white text-red-600 hover:bg-red-50'
-              }`}
-            >
-              {isDeleting ? 'Deleting...' : 'Delete'}
-            </button>
+            <div className="relative" data-batch-card-menu>
+              <button
+                type="button"
+                onClick={() => setBatchMenuOpen((current) => !current)}
+                disabled={actionBusy}
+                className={`px-2.5 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                  actionBusy
+                    ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                }`}
+                title="More batch actions"
+                aria-label="More batch actions"
+                aria-expanded={batchMenuOpen}
+              >
+                ...
+              </button>
+              {batchMenuOpen && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBatchMenuOpen(false)
+                      onDelete(batch)
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Delete batch
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -475,11 +614,16 @@ function BatchCard({
                     <th className="text-left px-4 py-2 font-medium text-gray-500 w-28">Condition</th>
                     <th className="text-left px-4 py-2 font-medium text-gray-500 w-24">Status</th>
                     <th className="text-left px-4 py-2 font-medium text-gray-500 w-36">Created</th>
+                    <th className="w-28"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {detail.experiments.map((exp) => (
-                    <tr key={exp.id} className="hover:bg-gray-50">
+                    <tr
+                      key={exp.id}
+                      onClick={() => onOpenExperiment(exp)}
+                      className="cursor-pointer hover:bg-gray-50"
+                    >
                       <td className="px-4 py-2">
                         <span className="font-mono text-brand-700 text-xs">{exp.gene_symbol || exp.name}</span>
                       </td>
@@ -496,6 +640,43 @@ function BatchCard({
                       </td>
                       <td className="px-4 py-2 text-xs text-gray-400">
                         {formatDate(exp.created_at)}
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex justify-end gap-2" onClick={(event) => event.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => onOpenExperiment(exp)}
+                            className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                          >
+                            Open
+                          </button>
+                          <div className="relative" data-batch-experiment-menu>
+                            <button
+                              type="button"
+                              onClick={() => setOpenExperimentMenuId((current) => (current === exp.id ? null : exp.id))}
+                              className="px-2 py-0.5 text-sm font-medium text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
+                              title="More actions"
+                              aria-label="More experiment actions"
+                              aria-expanded={openExperimentMenuId === exp.id}
+                            >
+                              ...
+                            </button>
+                            {openExperimentMenuId === exp.id && (
+                              <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenExperimentMenuId(null)
+                                    onDeleteExperiment(exp)
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-xs font-medium text-red-600 hover:bg-red-50"
+                                >
+                                  Delete experiment
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </td>
                     </tr>
                   ))}
