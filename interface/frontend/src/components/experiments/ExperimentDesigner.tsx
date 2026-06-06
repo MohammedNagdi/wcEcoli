@@ -42,7 +42,7 @@ const VARIANT_GROUPS: VariantGroup[] = [
     id: 'core',
     label: 'Core workflows',
     description: 'Controls, gene knockouts, static growth conditions, and user-composed media timelines.',
-    variants: ['wildtype', 'gene_knockout', 'condition', 'timelines'],
+    variants: ['wildtype', 'gene_knockout', 'multi_gene_knockout', 'condition', 'timelines'],
   },
   {
     id: 'nutrient',
@@ -1139,6 +1139,7 @@ export function ExperimentDesigner() {
   const [geneQuery, setGeneQuery] = useState(prefillGene)
   const [geneResults, setGeneResults] = useState<Gene[]>([])
   const [showGenePicker, setShowGenePicker] = useState(false)
+  const [selectedGenes, setSelectedGenes] = useState<Gene[]>([])
 
   // Gene impact preview
   const [geneDetail, setGeneDetail] = useState<GeneDetail | null>(null)
@@ -1206,6 +1207,15 @@ export function ExperimentDesigner() {
     'sinusoidal_media',
   ].includes(variantType)
   const variantsByName = useMemo(() => new Map(variants.map((variant) => [variant.name, variant])), [variants])
+  const selectedGeneSymbols = useMemo(
+    () => new Set(selectedGenes.map((gene) => gene.symbol)),
+    [selectedGenes],
+  )
+  const saveBlocked = saving
+    || !variantType
+    || !name.trim()
+    || (variantType === 'gene_knockout' && !geneSymbol)
+    || (variantType === 'multi_gene_knockout' && selectedGenes.length < 2)
   const visibleVariantGroups = useMemo(() => {
     return VARIANT_GROUPS
       .filter((group) => showAdvancedVariants || !group.advanced)
@@ -1285,10 +1295,12 @@ export function ExperimentDesigner() {
   useEffect(() => {
     if (variantType === 'gene_knockout' && geneSymbol) {
       setName(`${geneSymbol} knockout`)
+    } else if (variantType === 'multi_gene_knockout' && selectedGenes.length > 0) {
+      setName(`${selectedGenes.length} gene knockout`)
     } else if (variantType) {
       setName(`${variantType} experiment`)
     }
-  }, [variantType, geneSymbol])
+  }, [geneSymbol, selectedGenes.length, variantType])
 
   // Auto-resolve prefilled gene -> ko_index on mount
   useEffect(() => {
@@ -1326,9 +1338,24 @@ export function ExperimentDesigner() {
     setWorkspaceUrlState({ selectedGene: gene.symbol }, { replace: true })
   }
 
+  const toggleMultiGene = (gene: Gene) => {
+    if (gene.ko_index < 1) return
+    setSelectedGenes((current) => {
+      if (current.some((item) => item.symbol === gene.symbol)) {
+        return current.filter((item) => item.symbol !== gene.symbol)
+      }
+      return [...current, gene].sort((a, b) => a.symbol.localeCompare(b.symbol))
+    })
+  }
+
   const handleSave = async () => {
     if (!name.trim()) { setError('Name is required'); return }
     if (!variantType) { setError('Select an experiment type'); return }
+    if (variantType === 'gene_knockout' && !geneSymbol) { setError('Select a gene to knock out'); return }
+    if (variantType === 'multi_gene_knockout' && selectedGenes.length < 2) {
+      setError('Select at least two genes for a multi-gene knockout')
+      return
+    }
 
     setSaving(true)
     setError(null)
@@ -1340,7 +1367,10 @@ export function ExperimentDesigner() {
         variant_index: variantIndex,
         condition: effectiveExperimentEnvironment.condition,
         timeline: effectiveExperimentEnvironment.timeline,
-        gene_symbol: geneSymbol,
+        gene_symbol: variantType === 'gene_knockout' ? geneSymbol : '',
+        gene_symbols: variantType === 'multi_gene_knockout'
+          ? selectedGenes.map((gene) => gene.symbol)
+          : undefined,
         sim_params: JSON.stringify({ seeds, generations, length_sec: lengthSec }),
       }
       const experiment = await createExperiment(data)
@@ -1349,7 +1379,7 @@ export function ExperimentDesigner() {
         experiment: String(experiment.id),
         condition: effectiveExperimentEnvironment.condition,
       })
-      if (geneSymbol) nextParams.set('gene', geneSymbol)
+      if (variantType === 'gene_knockout' && geneSymbol) nextParams.set('gene', geneSymbol)
       navigate(`/experiments?${nextParams.toString()}`)
     } catch (e: any) {
       setError(e.message || 'Failed to save experiment')
@@ -1401,6 +1431,7 @@ export function ExperimentDesigner() {
               setVariantIndex(0)
               setGeneSymbol('')
               setGeneQuery('')
+              setSelectedGenes([])
             }}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm
                        focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
@@ -1510,6 +1541,96 @@ export function ExperimentDesigner() {
                 {' '}&rarr; KO index <span className="font-mono">{variantIndex}</span>
               </p>
             )}
+          </section>
+        )}
+
+        {variantType === 'multi_gene_knockout' && (
+          <section className="bg-white rounded-lg border border-gray-200 p-4">
+            <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+              Target genes
+              <HelpTip text="Select genes that resolve to at least two unique wcEcoli knockout targets. Genes sharing one RNA or transcription-unit target count as one target." />
+            </h2>
+            <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+              <p className="font-medium">Modeled multi-knockout: selected RNA synthesis/expression targets are set to zero together.</p>
+              <p className="mt-1 text-blue-800">
+                This uses the same KO-index mapping as the single gene knockout variant. It does not physically delete DNA loci or remodel neighboring operons.
+              </p>
+            </div>
+            <div className="relative">
+              <SearchInput
+                value={geneQuery}
+                onChange={(v) => { setGeneQuery(v); setShowGenePicker(true) }}
+                placeholder="Search genes to add..."
+              />
+              {showGenePicker && geneResults.length > 0 && (
+                <div className="absolute z-10 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                  {geneResults.map((g) => {
+                    const selected = selectedGeneSymbols.has(g.symbol)
+                    const disabled = g.ko_index < 1
+                    return (
+                      <button
+                        key={g.id}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          toggleMultiGene(g)
+                          setGeneQuery('')
+                          setShowGenePicker(false)
+                        }}
+                        className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between ${
+                          disabled
+                            ? 'cursor-not-allowed text-gray-300'
+                            : selected
+                              ? 'bg-brand-50 hover:bg-brand-100'
+                              : 'hover:bg-brand-50'
+                        }`}
+                      >
+                        <span>
+                          <span className="font-mono font-medium text-bio-gene">{g.symbol}</span>
+                          <span className="text-gray-400 ml-2">{g.ecoli_id}</span>
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {disabled ? 'no KO index' : selected ? 'selected' : `KO #${g.ko_index}`}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50/60 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-xs font-medium text-gray-600">
+                  Selected genes ({selectedGenes.length})
+                </p>
+                {selectedGenes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGenes([])}
+                    className="text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    Clear selected
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedGenes.map((gene) => (
+                  <button
+                    key={gene.symbol}
+                    type="button"
+                    onClick={() => toggleMultiGene(gene)}
+                    className="rounded-md border border-brand-200 bg-white px-2.5 py-1 text-xs font-medium text-brand-700 shadow-sm hover:bg-brand-50"
+                    title="Remove gene"
+                  >
+                    <span className="font-mono">{gene.symbol}</span>
+                    <span className="ml-1 text-brand-400">KO #{gene.ko_index} x</span>
+                  </button>
+                ))}
+                {selectedGenes.length === 0 && (
+                  <span className="text-sm text-gray-400">No genes selected.</span>
+                )}
+              </div>
+            </div>
           </section>
         )}
 
@@ -1722,10 +1843,22 @@ export function ExperimentDesigner() {
               <dt className="text-xs uppercase tracking-wide text-slate-400">Experiment</dt>
               <dd className="mt-1 font-medium text-slate-900">{variantType ? variantLabel(variantType) : 'Select a type'}</dd>
             </div>
-            {geneSymbol && (
+            {geneSymbol && variantType === 'gene_knockout' && (
               <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-400">Gene</dt>
                 <dd className="mt-1 font-mono text-slate-900">{geneSymbol}</dd>
+              </div>
+            )}
+            {variantType === 'multi_gene_knockout' && (
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-400">Genes</dt>
+                <dd className="mt-1 flex flex-wrap gap-1">
+                  {selectedGenes.length > 0 ? selectedGenes.map((gene) => (
+                    <span key={gene.symbol} className="rounded bg-brand-50 px-1.5 py-0.5 font-mono text-xs text-brand-700">
+                      {gene.symbol}
+                    </span>
+                  )) : <span className="text-slate-400">None selected</span>}
+                </dd>
               </div>
             )}
             {parameterIndexGuide?.current && variantType !== 'gene_knockout' && (
@@ -1772,7 +1905,7 @@ export function ExperimentDesigner() {
           <div className="mt-5 grid gap-2">
             <button
               onClick={handleSave}
-              disabled={saving || !variantType || !name.trim()}
+              disabled={saveBlocked}
               className="w-full px-5 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving...' : 'Save experiment'}

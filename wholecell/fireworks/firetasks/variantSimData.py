@@ -18,6 +18,9 @@ class VariantSimDataTask(FiretaskBase):
 		"output_sim_data",  # the output variant sim_data file (dir gets created)
 		"variant_metadata_directory",  # the output variant metadata directory
 		]
+	optional_params = [
+		"variant_kwargs",
+		]
 
 	def run_task(self, fw_spec):
 		fp.makedirs(os.path.dirname(self["output_sim_data"]))
@@ -26,7 +29,8 @@ class VariantSimDataTask(FiretaskBase):
 		info, sim_data = apply_variant.apply_variant(
 			self["input_sim_data"],
 			self["variant_function"],
-			self["variant_index"])
+			self["variant_index"],
+			self.get("variant_kwargs"))
 
 		sys.setrecursionlimit(4000)
 

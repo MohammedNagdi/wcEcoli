@@ -26,11 +26,13 @@ def _build_client():
 
     with Session(engine) as session:
         session.add(Variant(name="gene_knockout", parameter_count=10))
+        session.add(Variant(name="multi_gene_knockout", parameter_count=1))
         session.add(Variant(name="tf_activity", parameter_count=3))
         session.add(Variant(name="wildtype", parameter_count=1))
         session.add(Gene(id=1, ecoli_id="EG10001", symbol="abcA", category="Other", ko_index=42))
         session.add(Gene(id=2, ecoli_id="EG10002", symbol="abcB", category="Other", ko_index=43))
         session.add(Gene(id=3, ecoli_id="G0-0001", symbol="C0001", category="Other", ko_index=-1))
+        session.add(Gene(id=4, ecoli_id="EG10003", symbol="abcC", category="Other", ko_index=42))
         session.add(MediaRecipe(media_id="minimal", base_media="MIX0-57", ingredients="[]"))
         session.add(MediaRecipe(media_id="acetate", base_media="MIX0-57", ingredients="[]"))
         session.add(Condition(name="basal", nutrients="minimal", doubling_time=44.0))
@@ -104,6 +106,60 @@ def test_create_typed_gene_knockout_batch_with_matching_wildtypes():
         tempdir.cleanup()
 
 
+def test_create_multi_gene_knockout_experiment_canonicalizes_targets():
+    tempdir, engine, client = _build_client()
+    try:
+        response = client.post(
+            "/api/experiments",
+            json={
+                "name": "combined KO",
+                "variant_type": "multi_gene_knockout",
+                "variant_index": 99,
+                "condition": "basal",
+                "gene_symbols": ["abcB", "abcA"],
+                "sim_params": json.dumps({"seeds": 2, "generations": 1, "length_sec": 7200}),
+                "include_wildtype": True,
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["variant_type"] == "multi_gene_knockout"
+        assert body["variant_index"] == 0
+        assert body["gene_symbol"] == "abcA,abcB"
+
+        params = json.loads(body["sim_params"])
+        assert params["multi_gene_knockout"]["gene_symbols"] == ["abcA", "abcB"]
+        assert params["multi_gene_knockout"]["ko_indices"] == [42, 43]
+
+        with Session(engine) as session:
+            wildtype = session.exec(select(Experiment).where(Experiment.variant_type == "wildtype")).first()
+            assert wildtype
+            assert "multi_gene_knockout" not in json.loads(wildtype.sim_params)
+    finally:
+        tempdir.cleanup()
+
+
+def test_create_multi_gene_knockout_rejects_fewer_than_two_unique_ko_targets():
+    tempdir, _, client = _build_client()
+    try:
+        response = client.post(
+            "/api/experiments",
+            json={
+                "name": "shared target KO",
+                "variant_type": "multi_gene_knockout",
+                "condition": "basal",
+                "gene_symbols": ["abcC", "abcA"],
+                "sim_params": "{}",
+            },
+        )
+
+        assert response.status_code == 400, response.text
+        assert "fewer than two unique" in response.text
+    finally:
+        tempdir.cleanup()
+
+
 def test_typed_batch_allows_same_variant_with_different_explicit_seeds():
     tempdir, engine, client = _build_client()
     try:
@@ -128,6 +184,57 @@ def test_typed_batch_allows_same_variant_with_different_explicit_seeds():
         with Session(engine) as session:
             jobs = session.exec(select(SimulationJob).order_by(SimulationJob.seed)).all()
             assert [job.seed for job in jobs] == [0, 7]
+    finally:
+        tempdir.cleanup()
+
+
+def test_create_typed_multi_gene_knockout_batch_with_matching_wildtypes():
+    tempdir, engine, client = _build_client()
+    try:
+        response = client.post(
+            "/api/experiments/batch",
+            json={
+                "name": "multi KO batch",
+                "variant_type": "multi_gene_knockout",
+                "include_wildtype": True,
+                "records": [
+                    {
+                        "gene_symbols": ["abcB", "abcA"],
+                        "timeline": "acetate_shift",
+                        "seed": 0,
+                        "generations": 1,
+                        "sim_params": json.dumps({"length_sec": 7200}),
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["created"] == 2
+
+        detail = client.get(f"/api/experiments/batches/{body['batch_id']}")
+        assert detail.status_code == 200
+        experiments = detail.json()["experiments"]
+        multi = [exp for exp in experiments if exp["variant_type"] == "multi_gene_knockout"]
+        wildtypes = [exp for exp in experiments if exp["variant_type"] == "wildtype"]
+        assert len(multi) == 1
+        assert len(wildtypes) == 1
+        assert multi[0]["variant_index"] == 0
+
+        multi_params = json.loads(multi[0]["sim_params"])
+        assert multi_params["multi_gene_knockout"] == {
+            "gene_symbols": ["abcA", "abcB"],
+            "ko_indices": [42, 43],
+        }
+        assert "multi_gene_knockout" not in json.loads(wildtypes[0]["sim_params"])
+
+        with Session(engine) as session:
+            db_experiment = session.exec(
+                select(Experiment).where(Experiment.variant_type == "multi_gene_knockout")
+            ).first()
+            assert db_experiment
+            assert db_experiment.gene_symbol == "abcA,abcB"
     finally:
         tempdir.cleanup()
 
@@ -224,6 +331,39 @@ def test_rejects_invalid_typed_batch_requests():
         )
         assert invalid_ko.status_code == 400
         assert "valid knockout index" in invalid_ko.text
+
+        one_gene_multi = client.post(
+            "/api/experiments/batch",
+            json={
+                "name": "one gene multi",
+                "variant_type": "multi_gene_knockout",
+                "records": [{"gene_symbols": ["abcA"], "seed": 0, "generations": 1}],
+            },
+        )
+        assert one_gene_multi.status_code == 400
+        assert "at least two genes" in one_gene_multi.text
+
+        duplicate_multi = client.post(
+            "/api/experiments/batch",
+            json={
+                "name": "duplicate multi",
+                "variant_type": "multi_gene_knockout",
+                "records": [{"gene_symbols": ["abcA", "abca"], "seed": 0, "generations": 1}],
+            },
+        )
+        assert duplicate_multi.status_code == 400
+        assert "Duplicate genes" in duplicate_multi.text
+
+        invalid_multi = client.post(
+            "/api/experiments/batch",
+            json={
+                "name": "invalid multi",
+                "variant_type": "multi_gene_knockout",
+                "records": [{"gene_symbols": ["abcA", "C0001"], "seed": 0, "generations": 1}],
+            },
+        )
+        assert invalid_multi.status_code == 400
+        assert "valid knockout index" in invalid_multi.text
     finally:
         tempdir.cleanup()
 

@@ -17,12 +17,10 @@ Run with '-h' for command line help.
 Set PYTHONPATH when running this.
 """
 
-import logging
 import re
 import os
 import sys
 import traceback
-from typing import Tuple
 
 from models.ecoli.sim.variants.new_gene_internal_shift import (NEW_GENE_EXPRESSION_FACTORS,
 	NEW_GENE_TRANSLATION_EFFICIENCY_VALUES, NEW_GENE_INDUCTION_GEN,
@@ -34,8 +32,36 @@ import wholecell.utils.filepath as fp
 SIM_DIR_PATTERN = r'({})__(.+)'.format(fp.TIMESTAMP_PATTERN)
 
 
+def multi_ko_variant_kwargs(variant_spec, multi_ko_indices, require_variants):
+	"""Validate and build multi-gene knockout variant parameters."""
+	variant_type, first_index, last_index = variant_spec
+
+	if variant_type != 'multi_gene_knockout':
+		if multi_ko_indices is not None:
+			raise ValueError(
+				'--multi-ko-indices is only supported with '
+				'--variant multi_gene_knockout 0 0.')
+		return None
+
+	if (first_index, last_index) != (0, 0):
+		raise ValueError('multi_gene_knockout requires --variant multi_gene_knockout 0 0.')
+	if require_variants:
+		raise ValueError(
+			'multi_gene_knockout does not support --require-variants because '
+			'the requested KO indexes define the modified sim data.')
+	if multi_ko_indices is None:
+		raise ValueError('multi_gene_knockout requires --multi-ko-indices.')
+	if len(multi_ko_indices) < 2:
+		raise ValueError('multi_gene_knockout requires at least two unique KO indexes.')
+	if any(index < 1 for index in multi_ko_indices):
+		raise ValueError('All multi_gene_knockout KO indexes must be positive.')
+	if len(set(multi_ko_indices)) != len(multi_ko_indices):
+		raise ValueError('Duplicate KO indexes are not allowed in multi_gene_knockout.')
+
+	return {'ko_indices': multi_ko_indices}
+
+
 def parse_timestamp_description(sim_path):
-	# type: (str) -> Tuple[str, str]
 	"""Parse `timestamp, description` from a sim_path that ends with a dir like
 	'20190704.101500__Latest_sim_run' or failing that, return defaults.
 	"""
@@ -75,6 +101,11 @@ class RunSimulation(scriptBase.ScriptBase):
 		super(RunSimulation, self).define_parameters(parser)
 		self.define_parameter_sim_dir(parser)
 		self.define_sim_loop_options(parser, manual_script=True)
+		parser.add_argument('--multi-ko-indices', nargs='+', type=int,
+			metavar='KO_INDEX',
+			help='One-based gene_knockout indexes to combine in a single '
+				'multi_gene_knockout run. Requires '
+				'--variant multi_gene_knockout 0 0.')
 		self.define_sim_options(parser)
 		self.define_elongation_options(parser)
 
@@ -87,6 +118,8 @@ class RunSimulation(scriptBase.ScriptBase):
 
 		variant_type = args.variant[0]
 		variant_spec = (variant_type, int(args.variant[1]), int(args.variant[2]))
+		variant_kwargs = multi_ko_variant_kwargs(
+			variant_spec, args.multi_ko_indices, args.require_variants)
 
 		cli_sim_args = data.select_keys(vars(args), scriptBase.SIM_KEYS)
 
@@ -114,6 +147,8 @@ class RunSimulation(scriptBase.ScriptBase):
 				NEW_GENE_TRANSLATION_EFFICIENCY_VALUES,
 				new_gene_induction_gen=NEW_GENE_INDUCTION_GEN,
 				new_gene_knockout_gen=NEW_GENE_KNOCKOUT_GEN,)
+		elif variant_type == 'multi_gene_knockout':
+			metadata.update(multi_ko_indices=args.multi_ko_indices)
 
 		metadata_dir = fp.makedirs(args.sim_path, constants.METADATA_DIR)
 		metadata_path = os.path.join(metadata_dir, constants.JSON_METADATA_FILE)
@@ -143,6 +178,7 @@ class RunSimulation(scriptBase.ScriptBase):
 						input_sim_data=sim_data_file,
 						output_sim_data=variant_sim_data_modified_file,
 						variant_metadata_directory=variant_metadata_directory,
+						variant_kwargs=variant_kwargs,
 						)
 					task.run_task({})
 

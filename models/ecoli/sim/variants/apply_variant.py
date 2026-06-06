@@ -4,7 +4,7 @@ import time
 from models.ecoli.sim.variants import nameToFunctionMapping
 
 
-def apply_variant(sim_data_file, variant_type, variant_index):
+def apply_variant(sim_data_file, variant_type, variant_index, variant_kwargs=None):
 	"""Load the sim_data_file and apply the named variant type and variant index.
 	Returns (info_dict, modified_sim_data).
 	Example info_dict = {'shortName': "wildtype", 'desc': "Wildtype simulation"}
@@ -21,7 +21,8 @@ def apply_variant(sim_data_file, variant_type, variant_index):
 	print(f"{time.ctime()}: Creating sim_data for Variant: {variant_type},"
 		  f" Index: {variant_index}{operon_msg}")
 
-	info, sim_data = nameToFunctionMapping[variant_type](sim_data, variant_index)
+	info, sim_data = nameToFunctionMapping[variant_type](
+		sim_data, variant_index, **(variant_kwargs or {}))
 
 	if getattr(sim_data, 'operons_on', ''):
 		info["shortName"] += ", operons"

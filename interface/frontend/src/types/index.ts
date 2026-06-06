@@ -249,6 +249,7 @@ export interface ExperimentCreate {
   timeline?: string
   sim_params?: string
   gene_symbol?: string
+  gene_symbols?: string[]
   include_wildtype?: boolean
 }
 
@@ -257,6 +258,7 @@ export interface ExperimentCreate {
 export interface BatchRecord {
   variant_index?: number
   gene_symbol?: string
+  gene_symbols?: string[]
   timeline?: string
   seed: number
   generations: number

@@ -21,6 +21,11 @@ from app.routers.jobs import (
     create_simulation_jobs_for_experiment,
 )
 from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
+from app.services.multi_gene_knockout import (
+    MULTI_GENE_KNOCKOUT_TYPE,
+    strip_multi_gene_targets,
+    with_multi_gene_targets,
+)
 from app.services.batches import (
     BatchRequest,
     BatchResponse,
@@ -44,6 +49,7 @@ class ExperimentCreate(BaseModel):
     timeline: str = ""
     sim_params: str = "{}"
     gene_symbol: str = ""
+    gene_symbols: list[str] = []
     include_wildtype: bool = False  # Auto-create a matching WT control
 
 
@@ -247,6 +253,15 @@ VARIANT_PARAM_HINTS: dict[str, dict] = {
         "index_options": [
             "0: control",
             "1-4749: individual gene knockout index; use gene search to map symbols to indices",
+        ],
+    },
+    "multi_gene_knockout": {
+        "index_meaning": "Always 0; selected genes are stored as validated KO indexes in sim_params",
+        "index_range": [0, 0],
+        "hide_index": True,
+        "timeline_behavior": "composer",
+        "index_options": [
+            "0: multi-gene knockout target set supplied by experiment metadata",
         ],
     },
     "condition": {
@@ -689,6 +704,19 @@ def create_experiment(
             raise HTTPException(400, f"Unknown gene: {body.gene_symbol}")
         body.variant_index = gene.ko_index
 
+    sim_params = body.sim_params
+    gene_symbol = body.gene_symbol
+    if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE:
+        if body.gene_symbol:
+            raise HTTPException(400, "Use gene_symbols for multi_gene_knockout")
+        sim_params, canonical_symbols, _ = with_multi_gene_targets(
+            body.sim_params,
+            body.gene_symbols,
+            session,
+        )
+        body.variant_index = 0
+        gene_symbol = ",".join(canonical_symbols)
+
     condition, timeline = _normalized_experiment_environment(
         session,
         body.variant_type,
@@ -704,11 +732,11 @@ def create_experiment(
         variant_index=body.variant_index,
         condition=condition,
         timeline=timeline,
-        sim_params=body.sim_params,
+        sim_params=sim_params,
         status="draft",
         created_at=now,
         updated_at=now,
-        gene_symbol=body.gene_symbol,
+        gene_symbol=gene_symbol,
     )
     session.add(experiment)
     session.flush()  # get the ID before potential WT creation
@@ -716,8 +744,13 @@ def create_experiment(
     # Auto-create wildtype control if requested
     wt_id: int | None = None
     if body.include_wildtype:
+        wildtype_sim_params = (
+            strip_multi_gene_targets(sim_params)
+            if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE
+            else sim_params
+        )
         wt_id = _find_or_create_wildtype(
-            session, condition, timeline, body.sim_params, now,
+            session, condition, timeline, wildtype_sim_params, now,
         )
 
     session.commit()

@@ -12,12 +12,10 @@ the job status through its lifecycle:
                                                       ↘ failed
 """
 
-import json
 import logging
 import shutil
 import signal
 import subprocess
-import sys
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -28,6 +26,10 @@ from sqlmodel import Session, col, create_engine, select
 
 from app.config import settings
 from app.db.models import Experiment, SimulationJob, SimulationResult, Timeline
+from app.services.multi_gene_knockout import (
+    MULTI_GENE_KNOCKOUT_TYPE,
+    ko_indices_from_sim_params,
+)
 from app.services.timelines import infer_condition_from_timeline
 
 logging.basicConfig(
@@ -61,7 +63,11 @@ def _now() -> str:
 def _make_run_id(job: SimulationJob, experiment: Experiment) -> str:
     """Create a unique, human-readable run directory name."""
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    label = experiment.gene_symbol or experiment.variant_type
+    label = (
+        MULTI_GENE_KNOCKOUT_TYPE
+        if experiment.variant_type == MULTI_GENE_KNOCKOUT_TYPE
+        else experiment.gene_symbol or experiment.variant_type
+    )
     return ts + "_" + label + "_job" + str(job.id)
 
 
@@ -321,6 +327,7 @@ def execute_job(engine, job_id: int):
         variant_type = job.variant_type
         variant_start = str(job.variant_index)
         variant_end = str(job.variant_index)
+        multi_ko_indices: list[int] = []
         if job.variant_type == "timelines":
             # The UI now treats the timelines experiment as composer-driven.
             # Execute the sim as wildtype so the externally supplied timeline
@@ -332,6 +339,15 @@ def execute_job(engine, job_id: int):
                 "Variant 'timelines' is composer-driven in the interface; "
                 "executing as wildtype with the supplied timeline."
             )
+        elif job.variant_type == MULTI_GENE_KNOCKOUT_TYPE:
+            ko_indices = ko_indices_from_sim_params(experiment.sim_params)
+            variant_start = "0"
+            variant_end = "0"
+            multi_ko_indices = ko_indices
+            log_buffer.append(
+                "Multi-gene knockout KO indexes: "
+                + ", ".join(str(index) for index in ko_indices)
+            )
 
         sim_args = [
             "python", "runscripts/manual/runSim.py", run_id,
@@ -339,6 +355,8 @@ def execute_job(engine, job_id: int):
             "--seed", str(job.seed),
             "--generations", str(job.generations),
         ]
+        if multi_ko_indices:
+            sim_args.extend(["--multi-ko-indices", *(str(index) for index in multi_ko_indices)])
         if _variant_manages_environment(job):
             log_buffer.append(
                 "Variant '" + job.variant_type + "' manages the model environment; "

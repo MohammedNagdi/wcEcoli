@@ -197,6 +197,9 @@ class RuntimeContractsTest(unittest.TestCase):
 		self.assertFalse(sim_worker._variant_manages_environment(
 			SimulationJob(variant_type='gene_knockout', variant_index=884)
 		))
+		self.assertFalse(sim_worker._variant_manages_environment(
+			SimulationJob(variant_type='multi_gene_knockout', variant_index=0)
+		))
 
 	def test_batch_jobs_share_one_parca_directory(self):
 		experiment = SimpleNamespace(batch_id='batch-123')

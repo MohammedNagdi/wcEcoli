@@ -35,6 +35,7 @@ export function categoryLabel(raw: string): string {
 
 export const VARIANT_LABELS: Record<string, string> = {
   gene_knockout: 'Gene knockout',
+  multi_gene_knockout: 'Multi-gene knockout',
   condition: 'Growth condition',
   timelines: 'Timeline shift',
   wildtype: 'Wildtype (control)',

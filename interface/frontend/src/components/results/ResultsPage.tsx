@@ -22,6 +22,14 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 
 // Channel configuration
 
+function singleGeneSymbol(value?: string) {
+  const symbols = (value ?? '')
+    .split(',')
+    .map((symbol) => symbol.trim())
+    .filter(Boolean)
+  return symbols.length === 1 ? symbols[0] : undefined
+}
+
 interface ChannelDef {
   title: string
   color: string
@@ -193,10 +201,11 @@ export function ResultsPage() {
           } catch { /* best-effort */ }
         }
 
+        const focusGeneSymbol = singleGeneSymbol(geneSymbol)
         setResolvedGeneSymbol(geneSymbol)
         setWorkspaceUrlState(
           {
-            selectedGene: geneSymbol ?? null,
+            selectedGene: focusGeneSymbol ?? null,
             selectedExperimentId: experimentId ?? jobData.experiment_id ?? null,
             selectedJobId: jobData.id,
             selectedCondition: experimentCondition,
@@ -248,6 +257,7 @@ export function ResultsPage() {
   const channels = Object.keys(results.timeseries)
   const isMock = !job.sim_dir || job.status !== 'done'
   const grouped = groupChannels(channels)
+  const focusGeneSymbol = singleGeneSymbol(resolvedGeneSymbol)
 
   return (
     <div className="h-full overflow-y-auto pr-1">
@@ -365,11 +375,11 @@ export function ResultsPage() {
           <div className="mt-3" />
           <ResultStateExplorer
             jobId={job.id}
-            geneSymbol={resolvedGeneSymbol}
+            geneSymbol={focusGeneSymbol}
           />
           <MoleculeExplorer
             jobId={job.id}
-            geneSymbol={resolvedGeneSymbol}
+            geneSymbol={focusGeneSymbol}
             variantType={experiment?.variant_type ?? job.variant_type}
           />
         </div>

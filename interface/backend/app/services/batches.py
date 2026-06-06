@@ -10,6 +10,11 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from app.db.models import Experiment, Gene, SimulationJob, SimulationResult, Variant
+from app.services.multi_gene_knockout import (
+    MULTI_GENE_KNOCKOUT_TYPE,
+    strip_multi_gene_targets,
+    with_multi_gene_targets,
+)
 from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
 
 
@@ -23,6 +28,7 @@ ACTIVE_JOB_STATUSES = {"pending", "running_parca", "running_sim", "ingesting"}
 class BatchRecord(BaseModel):
     variant_index: int = 0
     gene_symbol: str = ""
+    gene_symbols: list[str] = []
     timeline: str = ""
     seed: int
     generations: int
@@ -88,8 +94,8 @@ def _validate_batch_request(body: BatchRequest, session: Session) -> Variant:
         raise HTTPException(400, "records must contain at least one item")
     if len(body.records) > MAX_BATCH_RECORDS:
         raise HTTPException(400, f"Batch too large: {len(body.records)} records (max {MAX_BATCH_RECORDS})")
-    if body.include_wildtype and body.variant_type != "gene_knockout":
-        raise HTTPException(400, "include_wildtype is only supported for gene_knockout batches")
+    if body.include_wildtype and body.variant_type not in {"gene_knockout", MULTI_GENE_KNOCKOUT_TYPE}:
+        raise HTTPException(400, "include_wildtype is only supported for gene knockout batches")
 
     variant = session.exec(select(Variant).where(Variant.name == body.variant_type)).first()
     if not variant:
@@ -177,8 +183,18 @@ def create_typed_batch(body: BatchRequest, session: Session) -> BatchResponse:
             gene = _resolve_gene(session, gene_symbol)
             variant_index = gene.ko_index
             gene_symbol = gene.symbol
+        elif body.variant_type == MULTI_GENE_KNOCKOUT_TYPE:
+            sim_params, canonical_symbols, ko_indices = with_multi_gene_targets(
+                sim_params,
+                record.gene_symbols,
+                session,
+            )
+            variant_index = 0
+            gene_symbol = ",".join(canonical_symbols)
 
-        if gene_symbol:
+        if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE:
+            name = f"Multi-KO [{','.join(str(index) for index in ko_indices)}] seed {record.seed}"
+        elif gene_symbol:
             name = f"KO {gene_symbol} seed {record.seed}"
         else:
             name = f"{body.variant_type}[{variant_index}] seed {record.seed}"
@@ -204,7 +220,12 @@ def create_typed_batch(body: BatchRequest, session: Session) -> BatchResponse:
         created_ids.append(experiment.id)
 
         if body.include_wildtype:
-            wildtype_keys.add((condition, timeline, sim_params, record.seed))
+            wildtype_sim_params = (
+                strip_multi_gene_targets(sim_params)
+                if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE
+                else sim_params
+            )
+            wildtype_keys.add((condition, timeline, wildtype_sim_params, record.seed))
 
     for condition, timeline, sim_params, seed in sorted(wildtype_keys):
         wt_id = _find_or_create_batch_wildtype(

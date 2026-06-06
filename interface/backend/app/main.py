@@ -117,6 +117,22 @@ def _run_migrations(engine):
             cur.execute("ALTER TABLE simulation_jobs ADD COLUMN docker_container_id TEXT NOT NULL DEFAULT ''")
             conn.commit()
 
+        # Migration 6: Upsert newly added variant files into existing live DBs.
+        variant_path = settings.variants_dir / "multi_gene_knockout.py"
+        if variant_path.exists():
+            import re
+            content = variant_path.read_text(encoding="utf-8")
+            doc_match = re.search(r'"""(.*?)"""', content, re.DOTALL)
+            docstring = doc_match.group(1).strip()[:2000] if doc_match else ""
+            cur.execute("SELECT id FROM variants WHERE name = ?", ("multi_gene_knockout",))
+            if cur.fetchone() is None:
+                logger.info("Migration: adding 'multi_gene_knockout' variant")
+                cur.execute(
+                    "INSERT INTO variants (name, docstring, filename, parameter_count) VALUES (?, ?, ?, ?)",
+                    ("multi_gene_knockout", docstring, "multi_gene_knockout.py", None),
+                )
+                conn.commit()
+
     except Exception as exc:
         logger.warning("Migration check failed: %s", exc)
     finally:

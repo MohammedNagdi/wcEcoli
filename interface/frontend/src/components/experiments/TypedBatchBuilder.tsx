@@ -18,6 +18,7 @@ type PreviewRecord = {
   row_id: string
   variant_index: number
   gene_symbol?: string
+  gene_symbols?: string[]
   timeline?: string
   timeline_label?: string
   seed: number
@@ -42,6 +43,7 @@ type IndexGuide = {
 type VariationItem = {
   variant_index: number
   gene_symbol?: string
+  gene_symbols?: string[]
   index_hint?: string
 }
 
@@ -66,7 +68,7 @@ const VARIANT_GROUPS: VariantGroup[] = [
     id: 'core',
     label: 'Core workflows',
     description: 'Controls, gene knockouts, static growth conditions, and user-composed media timelines.',
-    variants: ['wildtype', 'gene_knockout', 'condition', 'timelines'],
+    variants: ['wildtype', 'gene_knockout', 'multi_gene_knockout', 'condition', 'timelines'],
   },
   {
     id: 'nutrient',
@@ -354,7 +356,7 @@ export function TypedBatchBuilder() {
   }, [variantType, selectedGenes, selectedIndexes, selectedTimelineIds, batchTimelines, seedText, generations, lengthSec])
 
   useEffect(() => {
-    if (variantType !== 'gene_knockout') setIncludeWildtype(false)
+    if (!['gene_knockout', 'multi_gene_knockout'].includes(variantType)) setIncludeWildtype(false)
   }, [variantType])
 
   useEffect(() => {
@@ -445,14 +447,22 @@ export function TypedBatchBuilder() {
 
     const variationItems: VariationItem[] = variantType === 'gene_knockout'
       ? selectedGenes.map((gene) => ({
-        variant_index: gene.ko_index,
-        gene_symbol: gene.symbol,
-        index_hint: `KO #${gene.ko_index}`,
-      }))
-      : selectedIndexes.map((index) => ({
-          variant_index: index,
-          index_hint: findIndexHint(index, variantDetail),
+          variant_index: gene.ko_index,
+          gene_symbol: gene.symbol,
+          index_hint: `KO #${gene.ko_index}`,
         }))
+      : variantType === 'multi_gene_knockout'
+        ? selectedGenes.length >= 2
+          ? [{
+              variant_index: 0,
+              gene_symbols: selectedGenes.map((gene) => gene.symbol),
+              index_hint: selectedGenes.map((gene) => `${gene.symbol} KO #${gene.ko_index}`).join(', '),
+            }]
+          : []
+        : selectedIndexes.map((index) => ({
+            variant_index: index,
+            index_hint: findIndexHint(index, variantDetail),
+          }))
 
     const records: PreviewRecord[] = []
     for (const variation of variationItems) {
@@ -461,7 +471,7 @@ export function TypedBatchBuilder() {
           const rowId = [
             variantType,
             variation.variant_index,
-            variation.gene_symbol || '',
+            variation.gene_symbols?.join(',') || variation.gene_symbol || '',
             timeline.id,
             seed,
             generations,
@@ -472,6 +482,7 @@ export function TypedBatchBuilder() {
             row_id: rowId,
             variant_index: variation.variant_index,
             gene_symbol: variation.gene_symbol,
+            gene_symbols: variation.gene_symbols,
             timeline: timeline.value || undefined,
             timeline_label: timeline.value ? timeline.label : undefined,
             seed,
@@ -513,7 +524,7 @@ export function TypedBatchBuilder() {
     name: name.trim(),
     description: description.trim(),
     variant_type: variantType,
-    include_wildtype: variantType === 'gene_knockout' ? includeWildtype : false,
+    include_wildtype: ['gene_knockout', 'multi_gene_knockout'].includes(variantType) ? includeWildtype : false,
     records: previewRecords.map(payloadRecord),
   }), [description, includeWildtype, name, previewRecords, variantType])
 
@@ -524,7 +535,10 @@ export function TypedBatchBuilder() {
     if (variantType === 'gene_knockout' && selectedGenes.length === 0) {
       errors.push('Add at least one gene.')
     }
-    if (variantType !== 'gene_knockout' && selectedIndexes.length === 0) errors.push('Add at least one parameter index.')
+    if (variantType === 'multi_gene_knockout' && selectedGenes.length < 2) {
+      errors.push('Add at least two genes.')
+    }
+    if (!['gene_knockout', 'multi_gene_knockout'].includes(variantType) && selectedIndexes.length === 0) errors.push('Add at least one parameter index.')
     if (seedParse.error) errors.push(seedParse.error)
     if (previewRecords.length === 0) errors.push('Generate at least one preview record.')
     return errors
@@ -616,7 +630,11 @@ export function TypedBatchBuilder() {
     }
   }
 
-  const variationCount = variantType === 'gene_knockout' ? selectedGenes.length : selectedIndexes.length
+  const variationCount = variantType === 'gene_knockout'
+    ? selectedGenes.length
+    : variantType === 'multi_gene_knockout'
+      ? (selectedGenes.length >= 2 ? 1 : 0)
+      : selectedIndexes.length
   const timelineCount = timelineChoicesForExpansion.length
   const seedCount = seedParse.values.length
   const removedCount = generatedRecords.length - previewRecords.length
@@ -698,7 +716,7 @@ export function TypedBatchBuilder() {
               />
             </div>
           </div>
-          {variantType === 'gene_knockout' && (
+          {['gene_knockout', 'multi_gene_knockout'].includes(variantType) && (
             <label className="mt-4 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-sm">
               <input
                 type="checkbox"
@@ -779,12 +797,14 @@ export function TypedBatchBuilder() {
           )}
         </section>
 
-        {variantType === 'gene_knockout' ? (
+        {['gene_knockout', 'multi_gene_knockout'].includes(variantType) ? (
           <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
               <StepBadge>3</StepBadge>
-              Gene variations
-              <HelpTip text="Add one or more genes. Each selected gene is expanded against the selected timelines and seeds." />
+              {variantType === 'multi_gene_knockout' ? 'Target gene set' : 'Gene variations'}
+              <HelpTip text={variantType === 'multi_gene_knockout'
+                ? 'Add genes that resolve to at least two unique wcEcoli knockout targets. The selected targets run together as one combined knockout.'
+                : 'Add one or more genes. Each selected gene is expanded against the selected timelines and seeds.'} />
             </h2>
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <input
@@ -1147,7 +1167,14 @@ export function TypedBatchBuilder() {
                   {previewRecords.map((record) => (
                     <tr key={record.row_id} className="hover:bg-gray-50">
                       <td className="px-3 py-2">
-                        {record.gene_symbol ? (
+                        {record.gene_symbols && record.gene_symbols.length > 0 ? (
+                          <>
+                            <span className="rounded-md bg-brand-50 px-2 py-1 font-mono text-xs font-medium text-brand-700">
+                              {record.gene_symbols.length} genes
+                            </span>
+                            <p className="mt-1 max-w-xs truncate text-xs text-gray-400">{record.index_hint}</p>
+                          </>
+                        ) : record.gene_symbol ? (
                           <>
                             <span className="rounded-md bg-brand-50 px-2 py-1 font-mono text-xs font-medium text-brand-700">{record.gene_symbol}</span>
                             <span className="ml-2 text-xs text-gray-400">KO #{record.variant_index}</span>
@@ -1249,7 +1276,7 @@ export function TypedBatchBuilder() {
                 <dd className="mt-0.5 text-xs text-slate-400">{generations} gen</dd>
               </div>
             </div>
-            {variantType === 'gene_knockout' && (
+            {['gene_knockout', 'multi_gene_knockout'].includes(variantType) && (
               <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-400">Wildtype controls</dt>
                 <dd className="mt-1 text-slate-900">{includeWildtype ? 'Included' : 'Not included'}</dd>
