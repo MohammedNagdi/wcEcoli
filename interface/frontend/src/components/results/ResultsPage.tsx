@@ -15,7 +15,7 @@ import {
 import { getJob, getJobTimeseries, getExperiment, getGeneByKoIndex, getWtDelta } from '../../api/client'
 import { MoleculeExplorer, ResultStateExplorer } from './MoleculeExplorer'
 import { HelpTip, HelpNote } from '../common/HelpTip'
-import type { SimulationJob, ResultsResponse, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
+import type { SimulationJob, ResultsResponse, ResultsSummary, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { statusLabel, variantLabel } from '../../utils/labels'
 
@@ -162,6 +162,104 @@ function strongestDelta(wtDelta: WildtypeDelta | null): { label: string; value: 
   return candidates.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0]
 }
 
+type ComparisonMetricRow = {
+  key: 'division_time' | 'final_mass' | 'growth_rate' | 'doubling_time'
+  label: string
+  current: number | null
+  wildtype: number | null
+  deltaPct: number | null
+  unit: string
+  help: string
+}
+
+function comparisonRows(summary: ResultsSummary | undefined, wtDelta: WildtypeDelta | null): ComparisonMetricRow[] {
+  return [
+    {
+      key: 'division_time',
+      label: 'Division time',
+      current: summary?.division_time_sec != null ? summary.division_time_sec / 60 : null,
+      wildtype: wtDelta?.wt_division_time_min ?? null,
+      deltaPct: wtDelta?.division_time_pct ?? null,
+      unit: 'min',
+      help: 'Observed simulated cell-cycle division time. Higher than WT usually means slower division.',
+    },
+    {
+      key: 'final_mass',
+      label: 'Final mass',
+      current: summary?.final_mass_fg ?? null,
+      wildtype: wtDelta?.wt_final_mass_fg ?? null,
+      deltaPct: wtDelta?.final_mass_pct ?? null,
+      unit: 'fg',
+      help: 'Final simulated cell mass. Interpret with growth and division timing; larger is not automatically better.',
+    },
+    {
+      key: 'growth_rate',
+      label: 'Growth rate',
+      current: summary?.growth_rate ?? null,
+      wildtype: wtDelta?.wt_growth_rate ?? null,
+      deltaPct: wtDelta?.growth_rate_pct ?? null,
+      unit: 'x10^-3/s',
+      help: 'Specific growth rate. Lower than WT is the clearest aggregate growth defect signal.',
+    },
+    {
+      key: 'doubling_time',
+      label: 'Doubling time',
+      current: summary?.doubling_time_min ?? null,
+      wildtype: wtDelta?.wt_doubling_time_min ?? null,
+      deltaPct: wtDelta?.doubling_time_pct ?? null,
+      unit: 'min',
+      help: 'Growth-rate-derived mass doubling time. Higher than WT means slower biomass doubling.',
+    },
+  ]
+}
+
+function formatComparisonValue(row: ComparisonMetricRow, value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return 'n/a'
+  if (row.key === 'growth_rate') return (value * 1000).toFixed(2)
+  if (row.key === 'final_mass') return value.toFixed(1)
+  return value.toFixed(1)
+}
+
+function comparisonTone(row: ComparisonMetricRow): string {
+  const delta = row.deltaPct
+  if (delta == null || Math.abs(delta) < 5) return 'text-gray-500'
+  if (row.key === 'growth_rate') return delta < 0 ? 'text-red-600' : 'text-emerald-600'
+  if (row.key === 'division_time' || row.key === 'doubling_time') return delta > 0 ? 'text-red-600' : 'text-emerald-600'
+  return 'text-amber-600'
+}
+
+function comparisonInterpretation(row: ComparisonMetricRow): string {
+  const delta = row.deltaPct
+  if (delta == null) return 'No WT delta'
+  if (Math.abs(delta) < 5) return 'Near WT'
+  if (row.key === 'growth_rate') return delta < 0 ? 'Growth defect' : 'Faster growth'
+  if (row.key === 'division_time') return delta > 0 ? 'Slower division' : 'Faster division'
+  if (row.key === 'doubling_time') return delta > 0 ? 'Slower doubling' : 'Faster doubling'
+  return delta > 0 ? 'Higher final mass' : 'Lower final mass'
+}
+
+function suggestedComparisonPresets(wtDelta: WildtypeDelta | null): Array<{ preset: ChartPresetId; label: string; reason: string }> {
+  const strongest = strongestDelta(wtDelta)
+  if (!strongest) return []
+  if (strongest.label === 'Final mass') {
+    return [
+      { preset: 'biomass', label: 'Biomass preset', reason: 'Mass changed most; inspect macromolecular composition.' },
+      { preset: 'expression', label: 'Expression preset', reason: 'RNA/protein allocation can explain mass shifts.' },
+    ]
+  }
+  if (strongest.label === 'Growth rate') {
+    return [
+      { preset: 'overview', label: 'Overview preset', reason: 'Confirm the growth-rate curve and mass trajectory.' },
+      { preset: 'metabolism', label: 'Metabolism preset', reason: 'Growth-rate changes often track metabolic flux behavior.' },
+      { preset: 'regulation', label: 'Regulation preset', reason: 'Check stress and amino-acid supply signals.' },
+    ]
+  }
+  return [
+    { preset: 'overview', label: 'Overview preset', reason: 'Confirm timing and growth trajectory first.' },
+    { preset: 'regulation', label: 'Regulation preset', reason: 'Division and doubling shifts often need stress-signal context.' },
+  ]
+}
+
 function statusTone(status: string): string {
   if (status === 'done') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
   if (status === 'failed') return 'border-red-200 bg-red-50 text-red-800'
@@ -256,6 +354,9 @@ export function ResultsPage() {
     const id = parseInt(jobId, 10)
     setLoading(true)
     setError(null)
+    setExperiment(null)
+    setWtDelta(null)
+    setResolvedGeneSymbol(undefined)
 
     Promise.all([getJob(id), getJobTimeseries(id)])
       .then(async ([jobData, tsData]) => {
@@ -354,6 +455,8 @@ export function ResultsPage() {
   const selectedPreset = CHART_PRESETS.find((preset) => preset.id === chartPreset)
   const visibleChannels = channels.filter((ch) => activeChannels.has(ch))
   const hasWildtype = Boolean(wtDelta?.has_wildtype)
+  const comparisonMetricRows = comparisonRows(primarySummary, wtDelta)
+  const comparisonPresets = suggestedComparisonPresets(wtDelta)
 
   return (
     <div className="h-full overflow-y-auto pr-1">
@@ -387,7 +490,7 @@ export function ResultsPage() {
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-900">Outcome summary</h2>
             <HelpTip
-              text="This section answers whether the simulation completed, how its growth phenotype compares with the matched wildtype when available, and whether the plotted curves are extracted from a completed run."
+              text="This section answers whether the simulation completed, how its growth phenotype compares with the condition-matched wildtype when available, and whether the plotted curves are extracted from a completed run."
               position="right"
             />
           </div>
@@ -466,6 +569,15 @@ export function ResultsPage() {
           </aside>
         </div>
       </section>
+
+      <ComparisonBaseline
+        experiment={experiment}
+        wtDelta={wtDelta}
+        rows={comparisonMetricRows}
+        suggestions={comparisonPresets}
+        channels={channels}
+        onSelectPreset={(preset) => applyPreset(preset, channels)}
+      />
 
       <section className="mb-8 rounded-lg border border-gray-200 bg-white p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -666,5 +778,158 @@ function InfoRow({ label, value, mono = false }: { label: string; value: string;
       <dt className="font-medium uppercase tracking-wide text-gray-400">{label}</dt>
       <dd className={(mono ? 'font-mono ' : '') + 'min-w-0 break-words text-gray-700'}>{value}</dd>
     </div>
+  )
+}
+
+function ComparisonBaseline({
+  experiment,
+  wtDelta,
+  rows,
+  suggestions,
+  channels,
+  onSelectPreset,
+}: {
+  experiment: Experiment | null
+  wtDelta: WildtypeDelta | null
+  rows: ComparisonMetricRow[]
+  suggestions: Array<{ preset: ChartPresetId; label: string; reason: string }>
+  channels: string[]
+  onSelectPreset: (preset: ChartPresetId) => void
+}) {
+  const hasWildtype = Boolean(wtDelta?.has_wildtype)
+  const strongest = strongestDelta(wtDelta)
+  const compareHref = experiment ? `/results/compare?ids=${experiment.id}` : '/results/compare'
+  const pendingStatus = wtDelta?.wt_experiment_id && wtDelta.wt_status && !hasWildtype
+
+  return (
+    <section className="mb-8 rounded-lg border border-gray-200 bg-white">
+      <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-gray-900">Comparison baseline</h2>
+            <HelpTip
+              text="This uses the latest completed wildtype experiment with the same condition. It is a phenotype reference, not proof of causality and not necessarily a perfect seed or timeline match."
+              position="right"
+            />
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Compare this result against the condition-matched WT before deciding which model outputs to inspect.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className={'rounded-full border px-2.5 py-1 font-medium ' + (
+            hasWildtype
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : pendingStatus
+              ? 'border-blue-200 bg-blue-50 text-blue-800'
+              : 'border-amber-200 bg-amber-50 text-amber-800'
+          )}>
+            {hasWildtype
+              ? `WT experiment #${wtDelta?.wt_experiment_id}`
+              : pendingStatus
+              ? `WT ${statusLabel(wtDelta?.wt_status ?? '')}`
+              : 'No completed WT'}
+          </span>
+          <Link
+            to={compareHref}
+            className="rounded-full border border-gray-200 bg-white px-2.5 py-1 font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Open comparison
+          </Link>
+        </div>
+      </div>
+
+      {hasWildtype ? (
+        <div className="p-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {rows.map((row) => (
+              <div key={row.key} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-gray-800">{row.label}</span>
+                  <HelpTip text={row.help} position="bottom" />
+                </div>
+                <div className="space-y-1 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-400">This run</span>
+                    <span className="font-mono text-gray-800">
+                      {formatComparisonValue(row, row.current)} {row.unit}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-400">WT baseline</span>
+                    <span className="font-mono text-gray-600">
+                      {formatComparisonValue(row, row.wildtype)} {row.unit}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t border-gray-200 pt-1">
+                    <span className="text-gray-400">{comparisonInterpretation(row)}</span>
+                    <span className={'font-mono font-semibold ' + comparisonTone(row)}>
+                      {formatPercent(row.deltaPct)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-[1fr,1.4fr]">
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Interpretation</h3>
+              <p className="mt-2 text-sm text-gray-700">
+                {strongest
+                  ? `${strongest.label} is the largest phenotype shift versus the condition-matched WT (${formatPercent(strongest.value)}). Use it to choose the next plot family; do not infer mechanism from the aggregate metric alone.`
+                  : 'The WT baseline is available, but no aggregate metric has a strong percentage shift. Look for subtle timing differences in the time-series workbench.'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested next views</h3>
+              {suggestions.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {suggestions.map((suggestion) => {
+                    const preset = CHART_PRESETS.find((item) => item.id === suggestion.preset)
+                    const availableCount = preset?.channels.filter((channel) => channels.includes(channel)).length ?? 0
+                    return (
+                      <button
+                        key={suggestion.preset}
+                        type="button"
+                        disabled={availableCount === 0}
+                        onClick={() => onSelectPreset(suggestion.preset)}
+                        className={'rounded-lg border px-3 py-2 text-left text-xs transition-colors ' + (
+                          availableCount === 0
+                            ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
+                            : 'border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100'
+                        )}
+                        title={suggestion.reason}
+                      >
+                        <span className="block font-semibold">{suggestion.label}</span>
+                        <span className="block max-w-48 text-[11px] opacity-75">{suggestion.reason}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-gray-500">
+                  No preset recommendation is available until a WT delta is computed.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="p-4">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+            {pendingStatus ? (
+              <p>
+                A condition-matched WT baseline exists as experiment #{wtDelta?.wt_experiment_id}, but it is currently {statusLabel(wtDelta?.wt_status ?? '')}. Relative deltas will appear after it completes.
+              </p>
+            ) : (
+              <p>
+                No completed condition-matched WT baseline is available for this result. Absolute curves can still be inspected, but relative fitness or phenotype claims need a compatible WT run.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
