@@ -36,11 +36,41 @@ function timelineValue(value: string | null | undefined): string {
   return timeline || NO_TIMELINE
 }
 
+function viewLabel(viewMode: ViewMode): string {
+  if (viewMode === 'jobs') return 'Job diagnostics'
+  if (viewMode === 'batches') return 'Batches'
+  return 'Experiment outcomes'
+}
+
+function viewDescription(viewMode: ViewMode): string {
+  if (viewMode === 'jobs') return 'Individual job status, timing, errors, and result links.'
+  if (viewMode === 'batches') return 'Batch experiment groups and run controls.'
+  return 'Biological outcomes grouped by experiment, condition, timeline, and seed set.'
+}
+
 function resultIdentity(exp: Experiment): string {
   if (!exp.batch_id) return exp.name
   if (exp.gene_symbol) return exp.gene_symbol
   if (exp.variant_type === 'wildtype') return 'Wildtype'
   return `${variantLabel(exp.variant_type)} #${exp.variant_index}`
+}
+
+function experimentSearchText(exp: Experiment, jobs: SimulationJob[] = []): string {
+  return [
+    exp.name,
+    resultIdentity(exp),
+    exp.description,
+    exp.gene_symbol,
+    exp.variant_type,
+    variantLabel(exp.variant_type),
+    String(exp.variant_index ?? ''),
+    exp.condition,
+    exp.timeline,
+    exp.batch_id,
+    String(exp.id),
+    ...jobs.map((job) => String(job.id)),
+    ...jobs.map((job) => job.status),
+  ].filter(Boolean).join(' ').toLowerCase()
 }
 
 function toDateInputValue(date: Date): string {
@@ -148,6 +178,12 @@ function ExperimentCard({
   const hasMultipleSeeds = totalSeeds > 1
   const identity = resultIdentity(exp)
   const timeline = timelineLabel(exp.timeline)
+  const latestJob = [...jobs].sort((a, b) => b.id - a.id)[0]
+  const statusSummary = [
+    doneJobs.length > 0 ? `${doneJobs.length} done` : '',
+    activeJobs.length > 0 ? `${activeJobs.length} active` : '',
+    failedJobs.length > 0 ? `${failedJobs.length} failed` : '',
+  ].filter(Boolean).join(' / ') || 'No jobs'
 
   useEffect(() => {
     if (doneJobs.length === 0) return
@@ -182,30 +218,30 @@ function ExperimentCard({
           <div className="flex items-center gap-2 mb-1">
             <h3 className="font-medium text-gray-900 truncate">{identity}</h3>
             {showExperimentId && (
-              <span className="text-xs text-gray-400 font-mono">#{exp.id}</span>
+              <span className="text-xs text-gray-400 font-mono">experiment #{exp.id}</span>
             )}
-            <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium truncate max-w-[18rem]" title={timeline}>
-              {timeline}
-            </span>
+            <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium">{exp.condition || 'No condition'}</span>
           </div>
-          <div className="flex items-center gap-3 text-xs text-gray-400">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
             <span>{variantLabel(exp.variant_type)}</span>
+            <span>Variant index <span className="font-mono text-gray-500">{exp.variant_index}</span></span>
             {exp.batch_id && exp.name && exp.name !== identity && (
-              <span className="truncate">Batch experiment</span>
+              <span className="truncate">Batch <span className="font-mono text-gray-500">{exp.batch_id}</span></span>
             )}
             {exp.gene_symbol && (
               <span>Gene: <span className="font-mono text-bio-gene">{exp.gene_symbol}</span></span>
             )}
             <span>{totalSeeds} seed{totalSeeds !== 1 ? 's' : ''}</span>
-            {activeJobs.length > 0 && (
-              <span className="text-blue-600 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                {activeJobs.length} running
-              </span>
+            <span>{statusSummary}</span>
+            {latestJob && (
+              <span>Latest job <span className="font-mono text-gray-500">#{latestJob.id}</span></span>
             )}
-            {failedJobs.length > 0 && (
-              <span className="text-red-500">{failedJobs.length} failed</span>
-            )}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+            <span className="font-medium text-gray-500">Timeline</span>
+            <span className="max-w-full truncate rounded bg-gray-50 px-2 py-1 font-mono text-[11px] text-gray-600" title={timeline}>
+              {timeline}
+            </span>
           </div>
         </div>
 
@@ -215,7 +251,7 @@ function ExperimentCard({
               to={'/results/' + doneJobs[0].id}
               className="text-xs font-medium text-brand-600 hover:text-brand-700 px-3 py-1.5 rounded-lg hover:bg-brand-50 transition-colors"
             >
-              View results
+              Open result
             </Link>
           )}
           {hasMultipleSeeds && (
@@ -223,8 +259,8 @@ function ExperimentCard({
               onClick={() => setExpanded(!expanded)}
               className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded transition-colors"
             >
-              {expanded ? 'Collapse' : 'Expand seeds'}
-              <span className="ml-1">{expanded ? '▲' : '▼'}</span>
+              {expanded ? 'Hide seeds' : 'Show seeds'}
+              <span className="ml-1">{expanded ? '^' : 'v'}</span>
             </button>
           )}
           <div ref={menuRef} className="relative">
@@ -461,10 +497,6 @@ export function ResultsBrowserPage() {
   const doneCount = jobs.filter((job) => job.status === 'done').length
   const activeCount = jobs.filter((job) => isActive(job.status)).length
   const failedCount = jobs.filter((job) => job.status === 'failed').length
-  const runHistoryJobs = viewMode === 'batches'
-    ? jobs.filter((job) => Boolean(experiments.get(job.experiment_id)?.batch_id))
-    : jobs
-  const recentHistory = [...runHistoryJobs].sort((a, b) => b.id - a.id).slice(0, 6)
   const normalizedQuery = query.trim().toLowerCase()
 
   const experimentGroups = new Map<number, SimulationJob[]>()
@@ -493,7 +525,7 @@ export function ResultsBrowserPage() {
   ])].sort((a, b) => variantLabel(a).localeCompare(variantLabel(b)))
 
   const experimentMatchesFilters = (exp: Experiment, expJobs: SimulationJob[]) => {
-    if (normalizedQuery && !exp.name.toLowerCase().includes(normalizedQuery)) return false
+    if (normalizedQuery && !experimentSearchText(exp, expJobs).includes(normalizedQuery)) return false
     if (seedFilter !== 'all' && !expJobs.some((job) => String(job.seed) === seedFilter)) return false
     if (timelineFilter !== 'all' && timelineValue(exp.timeline) !== timelineFilter) return false
     if (typeFilter !== 'all' && exp.variant_type !== typeFilter) return false
@@ -502,7 +534,21 @@ export function ResultsBrowserPage() {
 
   const jobMatchesFilters = (job: SimulationJob) => {
     const exp = experiments.get(job.experiment_id)
-    if (normalizedQuery && !(exp?.name || '').toLowerCase().includes(normalizedQuery)) return false
+    const jobSearchText = [
+      exp ? experimentSearchText(exp, [job]) : '',
+      job.variant_type,
+      variantLabel(job.variant_type),
+      String(job.variant_index ?? ''),
+      job.condition,
+      job.timeline,
+      job.status,
+      job.phase,
+      job.error_message,
+      String(job.id),
+      String(job.experiment_id),
+      String(job.seed),
+    ].filter(Boolean).join(' ').toLowerCase()
+    if (normalizedQuery && !jobSearchText.includes(normalizedQuery)) return false
     if (seedFilter !== 'all' && String(job.seed) !== seedFilter) return false
     if (timelineFilter !== 'all' && timelineValue(job.timeline || exp?.timeline) !== timelineFilter) return false
     if (typeFilter !== 'all' && (exp?.variant_type || job.variant_type) !== typeFilter) return false
@@ -551,95 +597,21 @@ export function ResultsBrowserPage() {
     return s + 's'
   }
 
-  const renderRecentActivity = () => {
-    if (runHistoryJobs.length === 0) return null
-    return (
-      <section className="mt-6 rounded-lg border border-gray-200 bg-white">
-        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-900">Recent run activity</h2>
-            <p className="text-xs text-gray-400">Recent jobs for quick provenance checks after reviewing the filtered results.</p>
-          </div>
-          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500">
-            {runHistoryJobs.length} artifact{runHistoryJobs.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        <div className="divide-y divide-gray-100">
-          {recentHistory.map((job) => {
-            const exp = experiments.get(job.experiment_id)
-            const identity = exp ? resultIdentity(exp) : 'Experiment #' + job.experiment_id
-            const timeline = timelineLabel(job.timeline || exp?.timeline)
-            return (
-              <div key={job.id} className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[1fr,120px,120px,90px] md:items-center">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-gray-400">job #{job.id}</span>
-                    <p className="truncate font-medium text-gray-900">{identity}</p>
-                    {exp?.gene_symbol && (
-                      <span className="rounded bg-green-50 px-1.5 py-0.5 font-mono text-xs text-green-700">{exp.gene_symbol}</span>
-                    )}
-                  </div>
-                  <p className="mt-1 truncate text-xs text-gray-400">
-                    {variantLabel(job.variant_type)} - {timeline} - seed {job.seed}
-                  </p>
-                </div>
-                <span className={'w-fit rounded px-2 py-1 text-xs font-medium ' + (
-                  JOB_STATUS_COLORS[job.status] ?? 'bg-gray-100 text-gray-600'
-                )}>
-                  {statusLabel(job.status)}
-                </span>
-                <span className="text-xs text-gray-400">{formatDate(job.started_at)}</span>
-                <div className="text-right">
-                  {job.status === 'done' ? (
-                    <Link to={'/results/' + job.id} className="text-xs font-medium text-brand-600 hover:text-brand-700">
-                      Open
-                    </Link>
-                  ) : job.status === 'failed' && job.error_message ? (
-                    <span className="text-xs text-red-400" title={job.error_message}>Error</span>
-                  ) : (
-                    <span className="text-xs text-gray-300">Pending</span>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </section>
-    )
-  }
-
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Simulation results</h1>
-          <p className="text-sm text-gray-400">
-            {viewMode === 'experiments'
-              ? 'Experiments grouped with aggregated statistics across seeds'
-              : viewMode === 'batches'
-                ? 'Batch experiment groups and run controls'
-                : 'Individual run diagnostics and job-level results'
-            }
-          </p>
+      <div className="flex flex-col gap-4 mb-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Results</p>
+          <h1 className="text-xl font-semibold text-gray-900">{viewLabel(viewMode)}</h1>
+          <p className="mt-1 text-sm text-gray-500">{viewDescription(viewMode)}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             to="/results/compare"
-            className="px-4 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
+            className="px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
           >
             Compare experiments
           </Link>
-          <button
-            type="button"
-            onClick={() => setView('jobs')}
-            className={'px-4 py-1.5 text-sm font-medium border rounded-lg transition-colors ' + (
-              viewMode === 'jobs'
-                ? 'text-gray-900 bg-white border-gray-300 shadow-sm'
-                : 'text-gray-600 bg-white hover:bg-gray-50 border-gray-200'
-            )}
-          >
-            Job log
-          </button>
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
             <button
               onClick={() => setView('experiments')}
@@ -647,7 +619,7 @@ export function ResultsBrowserPage() {
                 viewMode === 'experiments' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               )}
             >
-              Experiments
+              Experiment outcomes
             </button>
             <button
               onClick={() => setView('batches')}
@@ -657,26 +629,35 @@ export function ResultsBrowserPage() {
             >
               Batches
             </button>
+            <button
+              type="button"
+              onClick={() => setView('jobs')}
+              className={'px-3 py-1.5 text-xs font-medium rounded-md transition-colors ' + (
+                viewMode === 'jobs' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              )}
+            >
+              Job diagnostics
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-          <p className="text-xs text-gray-400 mb-0.5">Experiments</p>
-          <p className="text-2xl font-semibold text-gray-700">{experimentGroups.size}</p>
+      <div className="mb-5 flex flex-wrap gap-2">
+        <div className="rounded-full border border-gray-200 bg-white px-3 py-1.5">
+          <span className="text-xs text-gray-400">Experiments</span>
+          <span className="ml-2 text-sm font-semibold text-gray-700">{experimentGroups.size}</span>
         </div>
-        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-          <p className="text-xs text-gray-400 mb-0.5">Completed jobs</p>
-          <p className="text-2xl font-semibold text-green-600">{doneCount}</p>
+        <div className="rounded-full border border-green-100 bg-green-50 px-3 py-1.5">
+          <span className="text-xs text-green-700">Completed jobs</span>
+          <span className="ml-2 text-sm font-semibold text-green-700">{doneCount}</span>
         </div>
-        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-          <p className="text-xs text-gray-400 mb-0.5">Active</p>
-          <p className="text-2xl font-semibold text-blue-600">{activeCount}</p>
+        <div className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5">
+          <span className="text-xs text-blue-700">Active</span>
+          <span className="ml-2 text-sm font-semibold text-blue-700">{activeCount}</span>
         </div>
-        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-          <p className="text-xs text-gray-400 mb-0.5">Failed</p>
-          <p className="text-2xl font-semibold text-red-600">{failedCount}</p>
+        <div className="rounded-full border border-red-100 bg-red-50 px-3 py-1.5">
+          <span className="text-xs text-red-700">Failed</span>
+          <span className="ml-2 text-sm font-semibold text-red-700">{failedCount}</span>
         </div>
       </div>
 
@@ -688,8 +669,24 @@ export function ResultsBrowserPage() {
 
       {viewMode !== 'batches' && jobs.length > 0 && (
         <section className="mb-6 rounded-lg border border-gray-200 bg-white px-4 py-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {viewMode === 'jobs' ? 'Find diagnostic jobs' : 'Find experiment outcomes'}
+              </h2>
+              <p className="text-xs text-gray-400">
+                {viewMode === 'jobs'
+                  ? 'Filter raw jobs by seed, timeline, type, or run date.'
+                  : 'Filter biological result groups without showing the raw job log.'}
+              </p>
+            </div>
+          </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr),120px,180px,180px,150px,150px]">
-            <SearchInput value={query} onChange={setQuery} placeholder="Search experiments..." />
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder={viewMode === 'jobs' ? 'Search jobs...' : 'Search outcomes...'}
+            />
             <select value={seedFilter} onChange={(event) => setSeedFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by seed">
               <option value="all">All seeds</option>
               {seedOptions.map((seed) => <option key={seed} value={String(seed)}>Seed {seed}</option>)}
@@ -739,10 +736,7 @@ export function ResultsBrowserPage() {
           Loading results...
         </div>
       ) : viewMode === 'batches' ? (
-        <>
-          <BatchDashboard />
-          {renderRecentActivity()}
-        </>
+        <BatchDashboard />
       ) : jobs.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-500 font-medium mb-1">No simulation jobs yet</p>
@@ -781,7 +775,6 @@ export function ResultsBrowserPage() {
               })}
             </div>
           )}
-          {renderRecentActivity()}
         </>
       ) : (
         <>
@@ -797,6 +790,10 @@ export function ResultsBrowserPage() {
             </div>
           ) : (
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="border-b border-gray-100 px-4 py-3">
+                <h2 className="text-sm font-semibold text-gray-900">Job diagnostics</h2>
+                <p className="text-xs text-gray-400">Raw execution records for checking provenance, failures, and runtime state.</p>
+              </div>
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
@@ -846,7 +843,7 @@ export function ResultsBrowserPage() {
                         <td className="px-4 py-3">
                           {job.status === 'done' && (
                             <Link to={'/results/' + job.id} className="text-xs font-medium text-brand-600 hover:text-brand-700 px-2 py-1 rounded hover:bg-brand-50 transition-colors">
-                              View results
+                              Open result
                             </Link>
                           )}
                           {job.status === 'failed' && job.error_message && (
@@ -860,7 +857,6 @@ export function ResultsBrowserPage() {
               </table>
             </div>
           )}
-          {renderRecentActivity()}
         </>
       )}
       <ConfirmDialog
