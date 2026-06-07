@@ -17,6 +17,7 @@ import { MoleculeExplorer, ResultStateExplorer } from './MoleculeExplorer'
 import { HelpTip, HelpNote } from '../common/HelpTip'
 import type { SimulationJob, ResultsResponse, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
+import { statusLabel, variantLabel } from '../../utils/labels'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -62,9 +63,43 @@ const CHANNEL_CONFIG: Record<string, ChannelDef> = {
 }
 
 const DEFAULT_ACTIVE = new Set([
-  'cell_mass', 'growth_rate', 'protein_mass', 'rna_mass', 'dna_mass',
-  'fba_objective', 'ppgpp_conc',
+  'cell_mass', 'growth_rate', 'protein_mass', 'ppgpp_conc',
 ])
+
+const CHART_PRESETS = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    description: 'Start here for the main phenotype: mass accumulation, growth rate, protein biomass, and ppGpp stress signal.',
+    channels: ['cell_mass', 'growth_rate', 'protein_mass', 'ppgpp_conc'],
+  },
+  {
+    id: 'biomass',
+    label: 'Biomass',
+    description: 'Compare macromolecular composition and cell size over the run.',
+    channels: ['cell_mass', 'dry_mass', 'protein_mass', 'rna_mass', 'dna_mass', 'cell_volume'],
+  },
+  {
+    id: 'expression',
+    label: 'Expression',
+    description: 'Inspect aggregate transcription and translation behavior before drilling into individual RNAs and proteins.',
+    channels: ['mrna_counts', 'protein_mass', 'rna_mass', 'ribosome_elongation_rate', 'ribosome_actual_elongations'],
+  },
+  {
+    id: 'regulation',
+    label: 'Regulation',
+    description: 'Look for nutrient stress and regulatory response signals such as ppGpp and amino-acid supply.',
+    channels: ['ppgpp_conc', 'aa_pool_size', 'ntp_pool_size', 'aa_supply_total', 'aa_synthesis_total'],
+  },
+  {
+    id: 'metabolism',
+    label: 'Metabolism',
+    description: 'Inspect FBA objective and aggregate reaction/exchange flux behavior.',
+    channels: ['fba_objective', 'exchange_flux_total', 'reaction_flux_total', 'small_molecule_mass'],
+  },
+] as const
+
+type ChartPresetId = typeof CHART_PRESETS[number]['id'] | 'custom'
 
 const SEED_COLORS = [
   '#2563eb', '#059669', '#dc2626', '#7c3aed', '#d97706',
@@ -87,6 +122,51 @@ function groupChannels(channels: string[]): Record<string, string[]> {
     groups[g].push(ch)
   }
   return groups
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (value == null) return 'Not available'
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`
+}
+
+function formatTimeline(value: string | null | undefined): string {
+  const timeline = (value || '').trim()
+  return timeline || 'No media timeline recorded'
+}
+
+function dataSourceLabel(job: SimulationJob, isMock: boolean): string {
+  if (isMock) return 'Preview or fallback data'
+  if (job.sim_dir) return 'Simulation output'
+  return 'Result summary only'
+}
+
+function dataSourceDescription(job: SimulationJob, isMock: boolean): string {
+  if (isMock) {
+    return 'These curves are not confirmed as extracted outputs from a completed simulation directory. Use them for UI inspection, not biological interpretation.'
+  }
+  if (job.sim_dir) {
+    return 'The job is complete and points to a simulation directory. Use the plots and model-output explorer for interpretation.'
+  }
+  return 'The run has summary metadata, but no simulation directory is attached for detailed output extraction.'
+}
+
+function strongestDelta(wtDelta: WildtypeDelta | null): { label: string; value: number } | null {
+  if (!wtDelta?.has_wildtype) return null
+  const candidates = [
+    { label: 'Division time', value: wtDelta.division_time_pct },
+    { label: 'Final mass', value: wtDelta.final_mass_pct },
+    { label: 'Growth rate', value: wtDelta.growth_rate_pct },
+    { label: 'Doubling time', value: wtDelta.doubling_time_pct },
+  ].filter((item): item is { label: string; value: number } => item.value != null)
+  if (candidates.length === 0) return null
+  return candidates.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0]
+}
+
+function statusTone(status: string): string {
+  if (status === 'done') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
+  if (status === 'failed') return 'border-red-200 bg-red-50 text-red-800'
+  if (['pending', 'running_parca', 'running_sim', 'ingesting'].includes(status)) return 'border-blue-200 bg-blue-50 text-blue-800'
+  return 'border-gray-200 bg-gray-50 text-gray-700'
 }
 
 // Chart component
@@ -169,6 +249,7 @@ export function ResultsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeChannels, setActiveChannels] = useState<Set<string>>(new Set(DEFAULT_ACTIVE))
+  const [chartPreset, setChartPreset] = useState<ChartPresetId>('overview')
 
   useEffect(() => {
     if (!jobId) return
@@ -226,12 +307,21 @@ export function ResultsPage() {
   }, [jobId])
 
   const toggleChannel = (ch: string) => {
+    setChartPreset('custom')
     setActiveChannels((prev) => {
       const next = new Set(prev)
       if (next.has(ch)) next.delete(ch)
       else next.add(ch)
       return next
     })
+  }
+
+  const applyPreset = (presetId: ChartPresetId, availableChannels: string[]) => {
+    if (presetId === 'custom') return
+    const preset = CHART_PRESETS.find((item) => item.id === presetId)
+    if (!preset) return
+    setChartPreset(presetId)
+    setActiveChannels(new Set(preset.channels.filter((channel) => availableChannels.includes(channel))))
   }
 
   if (loading) {
@@ -258,117 +348,228 @@ export function ResultsPage() {
   const isMock = !job.sim_dir || job.status !== 'done'
   const grouped = groupChannels(channels)
   const focusGeneSymbol = singleGeneSymbol(resolvedGeneSymbol)
+  const primarySummary = results.summary[0]
+  const resultTitle = experiment?.name || (resolvedGeneSymbol ? `${resolvedGeneSymbol} knockout` : `Job #${job.id}`)
+  const strongestWtDelta = strongestDelta(wtDelta)
+  const selectedPreset = CHART_PRESETS.find((preset) => preset.id === chartPreset)
+  const visibleChannels = channels.filter((ch) => activeChannels.has(ch))
+  const hasWildtype = Boolean(wtDelta?.has_wildtype)
 
   return (
     <div className="h-full overflow-y-auto pr-1">
       <div className="max-w-6xl mx-auto pb-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Link to="/results" className="text-gray-400 hover:text-gray-600 text-sm">&larr; All results</Link>
-            <span className="text-gray-300">/</span>
-            <h1 className="text-xl font-semibold text-gray-900">
-              {experiment?.name || (resolvedGeneSymbol ? `${resolvedGeneSymbol} knockout` : `Job #${job.id}`)} Results
-            </h1>
+      <div className="mb-5">
+        <Link to="/results" className="text-sm font-medium text-gray-400 hover:text-gray-600">&larr; All results</Link>
+        <div className="mt-2 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Single simulation result</p>
+            <h1 className="text-2xl font-semibold text-gray-900">{resultTitle}</h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Start with the phenotype summary, then inspect curated time-series presets, then drill into model state variables.
+            </p>
           </div>
-          <p className="text-sm text-gray-400">
-            {experiment?.name ? `Job #${job.id} · ` : ''}{job.variant_type} &middot; seed {job.seed} &middot; {job.generations} generation(s)
-            {isMock && (
-              <span className="ml-2 px-1.5 py-0.5 bg-amber-50 text-amber-700 text-xs rounded font-medium">
-                Mock data
-              </span>
-            )}
-          </p>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className={'rounded-full border px-2.5 py-1 font-medium ' + statusTone(job.status)}>
+              {statusLabel(job.status)}
+            </span>
+            <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-500">
+              Job <span className="font-mono text-gray-700">#{job.id}</span>
+            </span>
+            <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-500">
+              Seed <span className="font-mono text-gray-700">{job.seed}</span>
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Summary cards */}
-      {results.summary.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-          {(() => {
-            const s = results.summary[0]
-            return (
-              <>
+      <section className="mb-6 rounded-lg border border-gray-200 bg-white">
+        <div className="border-b border-gray-100 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-gray-900">Outcome summary</h2>
+            <HelpTip
+              text="This section answers whether the simulation completed, how its growth phenotype compares with the matched wildtype when available, and whether the plotted curves are extracted from a completed run."
+              position="right"
+            />
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Use this as the result triage step before opening detailed model outputs.
+          </p>
+        </div>
+        <div className="grid gap-4 p-4 lg:grid-cols-[1fr,280px]">
+          <div>
+            {primarySummary && (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <SummaryCard
                   label="Division time"
-                  value={s.division_time_sec != null ? (s.division_time_sec / 60).toFixed(1) + ' min' : '\u2014'}
-                  help="Time from cell birth to division in the simulation. E. coli typically divides every 20-60 min depending on growth conditions."
-                  deltaPct={wtDelta?.has_wildtype ? wtDelta.division_time_pct : undefined}
+                  value={primarySummary.division_time_sec != null ? (primarySummary.division_time_sec / 60).toFixed(1) + ' min' : '-'}
+                  help="Time from simulated cell birth to division. Compare this with doubling time: division is a discrete cell-cycle event, while doubling time is calculated from growth rate."
+                  deltaPct={hasWildtype ? wtDelta?.division_time_pct : undefined}
                 />
                 <SummaryCard
                   label="Final mass"
-                  value={s.final_mass_fg != null ? s.final_mass_fg.toFixed(1) + ' fg' : '\u2014'}
-                  help="Dry mass of the cell at division, in femtograms. A typical E. coli cell is ~1,000 fg wet mass (~300 fg dry)."
-                  deltaPct={wtDelta?.has_wildtype ? wtDelta.final_mass_pct : undefined}
+                  value={primarySummary.final_mass_fg != null ? primarySummary.final_mass_fg.toFixed(1) + ' fg' : '-'}
+                  help="Final simulated cell mass. Large changes can indicate broad biomass allocation effects even when division still occurs."
+                  deltaPct={hasWildtype ? wtDelta?.final_mass_pct : undefined}
                 />
                 <SummaryCard
                   label="Growth rate"
-                  value={s.growth_rate != null ? (s.growth_rate * 1000).toFixed(2) + ' \u00d710\u207b\u00b3 /s' : '\u2014'}
-                  help="Instantaneous specific growth rate at the end of the simulation (1/s). Calculated from the rate of mass increase."
-                  deltaPct={wtDelta?.has_wildtype ? wtDelta.growth_rate_pct : undefined}
+                  value={primarySummary.growth_rate != null ? (primarySummary.growth_rate * 1000).toFixed(2) + ' x10^-3 /s' : '-'}
+                  help="Specific growth rate near the end of the simulation. This is often the first phenotype to compare against WT."
+                  deltaPct={hasWildtype ? wtDelta?.growth_rate_pct : undefined}
                 />
                 <SummaryCard
                   label="Doubling time"
-                  value={s.doubling_time_min != null ? s.doubling_time_min.toFixed(1) + ' min' : '\u2014'}
-                  help="Time for the cell to double its mass at the current growth rate: ln(2)/growth_rate. Compare to the observed division time."
-                  deltaPct={wtDelta?.has_wildtype ? wtDelta.doubling_time_pct : undefined}
+                  value={primarySummary.doubling_time_min != null ? primarySummary.doubling_time_min.toFixed(1) + ' min' : '-'}
+                  help="Mass-doubling estimate from growth rate. It can differ from observed division time when the simulated cell cycle and biomass growth are not perfectly aligned."
+                  deltaPct={hasWildtype ? wtDelta?.doubling_time_pct : undefined}
                 />
-              </>
-            )
-          })()}
-        </div>
-      )}
-
-      {/* Channel toggles */}
-      <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-sm font-medium text-gray-700">Simulation channels</h2>
-        <HelpTip
-          text="Each channel is a time-varying output of the whole-cell simulation. Toggle channels on/off to compare dynamics. Mass channels track macromolecular composition; Regulation channels track intracellular signals like ppGpp and amino acid pools; Metabolism channels show flux-balance analysis (FBA) outputs."
-          position="right"
-        />
-      </div>
-      <div className="mb-4 space-y-2">
-        {Object.entries(grouped).map(([groupName, chs]) => (
-          <div key={groupName} className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-medium text-gray-400 w-28 shrink-0">{groupName}</span>
-            {chs.map((ch) => {
-              const cfg = CHANNEL_CONFIG[ch]
-              const active = activeChannels.has(ch)
-              return (
-                <button
-                  key={ch}
-                  onClick={() => toggleChannel(ch)}
-                  className={'px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ' + (
-                    active
-                      ? 'border-gray-300 bg-white text-gray-800 shadow-sm'
-                      : 'border-transparent bg-gray-100 text-gray-400'
-                  )}
-                >
-                  <span
-                    className="inline-block w-2 h-2 rounded-full mr-1.5"
-                    style={{ backgroundColor: cfg?.color ?? '#6b7280', opacity: active ? 1 : 0.3 }}
-                  />
-                  {cfg?.title ?? ch}
-                </button>
-              )
-            })}
+              </div>
+            )}
+            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Recommended first look</h3>
+              <div className="mt-2 grid gap-3 md:grid-cols-3">
+                <GuidanceItem
+                  title="1. Check the phenotype"
+                  body={strongestWtDelta
+                    ? `${strongestWtDelta.label} has the largest WT delta (${formatPercent(strongestWtDelta.value)}). Start there before interpreting individual molecules.`
+                    : hasWildtype
+                    ? 'A matching WT exists, but no strong aggregate delta was returned. Inspect the curves for subtle timing differences.'
+                    : 'No matching WT comparison is attached. Treat absolute values cautiously and compare against a compatible WT run if possible.'}
+                />
+                <GuidanceItem
+                  title="2. Plot curated channels"
+                  body="Use the chart presets below before enabling every channel. The overview preset is intended to keep the first read small."
+                />
+                <GuidanceItem
+                  title="3. Link to model outputs"
+                  body={focusGeneSymbol
+                    ? `Use Model outputs to inspect ${focusGeneSymbol} RNA/protein, linked regulators, reactions, and metabolites.`
+                    : 'Use Model outputs to search for the RNAs, proteins, reactions, or metabolites suggested by the phenotype.'}
+                />
+              </div>
+            </div>
           </div>
+          <aside className="rounded-lg border border-gray-200 bg-slate-50 p-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Run context</h3>
+            <dl className="mt-3 space-y-2 text-xs">
+              <InfoRow label="Experiment" value={experiment?.name || `Experiment #${job.experiment_id}`} />
+              <InfoRow label="Type" value={variantLabel(experiment?.variant_type ?? job.variant_type)} />
+              <InfoRow label="Gene" value={resolvedGeneSymbol || experiment?.gene_symbol || 'Not gene-specific'} mono />
+              <InfoRow label="Condition" value={experiment?.condition || job.condition || 'Not recorded'} />
+              <InfoRow label="Timeline" value={formatTimeline(experiment?.timeline || job.timeline)} mono />
+              <InfoRow label="Generations" value={String(job.generations)} />
+              <InfoRow label="Data source" value={dataSourceLabel(job, isMock)} />
+            </dl>
+            <p className={'mt-3 rounded border px-2 py-2 text-xs ' + (isMock ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800')}>
+              {dataSourceDescription(job, isMock)}
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section className="mb-8 rounded-lg border border-gray-200 bg-white p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-gray-900">Time-series workbench</h2>
+              <HelpTip
+                text="Presets choose a small set of simulation channels for a specific interpretation task. You can still toggle individual channels; doing so creates a custom view."
+                position="right"
+              />
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Selected channels are plotted below. Keep the view narrow while forming a hypothesis, then add channels as needed.
+            </p>
+          </div>
+          <div className="text-xs text-gray-400">
+            {visibleChannels.length} of {channels.length} channels selected
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {CHART_PRESETS.map((preset) => {
+            const availableCount = preset.channels.filter((channel) => channels.includes(channel)).length
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                disabled={availableCount === 0}
+                onClick={() => applyPreset(preset.id, channels)}
+                className={'rounded-lg border px-3 py-2 text-left text-xs transition-colors ' + (
+                  chartPreset === preset.id
+                    ? 'border-brand-300 bg-brand-50 text-brand-800 shadow-sm'
+                    : availableCount === 0
+                    ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                )}
+                title={preset.description}
+              >
+                <span className="block font-semibold">{preset.label}</span>
+                <span className="block text-[11px] opacity-75">{availableCount} available channel{availableCount === 1 ? '' : 's'}</span>
+              </button>
+            )
+          })}
+          {chartPreset === 'custom' && (
+            <span className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+              Custom selection
+            </span>
+          )}
+        </div>
+
+        <p className="mt-3 text-xs text-gray-500">
+          {selectedPreset?.description ?? 'Custom view: selected manually from the channel groups below.'}
+        </p>
+
+        <div className="mt-4 space-y-2 border-t border-gray-100 pt-4">
+          {Object.entries(grouped).map(([groupName, chs]) => (
+            <div key={groupName} className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-medium text-gray-400 w-28 shrink-0">{groupName}</span>
+              {chs.map((ch) => {
+                const cfg = CHANNEL_CONFIG[ch]
+                const active = activeChannels.has(ch)
+                return (
+                  <button
+                    key={ch}
+                    onClick={() => toggleChannel(ch)}
+                    className={'px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ' + (
+                      active
+                        ? 'border-gray-300 bg-white text-gray-800 shadow-sm'
+                        : 'border-transparent bg-gray-100 text-gray-400'
+                    )}
+                  >
+                    <span
+                      className="inline-block w-2 h-2 rounded-full mr-1.5"
+                      style={{ backgroundColor: cfg?.color ?? '#6b7280', opacity: active ? 1 : 0.3 }}
+                    />
+                    {cfg?.title ?? ch}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        {visibleChannels.map((ch) => (
+          <TimeseriesChart key={ch} channel={ch} series={results.timeseries[ch]} />
         ))}
       </div>
 
-      {/* Charts grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-        {channels
-          .filter((ch) => activeChannels.has(ch))
-          .map((ch) => (
-            <TimeseriesChart key={ch} channel={ch} series={results.timeseries[ch]} />
-          ))}
-      </div>
+      {visibleChannels.length === 0 && (
+        <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          No channels are selected. Choose a preset or turn on individual channels to show plots.
+        </div>
+      )}
 
-      {/* Molecule Explorer */}
       {job.status === 'done' && (
-        <div className="mb-8">
+        <section className="mb-8">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-gray-900">Model outputs</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              Use this section after the phenotype and time-series pass. It connects the selected gene to mRNAs, proteins, regulatory edges, reactions, metabolites, and searchable state variables.
+            </p>
+          </div>
           <HelpNote variant="model-depth">
             <strong>Model depth:</strong>{' '}The wcEcoli model tracks transcription, translation, and degradation for all 4,749 E. coli genes, but only ~1,500 have <em>mechanistic downstream effects</em> (enzymatic reactions, TF regulation, complex formation). The remaining genes are passengers: their mRNA and protein levels are simulated, but knocking them out may not visibly alter growth rate.
           </HelpNote>
@@ -376,13 +577,14 @@ export function ResultsPage() {
           <ResultStateExplorer
             jobId={job.id}
             geneSymbol={focusGeneSymbol}
+            variantType={experiment?.variant_type ?? job.variant_type}
           />
           <MoleculeExplorer
             jobId={job.id}
             geneSymbol={focusGeneSymbol}
             variantType={experiment?.variant_type ?? job.variant_type}
           />
-        </div>
+        </section>
       )}
 
       {/* Results table */}
@@ -445,6 +647,24 @@ function SummaryCard({ label, value, help, deltaPct }: {
           {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% vs WT
         </p>
       )}
+    </div>
+  )
+}
+
+function GuidanceItem({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+      <p className="text-xs font-semibold text-gray-800">{title}</p>
+      <p className="mt-1 text-xs leading-relaxed text-gray-500">{body}</p>
+    </div>
+  )
+}
+
+function InfoRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="grid grid-cols-[90px,1fr] gap-2">
+      <dt className="font-medium uppercase tracking-wide text-gray-400">{label}</dt>
+      <dd className={(mono ? 'font-mono ' : '') + 'min-w-0 break-words text-gray-700'}>{value}</dd>
     </div>
   )
 }

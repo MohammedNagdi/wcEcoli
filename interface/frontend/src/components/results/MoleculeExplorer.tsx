@@ -2,18 +2,15 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Line } from 'react-chartjs-2'
 import {
   getMoleculeTypes,
-  getMoleculeIds,
   getMoleculeTimeseries,
   searchMolecules,
   getResultStateExplorer,
   getStoichiometryNeighborhood,
-  getGene,
 } from '../../api/client'
 import { HelpTip } from '../common/HelpTip'
 import type {
   MoleculeTypeInfo,
   MoleculeTimeseries,
-  GeneDetail,
   ResultStateVariable,
   ResultStateExplorerResponse,
   StoichiometryMolecule,
@@ -33,12 +30,41 @@ const TYPE_LABELS: Record<string, string> = {
   aa_pool: 'AA pools',
 }
 
+const TYPE_DESCRIPTIONS: Record<string, string> = {
+  protein: 'Monomer count series from MonomerCounts.',
+  mRNA: 'Transcription-unit RNA count series from RNACounts.',
+  rRNA: 'Ribosomal RNA count series from RNACounts.',
+  mRNA_cistron: 'Gene-level cistron RNA count series from RNACounts.',
+  reaction_flux: 'Internal FBA reaction flux series.',
+  exchange_flux: 'External exchange flux series.',
+  metabolite_delta: 'Metabolite change series from FBAResults.',
+  metabolite_count: 'Metabolite count series from EnzymeKinetics.',
+  aa_pool: 'Amino-acid pool size series from GrowthLimits.',
+}
+
 const CHART_COLORS = [
   '#2563eb', '#dc2626', '#059669', '#7c3aed', '#d97706',
   '#0891b2', '#be185d', '#4f46e5', '#ea580c', '#65a30d',
 ]
 
 const MAX_SELECTED = 5
+
+type SelectedMolecule = {
+  molecule_type: string
+  id: string
+}
+
+function selectedKey(item: SelectedMolecule) {
+  return item.molecule_type + ':' + item.id
+}
+
+function outputTypeLabel(type: string) {
+  return TYPE_LABELS[type] ?? type
+}
+
+function outputSeriesTotal(types: MoleculeTypeInfo[]) {
+  return types.reduce((sum, type) => sum + type.count, 0)
+}
 
 const ROLE_LABELS: Record<string, string> = {
   focus: 'Focus gene',
@@ -241,365 +267,14 @@ function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
   )
 }
 
-// Collapsible section for molecule charts
-function FocusSection({
-  title,
-  badge,
-  defaultOpen = true,
-  children,
-}: {
-  title: string
-  badge?: string
-  defaultOpen?: boolean
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  return (
-    <div className="border-b border-gray-100 last:border-0">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-gray-50 transition-colors"
-      >
-        <span className={'text-gray-400 text-xs transition-transform ' + (open ? 'rotate-90' : '')}>&#9654;</span>
-        <span className="text-xs font-medium text-gray-600">{title}</span>
-        {badge && <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{badge}</span>}
-      </button>
-      {open && <div className="px-4 pb-3">{children}</div>}
-    </div>
-  )
-}
-
-// Experiment Focus Panel — enriched with gene detail (complexes, downstream targets)
-function ExperimentFocusPanel({
+export function ResultStateExplorer({
   jobId,
   geneSymbol,
   variantType,
 }: {
   jobId: number
-  geneSymbol: string
-  variantType: string
-}) {
-  const [proteinTs, setProteinTs] = useState<MoleculeTimeseries[]>([])
-  const [mrnaTs, setMrnaTs] = useState<MoleculeTimeseries[]>([])
-  const [complexTs, setComplexTs] = useState<MoleculeTimeseries[]>([])
-  const [loading, setLoading] = useState(true)
-  const [matchInfo, setMatchInfo] = useState<{ protein: string[]; mRNA: string[]; complex: string[] }>({
-    protein: [], mRNA: [], complex: [],
-  })
-  const [geneDetail, setGeneDetail] = useState<GeneDetail | null>(null)
-
-  useEffect(() => {
-    if (!geneSymbol) {
-      setProteinTs([])
-      setMrnaTs([])
-      setComplexTs([])
-      setGeneDetail(null)
-      setLoading(false)
-      return
-    }
-
-    let cancelled = false
-    setLoading(true)
-    setProteinTs([])
-    setMrnaTs([])
-    setComplexTs([])
-    setMatchInfo({ protein: [], mRNA: [], complex: [] })
-
-    getGene(geneSymbol).catch(() => null)
-      .then(async (detail) => {
-        if (cancelled) return
-        setGeneDetail(detail)
-
-        const queries: string[] = []
-        const addQuery = (value: string | null | undefined) => {
-          const trimmed = value?.trim()
-          if (!trimmed) return
-          if (!queries.some((query) => query.toLowerCase() === trimmed.toLowerCase())) {
-            queries.push(trimmed)
-          }
-        }
-
-        addQuery(geneSymbol)
-        if (detail?.monomer_id) {
-          addQuery(detail.monomer_id.replace(/\[.*\]$/, ''))
-        }
-        addQuery(detail?.ecoli_id)
-        if (detail?.rna_ids) {
-          try {
-            const parsed = JSON.parse(detail.rna_ids)
-            if (Array.isArray(parsed)) {
-              for (const id of parsed) {
-                if (typeof id === 'string') addQuery(id.replace(/\[.*\]$/, ''))
-              }
-            }
-          } catch {}
-        }
-
-        let complexIds: string[] = []
-        if (detail?.complex_ids) {
-          try {
-            const parsed = JSON.parse(detail.complex_ids)
-            if (Array.isArray(parsed)) {
-              complexIds = parsed
-                .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-                .map((id) => id.trim())
-                .map((id) => id.includes('[') ? id : id + '[c]')
-                .slice(0, 5)
-              for (const id of complexIds) {
-                addQuery(id.replace(/\[.*\]$/, ''))
-              }
-            }
-          } catch {}
-        }
-
-        const searchResponses = await Promise.all(
-          queries.map((query) =>
-            searchMolecules(jobId, query).catch(() => ({
-              query,
-              results: {} as Record<string, string[]>,
-              total_matches: 0,
-            }))
-          )
-        )
-        if (cancelled) return
-
-        const allResults: Record<string, string[]> = {}
-        for (const res of searchResponses) {
-          for (const [mtype, ids] of Object.entries(res.results)) {
-            if (!allResults[mtype]) allResults[mtype] = []
-            for (const id of ids) {
-              if (!allResults[mtype].includes(id)) allResults[mtype].push(id)
-            }
-          }
-        }
-
-        const proteinIds = (allResults.protein ?? []).slice(0, 3)
-        const directMrnaIds = (allResults.mRNA ?? []).slice(0, 3)
-        const cistronMrnaIds = (allResults.mRNA_cistron ?? []).slice(
-          0,
-          Math.max(0, 3 - directMrnaIds.length)
-        )
-        const mrnaIds = [...directMrnaIds, ...cistronMrnaIds]
-
-        setMatchInfo({ protein: proteinIds, mRNA: mrnaIds, complex: complexIds })
-
-        const promises: Promise<any>[] = []
-
-        if (proteinIds.length > 0) {
-          promises.push(
-            getMoleculeTimeseries(jobId, 'protein', proteinIds)
-              .then((r) => { if (!cancelled) setProteinTs(r.molecules) })
-              .catch(() => { if (!cancelled) setProteinTs([]) })
-          )
-        }
-        if (mrnaIds.length > 0) {
-          const mrnaFetches: Promise<MoleculeTimeseries[]>[] = []
-          if (directMrnaIds.length > 0) {
-            mrnaFetches.push(
-              getMoleculeTimeseries(jobId, 'mRNA', directMrnaIds)
-                .then((r) => r.molecules)
-                .catch(() => [])
-            )
-          }
-          if (cistronMrnaIds.length > 0) {
-            mrnaFetches.push(
-              getMoleculeTimeseries(jobId, 'mRNA_cistron', cistronMrnaIds)
-                .then((r) => r.molecules)
-                .catch(() => [])
-            )
-          }
-          promises.push(
-            Promise.all(mrnaFetches)
-              .then((responses) => {
-                if (!cancelled) setMrnaTs(responses.flat())
-              })
-          )
-        }
-        if (complexIds.length > 0) {
-          promises.push(
-            getMoleculeTimeseries(jobId, 'protein', complexIds)
-              .then((r) => { if (!cancelled) setComplexTs(r.molecules) })
-              .catch(() => { if (!cancelled) setComplexTs([]) })
-          )
-        }
-
-        await Promise.all(promises)
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [jobId, geneSymbol])
-
-  if (loading) {
-    return (
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-        <div className="flex items-center gap-2 text-amber-700 text-sm">
-          <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-          Loading knockout target trajectories...
-        </div>
-      </div>
-    )
-  }
-
-  if (proteinTs.length === 0 && mrnaTs.length === 0 && complexTs.length === 0) return null
-
-  const proteinDatasets = buildChartData(proteinTs)
-  const mrnaDatasets = buildChartData(mrnaTs)
-  const complexDatasets = buildChartData(complexTs)
-
-  const isKnockout = variantType === 'gene_knockout'
-  const label = isKnockout ? 'Knockout target' : 'Experiment focus'
-
-  // Downstream targets (genes this TF regulates)
-  const targets = geneDetail?.regulates ?? []
-  // Upstream regulators
-  const regulators = geneDetail?.regulated_by ?? []
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
-      <div className="px-4 py-3 border-b border-gray-100 bg-amber-50">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">&#9888;&#65039;</span>
-          <h3 className="text-sm font-semibold text-amber-900">
-            {label}: <span className="font-mono">{geneSymbol}</span>
-            {geneDetail?.monomer_name && (
-              <span className="font-normal text-amber-700 ml-1">({geneDetail.monomer_name})</span>
-            )}
-          </h3>
-        </div>
-        <p className="text-xs text-amber-700 mt-0.5">
-          {isKnockout
-            ? 'Expression of ' + geneSymbol + ' was knocked out. Showing protein, mRNA' + (complexDatasets.length > 0 ? ', complex' : '') + ' trajectories across all generations.'
-            : 'Molecule trajectories related to this experiment\'s gene of interest.'}
-        </p>
-        {/* Gene product summary badges */}
-        <div className="flex flex-wrap gap-1.5 mt-2">
-          {geneDetail?.monomer_id && (
-            <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-mono">
-              {geneDetail.monomer_id}
-            </span>
-          )}
-          {matchInfo.mRNA.map((id) => (
-            <span key={id} className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-mono">
-              {id.replace(/\[.*\]$/, '')}
-            </span>
-          ))}
-          {matchInfo.complex.length > 0 && (
-            <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
-              {matchInfo.complex.length} complex{matchInfo.complex.length > 1 ? 'es' : ''}
-            </span>
-          )}
-          {targets.length > 0 && (
-            <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
-              TF &#8594; {targets.length} target{targets.length > 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div>
-        {/* Protein */}
-        {proteinDatasets.length > 0 && (
-          <FocusSection
-            title={'Protein — ' + matchInfo.protein.map((id) => id.replace(/\[.*\]$/, '')).join(', ')}
-            badge="molecules"
-          >
-            <MoleculeChart datasets={proteinDatasets} unit="molecules" />
-          </FocusSection>
-        )}
-
-        {/* mRNA */}
-        {mrnaDatasets.length > 0 && (
-          <FocusSection
-            title={'mRNA — ' + matchInfo.mRNA.map((id) => id.replace(/\[.*\]$/, '')).join(', ')}
-            badge="molecules"
-          >
-            <MoleculeChart datasets={mrnaDatasets} unit="molecules" />
-          </FocusSection>
-        )}
-
-        {/* Complexes */}
-        {complexDatasets.length > 0 && (
-          <FocusSection
-            title={'Complexes — ' + matchInfo.complex.map((id) => id.replace(/\[.*\]$/, '')).join(', ')}
-            badge="molecules"
-            defaultOpen={false}
-          >
-            <MoleculeChart datasets={complexDatasets} unit="molecules" />
-          </FocusSection>
-        )}
-
-        {/* Downstream TF targets */}
-        {targets.length > 0 && (
-          <FocusSection
-            title={'Downstream targets (' + targets.length + ' genes regulated by ' + geneSymbol + ')'}
-            defaultOpen={false}
-          >
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
-              {targets.slice(0, 20).map((t: any, i: number) => (
-                <div key={i} className="flex items-center gap-1.5 text-xs px-2 py-1 rounded bg-gray-50">
-                  <span className="font-mono font-medium text-bio-gene">{t.target}</span>
-                  <span className={'text-[10px] px-1 rounded ' + (
-                    t.type === 'activator' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-                  )}>
-                    {t.type === 'activator' ? '+' : '−'}
-                  </span>
-                  <span className="text-gray-400 font-mono text-[10px] ml-auto">
-                    {t.log2fc > 0 ? '+' : ''}{t.log2fc.toFixed(1)}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {targets.length > 20 && (
-              <p className="text-xs text-gray-400 mt-1.5">
-                and {targets.length - 20} more target{targets.length - 20 > 1 ? 's' : ''}...
-              </p>
-            )}
-            {isKnockout && (
-              <p className="text-xs text-amber-600 mt-2 bg-amber-50 rounded px-2 py-1.5">
-                &#9888; Knocking out {geneSymbol} affects expression of these {targets.length} downstream gene{targets.length > 1 ? 's' : ''}.
-                Consider checking their protein levels in the explorer below.
-              </p>
-            )}
-          </FocusSection>
-        )}
-
-        {/* Upstream regulators */}
-        {regulators.length > 0 && (
-          <FocusSection
-            title={'Regulated by (' + regulators.length + ' TF' + (regulators.length > 1 ? 's' : '') + ')'}
-            defaultOpen={false}
-          >
-            <div className="flex flex-wrap gap-1.5">
-              {regulators.map((r: any, i: number) => (
-                <span key={i} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-50">
-                  <span className="font-mono font-medium text-bio-gene">{r.tf}</span>
-                  <span className={'text-[10px] px-1 rounded ' + (
-                    r.type === 'activator' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-                  )}>
-                    {r.type === 'activator' ? '+' : '−'}
-                  </span>
-                </span>
-              ))}
-            </div>
-          </FocusSection>
-        )}
-      </div>
-    </div>
-  )
-}
-
-export function ResultStateExplorer({
-  jobId,
-  geneSymbol,
-}: {
-  jobId: number
   geneSymbol?: string
+  variantType?: string
 }) {
   const [data, setData] = useState<ResultStateExplorerResponse | null>(null)
   const [stoichiometry, setStoichiometry] = useState<StoichiometryNeighborhoodResponse | null>(null)
@@ -696,6 +371,8 @@ export function ResultStateExplorer({
   const availableVariables = data.variables.filter((variable) => variable.available)
   const topVariables = availableVariables.slice(0, 16)
   const regulatoryEdges = data.edges.filter((edge) => edge.edge_type === 'regulates')
+  const isGeneKnockout = variantType === 'gene_knockout'
+  const focusLabel = isGeneKnockout ? 'gene knockout target' : 'experiment focus gene'
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
@@ -710,8 +387,8 @@ export function ResultStateExplorer({
               />
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Focus <span className="font-mono font-medium">{data.focus_gene}</span>
-              {' '}to mRNAs, proteins, complexes, and regulatory-neighborhood genes.
+              Maps the {focusLabel} <span className="font-mono font-medium">{data.focus_gene}</span>
+              {' '}to plottable mRNAs, proteins, complexes, reactions, metabolites, and regulatory-neighborhood genes.
             </p>
           </div>
           <div className="text-right text-xs text-gray-400">
@@ -803,6 +480,9 @@ export function ResultStateExplorer({
                           </span>
                           <span className="truncate font-mono text-gray-800">{variable.id}</span>
                         </span>
+                        <span className="mt-0.5 block truncate text-[10px] text-gray-400">
+                          output table: {outputTypeLabel(variable.molecule_type)}
+                        </span>
                       </span>
                       <span className="text-right font-mono text-gray-700">{formatValue(variable.final_value)}</span>
                       <span className={'text-right font-mono font-medium ' + deltaClass}>
@@ -862,15 +542,14 @@ export function MoleculeExplorer({
   variantType?: string
 }) {
   const [types, setTypes] = useState<MoleculeTypeInfo[]>([])
-  const [activeType, setActiveType] = useState<string>('protein')
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<string[]>([])
+  const [searchResults, setSearchResults] = useState<Record<string, string[]>>({})
   const [searching, setSearching] = useState(false)
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected] = useState<SelectedMolecule[]>([])
   const [timeseries, setTimeseries] = useState<MoleculeTimeseries[]>([])
   const [loadingTs, setLoadingTs] = useState(false)
   const [typesLoading, setTypesLoading] = useState(true)
-  const [explorerOpen, setExplorerOpen] = useState(variantType === 'gene_knockout')
+  const [explorerOpen, setExplorerOpen] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -878,24 +557,21 @@ export function MoleculeExplorer({
     getMoleculeTypes(jobId)
       .then((res) => {
         setTypes(res.available_types)
-        if (res.available_types.length > 0) {
-          setActiveType(res.available_types[0].molecule_type)
-        }
       })
       .catch(() => {})
       .finally(() => setTypesLoading(false))
   }, [jobId])
 
   const doSearch = useCallback(
-    (q: string, type: string) => {
+    (q: string) => {
       if (q.length < 2) {
-        setSearchResults([])
+        setSearchResults({})
         return
       }
       setSearching(true)
-      getMoleculeIds(jobId, type, { search: q, limit: 50 })
-        .then((res) => setSearchResults(res.ids))
-        .catch(() => setSearchResults([]))
+      searchMolecules(jobId, q)
+        .then((res) => setSearchResults(res.results))
+        .catch(() => setSearchResults({}))
         .finally(() => setSearching(false))
     },
     [jobId]
@@ -903,11 +579,11 @@ export function MoleculeExplorer({
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => doSearch(searchQuery, activeType), 250)
+    debounceRef.current = setTimeout(() => doSearch(searchQuery.trim()), 250)
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [searchQuery, activeType, doSearch])
+  }, [searchQuery, doSearch])
 
   useEffect(() => {
     if (selected.length === 0) {
@@ -915,17 +591,30 @@ export function MoleculeExplorer({
       return
     }
     setLoadingTs(true)
-    getMoleculeTimeseries(jobId, activeType, selected)
-      .then((res) => setTimeseries(res.molecules))
+    const grouped = selected.reduce<Record<string, string[]>>((acc, item) => {
+      if (!acc[item.molecule_type]) acc[item.molecule_type] = []
+      acc[item.molecule_type].push(item.id)
+      return acc
+    }, {})
+
+    Promise.all(
+      Object.entries(grouped).map(([moleculeType, ids]) =>
+        getMoleculeTimeseries(jobId, moleculeType, ids)
+          .then((res) => res.molecules)
+          .catch(() => [])
+      )
+    )
+      .then((responses) => setTimeseries(responses.flat()))
       .catch(() => setTimeseries([]))
       .finally(() => setLoadingTs(false))
-  }, [jobId, activeType, selected])
+  }, [jobId, selected])
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = (item: SelectedMolecule) => {
+    const key = selectedKey(item)
     setSelected((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id)
+      if (prev.some((x) => selectedKey(x) === key)) return prev.filter((x) => selectedKey(x) !== key)
       if (prev.length >= MAX_SELECTED) return prev
-      return [...prev, id]
+      return [...prev, item]
     })
   }
 
@@ -934,15 +623,6 @@ export function MoleculeExplorer({
     setTimeseries([])
   }
 
-  const switchType = (type: string) => {
-    setActiveType(type)
-    setSelected([])
-    setTimeseries([])
-    setSearchQuery('')
-    setSearchResults([])
-  }
-
-  const activeInfo = types.find((t) => t.molecule_type === activeType)
   const datasets = buildChartData(timeseries)
   const unit = timeseries[0]?.unit ?? 'molecules'
 
@@ -959,28 +639,21 @@ export function MoleculeExplorer({
 
   if (types.length === 0) return null
 
-  const totalCount = types.reduce((s, t) => s + t.count, 0).toLocaleString()
-  const searchPlaceholder = 'Search ' + (activeInfo?.count.toLocaleString() ?? '') + ' ' + (TYPE_LABELS[activeType]?.toLowerCase() ?? 'molecules') + '...'
+  const totalCount = outputSeriesTotal(types).toLocaleString()
+  const searchPlaceholder = 'Search gene, protein, metabolite, reaction, or raw output ID...'
+  const resultGroups = Object.entries(searchResults).filter(([, ids]) => ids.length > 0)
 
   return (
     <div>
-      {geneSymbol && (
-        <ExperimentFocusPanel
-          jobId={jobId}
-          geneSymbol={geneSymbol}
-          variantType={variantType ?? ''}
-        />
-      )}
-
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="w-full px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
           <div className="text-left">
             <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
               Molecule Explorer
-              <HelpTip text="Browse and plot time trajectories of individual proteins, mRNAs, rRNAs, and mRNA cistrons from the simulation output. Molecule IDs use EcoCyc names with compartment tags (e.g. RPOB-MONOMER[c]). You can search by gene name and it will find matching protein and mRNA IDs." position="bottom" />
+              <HelpTip text="Advanced output-series search. Search by gene symbol, EcoCyc ID, protein, metabolite, reaction, or raw output ID. Counts below are plottable simulation output series, not unique biological molecules." position="bottom" />
             </h3>
             <p className="text-xs text-gray-400 mt-0.5">
-              Search and plot any of the {totalCount} tracked proteins, mRNAs, and rRNAs
+              Browse {totalCount} plottable output series across RNAs, proteins, fluxes, metabolites, and amino-acid pools.
             </p>
           </div>
           <button
@@ -997,20 +670,20 @@ export function MoleculeExplorer({
 
         {explorerOpen && (
           <div className="p-4">
-            <div className="flex gap-2 mb-3">
+            <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
               {types.map((t) => (
-                <button
+                <div
                   key={t.molecule_type}
-                  onClick={() => switchType(t.molecule_type)}
-                  className={'px-3 py-1.5 rounded text-xs font-medium transition-colors ' + (
-                    activeType === t.molecule_type
-                      ? 'bg-brand-600 text-white'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                  )}
+                  className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
                 >
-                  {TYPE_LABELS[t.molecule_type] ?? t.molecule_type}
-                  <span className="ml-1 opacity-70">({t.count.toLocaleString()})</span>
-                </button>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-gray-700">{outputTypeLabel(t.molecule_type)}</span>
+                    <span className="font-mono text-[11px] text-gray-500">{t.count.toLocaleString()}</span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-4 text-gray-400">
+                    {TYPE_DESCRIPTIONS[t.molecule_type] ?? 'Simulation output series.'}
+                  </p>
+                </div>
               ))}
             </div>
 
@@ -1031,32 +704,47 @@ export function MoleculeExplorer({
 
             <div className="flex gap-4">
               <div className="flex-1 min-w-0">
-                {searchQuery.length >= 2 && searchResults.length > 0 && (
-                  <div className="border border-gray-200 rounded-md max-h-48 overflow-y-auto">
-                    {searchResults.map((id) => {
-                      const isSelected = selected.includes(id)
-                      const canSelect = isSelected || selected.length < MAX_SELECTED
-                      return (
-                        <button
-                          key={id}
-                          onClick={() => canSelect && toggleSelect(id)}
-                          disabled={!canSelect}
-                          className={'w-full text-left px-3 py-1.5 text-xs font-mono border-b border-gray-50 last:border-0 transition-colors ' + (
-                            isSelected
-                              ? 'bg-brand-50 text-brand-700 font-semibold'
-                              : canSelect
-                              ? 'hover:bg-gray-50 text-gray-700'
-                              : 'text-gray-300 cursor-not-allowed'
-                          )}
-                        >
-                          {isSelected && <span className="mr-1.5">&#10003;</span>}
-                          {id}
-                        </button>
-                      )
-                    })}
+                {searchQuery.length >= 2 && resultGroups.length > 0 && (
+                  <div className="max-h-72 overflow-y-auto rounded-md border border-gray-200">
+                    {resultGroups.map(([moleculeType, ids]) => (
+                      <div key={moleculeType} className="border-b border-gray-100 last:border-b-0">
+                        <div className="flex items-center justify-between bg-gray-50 px-3 py-1.5">
+                          <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                            {outputTypeLabel(moleculeType)}
+                          </span>
+                          <span className="text-[11px] text-gray-400">{ids.length} match{ids.length === 1 ? '' : 'es'}</span>
+                        </div>
+                        {ids.map((id) => {
+                          const item = { molecule_type: moleculeType, id }
+                          const key = selectedKey(item)
+                          const isSelected = selected.some((x) => selectedKey(x) === key)
+                          const canSelect = isSelected || selected.length < MAX_SELECTED
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => canSelect && toggleSelect(item)}
+                              disabled={!canSelect}
+                              className={'w-full border-t border-gray-50 px-3 py-1.5 text-left text-xs transition-colors ' + (
+                                isSelected
+                                  ? 'bg-brand-50 text-brand-700 font-semibold'
+                                  : canSelect
+                                  ? 'hover:bg-gray-50 text-gray-700'
+                                  : 'cursor-not-allowed text-gray-300'
+                              )}
+                            >
+                              <span className="font-mono">{id}</span>
+                              <span className="ml-2 text-[11px] text-gray-400">
+                                {TYPE_DESCRIPTIONS[moleculeType] ?? 'Simulation output series.'}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ))}
                   </div>
                 )}
-                {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
+                {searchQuery.length >= 2 && !searching && resultGroups.length === 0 && (
                   <p className="text-xs text-gray-400 py-2">No matches for &ldquo;{searchQuery}&rdquo;</p>
                 )}
                 {searchQuery.length < 2 && searchQuery.length > 0 && (
@@ -1075,14 +763,17 @@ export function MoleculeExplorer({
                     </button>
                   </div>
                   <div className="space-y-1">
-                    {selected.map((id, i) => (
-                      <div key={id} className="flex items-center gap-2 px-2 py-1 rounded bg-gray-50 text-xs">
+                    {selected.map((item, i) => (
+                      <div key={selectedKey(item)} className="flex items-center gap-2 px-2 py-1 rounded bg-gray-50 text-xs">
                         <span
                           className="w-2.5 h-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
                         />
-                        <span className="font-mono truncate flex-1">{id}</span>
-                        <button onClick={() => toggleSelect(id)} className="text-gray-400 hover:text-red-500 shrink-0">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-mono">{item.id}</span>
+                          <span className="block truncate text-[10px] text-gray-400">{outputTypeLabel(item.molecule_type)}</span>
+                        </span>
+                        <button onClick={() => toggleSelect(item)} className="text-gray-400 hover:text-red-500 shrink-0">
                           &times;
                         </button>
                       </div>
@@ -1111,9 +802,9 @@ export function MoleculeExplorer({
 
             {selected.length === 0 && searchQuery.length === 0 && (
               <div className="text-center py-6 text-gray-400">
-                <p className="text-sm">Search for a gene or protein name to plot its trajectory</p>
+                <p className="text-sm">Search by biological name; raw output IDs are optional.</p>
                 <p className="text-xs mt-1">
-                  e.g. <span className="font-mono">rpoB</span>, <span className="font-mono">ADHE</span>, <span className="font-mono">pfkA</span>
+                  e.g. <span className="font-mono">aaeB</span>, <span className="font-mono">rpoB</span>, <span className="font-mono">GLC</span>, <span className="font-mono">ACETATEKINA-RXN</span>
                 </p>
               </div>
             )}
