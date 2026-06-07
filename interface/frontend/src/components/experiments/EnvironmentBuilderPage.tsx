@@ -16,8 +16,10 @@ import type {
   ConditionCatalog,
   ConditionRecord,
   EnvironmentMolecule,
+  MediaStock,
   MediaRecipe,
   MediaRecipeRecord,
+  TimelineRecord,
   TfConditionRecord,
 } from '../../types'
 import { HelpTip } from '../common/HelpTip'
@@ -57,6 +59,7 @@ type DependencyStep = {
   id: DependencyStepId
   file: string
   label: string
+  question: string
   summary: string
   definition: string
   needs: string
@@ -75,11 +78,11 @@ const DEPENDENCY_SECTION_TARGETS: Record<DependencyStepId, SaveSectionKey> = {
 }
 
 const SECTION_LABELS: Record<SaveSectionKey, string> = {
-  media: 'Growth Media',
-  mediaRecipe: 'Media Formulations',
-  condition: 'Growth Conditions',
-  tfCondition: 'TF Activation Rules',
-  timeline: 'Media Shift Schedules',
+  media: 'Medium Stock',
+  mediaRecipe: 'Media Recipe',
+  condition: 'Growth Condition',
+  tfCondition: 'TF State Rules',
+  timeline: 'Media Protocol',
 }
 
 const MAIN_SECTION_KEYS: SaveSectionKey[] = ['media', 'mediaRecipe', 'condition', 'tfCondition', 'timeline']
@@ -96,62 +99,68 @@ const DEPENDENCY_STEPS: DependencyStep[] = [
   {
     id: 'media',
     file: 'condition/media/*.tsv',
-    label: 'Growth media stocks',
-    summary: 'Defines the stock medium.',
-    definition: 'A growth medium specifies which chemical species the cell\'s environment contains and at what concentrations (mmol/L). The concentrations set boundary flux constraints in the metabolic model — finite values cap uptake or secretion, while Infinity means unconstrained availability (used for gases, water, and trace metals).',
+    label: 'Medium stock',
+    question: 'What raw medium stock am I starting from?',
+    summary: 'Choose the extracellular molecule and concentration table.',
+    definition: 'A medium stock lists extracellular molecules and concentrations. Finite values cap availability; Infinity means the molecule is treated as unconstrained for the run.',
     needs: 'Known molecule IDs.',
-    creates: 'A medium name such as MIX0-57.',
-    unlocks: 'Used as the base medium in a formulation.',
+    creates: 'A stock name such as MIX0-57.',
+    unlocks: 'Used as the base of a media recipe.',
   },
   {
     id: 'environment',
     file: 'condition/environment_molecules.tsv',
     label: 'Exchange molecule registry',
+    question: 'Do I need a new exchange molecule ID?',
     summary: 'Registers new molecule IDs.',
-    definition: 'Every molecule that can cross the cell boundary must be registered with a unique ID, a compartment location ([p] for periplasm, [c] for cytoplasm), and a molecular weight. Add entries here only when introducing a molecule ID that the reconstruction does not already know — most common metabolites are pre-registered.',
+    definition: 'Use this only when a medium needs a molecule ID that the reconstruction does not already know. Most common metabolites are already registered.',
     needs: 'Only if a new medium needs a new ID.',
     creates: 'Molecule IDs such as MY_CARBON_SRC.',
-    unlocks: 'Those IDs can be used in media and formulations.',
+    unlocks: 'Those IDs can be used in media stocks and recipes.',
     branch: true,
   },
   {
     id: 'mediaRecipe',
     file: 'condition/media_recipes.tsv',
-    label: 'Media formulations',
-    summary: 'Builds the formulation ID used by experiments.',
-    definition: 'A formulation bundles a base medium stock with any supplementary stocks or discrete ingredients and assigns a single short ID (e.g. minimal_acetate). All downstream records — growth conditions, TF activation rules, and schedules — reference this ID instead of the raw stock name.',
+    label: 'Media recipe',
+    question: 'How should this media recipe be assembled for experiments?',
+    summary: 'Choose or define the recipe operation: base stock, optional mixed stock, and ingredient additions or removals.',
+    definition: 'A recipe combines a base medium stock with supplements or ingredients and assigns one short ID, such as minimal_acetate. Downstream records use this recipe ID instead of the raw stock name.',
     needs: 'A base medium and any ingredient IDs.',
-    creates: 'A formulation ID such as minimal_acetate.',
-    unlocks: 'Used as nutrients in Growth Conditions.',
+    creates: 'A recipe ID such as minimal_acetate.',
+    unlocks: 'Used as nutrients in growth conditions.',
   },
   {
     id: 'condition',
     file: 'condition/condition_defs.tsv',
-    label: 'Growth condition definitions',
-    summary: 'Defines the biological state for a formulation.',
-    definition: 'A growth condition maps a formulation to the full biological context: which transcription factor complexes are active or inactive, which genes are perturbed, and what the expected doubling time is. It is the central record that ties the chemical environment to the regulatory state of the cell.',
-    needs: 'A formulation ID from Media Formulations.',
+    label: 'Growth condition',
+    question: 'What biological growth condition should this recipe represent?',
+    summary: 'Attach biological context such as expected growth, TF lists, and genotype perturbations.',
+    definition: 'A growth condition ties a media recipe to expected growth behavior and regulatory state. This is what later appears as a selectable condition for experiments.',
+    needs: 'A recipe ID from Media Recipe.',
     creates: 'A condition name, nutrients, TF lists, and doubling time.',
     unlocks: 'Keeps TF rules aligned to the same setup.',
   },
   {
     id: 'tfCondition',
     file: 'condition/tf_condition.tsv',
-    label: 'TF activation rules',
-    summary: 'Adds nutrient-specific TF logic.',
-    definition: 'Transcription factors (TFs) switch gene expression in response to environmental signals. Each row declares: under the active nutrient context this TF complex is active, under the contrasting inactive context it is off. The simulator reads these rules to set regulatory state before each run.',
-    needs: 'The same formulation context used by the Growth Condition.',
+    label: 'TF state rules',
+    question: 'Which TF state rules belong to this recipe?',
+    summary: 'Select reconstruction rules that explain active or inactive TF states.',
+    definition: 'These optional rows describe when a TF complex is active or inactive under nutrient contexts. They are not a free-form TF knockout; they encode reconstruction-level regulatory states.',
+    needs: 'The same recipe context used by the growth condition.',
     creates: 'Active and inactive TF rules.',
-    unlocks: 'Finishes the regulatory context before scheduling.',
+    unlocks: 'Finishes the regulatory context before building a protocol.',
   },
   {
     id: 'timeline',
     file: 'condition/timelines_def.tsv',
-    label: 'Media shift schedules',
-    summary: 'Orders formulation changes over time.',
-    definition: 'A schedule is a comma-separated list of time–formulation pairs, e.g. "0 minimal, 3600 minimal_acetate". The cell starts in the first medium and shifts at each specified time (in seconds). For Levels 2 and 3 the first event should match the current formulation.',
-    needs: 'Formulation IDs; the first event should start from the current formulation.',
-    creates: 'The final schedule string.',
+    label: 'Media protocol',
+    question: 'Does the environment stay constant or shift over time?',
+    summary: 'Choose a static medium or a time-ordered media-shift protocol.',
+    definition: 'A protocol is a time-ordered list of recipe changes, for example "0 minimal, 3600 minimal_acetate". The UI shows minutes and hours; published catalog rows store event times in seconds.',
+    needs: 'Recipe IDs; the first event should start from the current recipe.',
+    creates: 'The final protocol string.',
     unlocks: 'A complete experiment-ready setup.',
   },
 ]
@@ -177,6 +186,176 @@ function parseTimelineEvents(events: string) {
 
 function firstTimelineMedia(events: string) {
   return parseTimelineEvents(events)[0]?.mediaId || ''
+}
+
+function formatSecondsHuman(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0 min'
+  if (seconds % 3600 === 0) return `${seconds / 3600} hr`
+  if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)} hr`
+  if (seconds % 60 === 0) return `${seconds / 60} min`
+  return `${seconds} s`
+}
+
+function summarizeMediaProtocol(events: string) {
+  const parsed = parseTimelineEvents(events)
+  if (parsed.length === 0) {
+    return {
+      label: 'No protocol selected',
+      detail: 'Choose a media recipe or add a protocol event.',
+    }
+  }
+
+  if (parsed.length === 1) {
+    return {
+      label: 'Static medium',
+      detail: `Starts and stays in ${parsed[0].mediaId}.`,
+    }
+  }
+
+  const first = parsed[0]
+  const last = parsed[parsed.length - 1]
+  const lastTimeSec = Number(last.timeSec)
+  return {
+    label: `${parsed.length - 1} scheduled shift${parsed.length === 2 ? '' : 's'}`,
+    detail: `Starts in ${first.mediaId}; last event switches to ${last.mediaId} at ${formatSecondsHuman(lastTimeSec)}.`,
+  }
+}
+
+function hasJsonContent(value: string | undefined | null) {
+  if (!value) return false
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === '{}' || trimmed === '[]') return false
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (Array.isArray(parsed)) return parsed.length > 0
+    if (parsed && typeof parsed === 'object') return Object.keys(parsed).length > 0
+    return Boolean(parsed)
+  } catch {
+    return true
+  }
+}
+
+function formatCountLabel(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+function parseStringArray(value: string | undefined | null) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed.map((item) => String(item)).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+function stringifyStringArray(values: string[]) {
+  return JSON.stringify(values)
+}
+
+function addToJsonArray(value: string, item: string) {
+  if (!item) return value
+  const values = parseStringArray(value)
+  if (values.includes(item)) return stringifyStringArray(values)
+  return stringifyStringArray([...values, item])
+}
+
+function removeJsonArrayIndex(value: string, index: number) {
+  const values = parseStringArray(value)
+  return stringifyStringArray(values.filter((_, itemIndex) => itemIndex !== index))
+}
+
+function parseRecipeEditArray(value: string | undefined | null) {
+  const trimmed = (value || '').trim()
+  if (!trimmed || trimmed === '[]') return { values: [] as string[], error: '' }
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+    return { values: [] as string[], error: 'Use bracketed array syntax such as [] or [Infinity].' }
+  }
+
+  const body = trimmed.slice(1, -1).trim()
+  if (!body) return { values: [] as string[], error: '' }
+  const values = body.split(',').map((item) => item.trim()).filter(Boolean)
+  const invalid = values.find((item) => (
+    item !== 'Infinity'
+    && item !== '-Infinity'
+    && !/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(item)
+  ))
+  if (invalid) {
+    return { values, error: `Invalid edit value "${invalid}". Use numbers, Infinity, or -Infinity.` }
+  }
+  return { values, error: '' }
+}
+
+function stringifyRecipeEditArray(values: string[]) {
+  return `[${values.join(',')}]`
+}
+
+function addToRecipeEditArray(value: string, item = 'Infinity') {
+  const parsed = parseRecipeEditArray(value)
+  if (parsed.error) return value
+  return stringifyRecipeEditArray([...parsed.values, item])
+}
+
+function upsertJsonObjectValue(value: string, key: string, nextValue: number | string) {
+  if (!key) return value
+  let parsed: Record<string, unknown> = {}
+  try {
+    const candidate = JSON.parse(value || '{}')
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      parsed = candidate as Record<string, unknown>
+    }
+  } catch {
+    parsed = {}
+  }
+  return JSON.stringify({ ...parsed, [key]: nextValue })
+}
+
+function jsonObjectKeys(value: string | undefined | null) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed) : []
+  } catch {
+    return []
+  }
+}
+
+function classifyTfRuleScope(row: Pick<TfConditionRecord, 'active_genotype_perturbations' | 'inactive_genotype_perturbations'>) {
+  const hasActiveGenotype = hasJsonContent(row.active_genotype_perturbations)
+  const hasInactiveGenotype = hasJsonContent(row.inactive_genotype_perturbations)
+  if (hasActiveGenotype && hasInactiveGenotype) return 'nutrient + genotype state'
+  if (hasActiveGenotype || hasInactiveGenotype) return 'genotype-dependent state'
+  return 'nutrient state'
+}
+
+function tfRuleKey(row: Pick<TfConditionRecord, 'tf' | 'active_tf' | 'active_nutrients' | 'inactive_nutrients' | 'active_genotype_perturbations' | 'inactive_genotype_perturbations' | 'tf_type'>) {
+  return [
+    row.tf,
+    row.active_tf,
+    row.active_nutrients,
+    row.inactive_nutrients,
+    row.active_genotype_perturbations,
+    row.inactive_genotype_perturbations,
+    row.tf_type,
+  ].join('|')
+}
+
+function protocolInvolvesMedia(timeline: TimelineRecord, mediaId: string) {
+  return parseTimelineEvents(timeline.events).some((event) => event.mediaId === mediaId)
+}
+
+function sortProtocolsForMedia(timelines: TimelineRecord[], mediaId: string) {
+  const starts: TimelineRecord[] = []
+  const involves: TimelineRecord[] = []
+  timelines.forEach((timeline) => {
+    const firstMedia = firstTimelineMedia(timeline.events)
+    if (firstMedia === mediaId) {
+      starts.push(timeline)
+    } else if (protocolInvolvesMedia(timeline, mediaId)) {
+      involves.push(timeline)
+    }
+  })
+  return { starts, involves, all: [...starts, ...involves] }
 }
 
 function stringifySnapshot(value: unknown) {
@@ -458,8 +637,8 @@ function SavedStatePanel({
 }) {
   return (
     <SectionCard
-      title="Saved state"
-      subtitle="Each section saves locally so you can see what is settled and what still has unsaved changes."
+      title="Build summary"
+      subtitle="Reusable records created here become options in experiment design after publish."
     >
       <div className="space-y-3 text-sm">
         {MAIN_SECTION_KEYS.map((section) => (
@@ -540,7 +719,7 @@ function getDependencyBadge({
 
   if (stepId === 'condition' && !currentConditionName) {
     return {
-      label: 'Define after formulation',
+      label: 'Define after recipe',
       classes: 'bg-slate-100 text-slate-600',
     }
   }
@@ -567,6 +746,7 @@ function getSectionSummaries({
   effectiveCondition,
   effectiveTfRows,
   effectiveTimelineName,
+  effectiveTimelineEvents,
   currentScheduleStartReference,
 }: {
   mediaMode: SectionMode
@@ -577,22 +757,24 @@ function getSectionSummaries({
   effectiveCondition: ConditionRecord | null | undefined
   effectiveTfRows: Array<TfConditionRecord | DraftTfConditionRow>
   effectiveTimelineName: string
+  effectiveTimelineEvents: string
   currentScheduleStartReference: string
 }): Record<SaveSectionKey, string> {
+  const protocolSummary = summarizeMediaProtocol(effectiveTimelineEvents)
   return {
     media: mediaMode === 'existing'
-      ? `Using ${currentMediaStockName || 'no medium selected'}`
-      : `${draftMediaStockName || 'Untitled medium'} with ${compactRows(draftMediaRows, (row) => Boolean(row.molecule_id.trim())).length} rows`,
+      ? `Using stock ${currentMediaStockName || 'none selected'}`
+      : `${draftMediaStockName || 'Untitled stock'} with ${compactRows(draftMediaRows, (row) => Boolean(row.molecule_id.trim())).length} molecules`,
     mediaRecipe: effectiveMediaRecipe
       ? `${effectiveMediaRecipe.media_id} from ${effectiveMediaRecipe.base_media}`
-      : 'Choose or create a formulation',
+      : 'Choose or create a media recipe',
     condition: effectiveCondition
       ? `${effectiveCondition.condition} on ${effectiveCondition.nutrients}`
       : 'Choose or create a growth condition',
     tfCondition: effectiveTfRows.length > 0
       ? `${effectiveTfRows.length} TF rule${effectiveTfRows.length === 1 ? '' : 's'} ready`
       : 'No TF rules selected yet',
-    timeline: `${effectiveTimelineName || 'draft schedule'} starts at ${currentScheduleStartReference}`,
+    timeline: `${effectiveTimelineName || 'draft protocol'}: ${protocolSummary.label}; starts at ${currentScheduleStartReference}`,
   }
 }
 
@@ -623,6 +805,10 @@ export function EnvironmentBuilderPage() {
 
   const [mediaRecipeMode, setMediaRecipeMode] = useState<SectionMode>('existing')
   const [selectedMediaRecipeId, setSelectedMediaRecipeId] = useState('')
+  const [selectedIngredientId, setSelectedIngredientId] = useState('')
+  const [selectedConditionStateId, setSelectedConditionStateId] = useState('')
+  const [selectedConditionActiveTfId, setSelectedConditionActiveTfId] = useState('')
+  const [selectedConditionInactiveTfId, setSelectedConditionInactiveTfId] = useState('')
   const [draftMediaRecipe, setDraftMediaRecipe] = useState<MediaRecipeRecord>({
     media_id: 'my_new_media',
     base_media: 'MY_NEW_MIX',
@@ -635,7 +821,7 @@ export function EnvironmentBuilderPage() {
     ingredients_volume: '[]',
   })
 
-  const [conditionMode, setConditionMode] = useState<SectionMode>('create')
+  const [conditionMode, setConditionMode] = useState<SectionMode>('existing')
   const [selectedConditionName, setSelectedConditionName] = useState('')
   const [draftCondition, setDraftCondition] = useState<ConditionRecord>({
     condition: 'my_condition',
@@ -661,7 +847,7 @@ export function EnvironmentBuilderPage() {
     },
   ])
 
-  const [timelineMode, setTimelineMode] = useState<SectionMode>('create')
+  const [timelineMode, setTimelineMode] = useState<SectionMode>('existing')
   const [selectedTimelineId, setSelectedTimelineId] = useState('')
   const [draftTimelineName, setDraftTimelineName] = useState('000028_my_timeline')
   const [draftTimelineEvents, setDraftTimelineEvents] = useState('')
@@ -740,6 +926,102 @@ export function EnvironmentBuilderPage() {
   const allTfConditions = catalog?.tf_conditions || []
   const allTimelines = catalog?.timelines || []
 
+  const recipeCountsByBaseStock = useMemo(() => {
+    const counts = new Map<string, number>()
+    allMediaRecipes.forEach((recipe) => {
+      counts.set(recipe.base_media, (counts.get(recipe.base_media) || 0) + 1)
+    })
+    return counts
+  }, [allMediaRecipes])
+
+  const recipeCountsByAddedStock = useMemo(() => {
+    const counts = new Map<string, number>()
+    allMediaRecipes.forEach((recipe) => {
+      if (!recipe.added_media) return
+      counts.set(recipe.added_media, (counts.get(recipe.added_media) || 0) + 1)
+    })
+    return counts
+  }, [allMediaRecipes])
+
+  const conditionCountsByRecipe = useMemo(() => {
+    const counts = new Map<string, number>()
+    allConditions.forEach((condition) => {
+      counts.set(condition.nutrients, (counts.get(condition.nutrients) || 0) + 1)
+    })
+    return counts
+  }, [allConditions])
+
+  const tfCountsByRecipe = useMemo(() => {
+    const counts = new Map<string, number>()
+    allTfConditions.forEach((row) => {
+      if (row.active_nutrients) {
+        counts.set(row.active_nutrients, (counts.get(row.active_nutrients) || 0) + 1)
+      }
+      if (row.inactive_nutrients && row.inactive_nutrients !== row.active_nutrients) {
+        counts.set(row.inactive_nutrients, (counts.get(row.inactive_nutrients) || 0) + 1)
+      }
+    })
+    return counts
+  }, [allTfConditions])
+
+  const protocolCountsByRecipe = useMemo(() => {
+    const starts = new Map<string, number>()
+    const involves = new Map<string, number>()
+    allTimelines.forEach((timeline) => {
+      const events = parseTimelineEvents(timeline.events)
+      const firstMedia = events[0]?.mediaId
+      const seen = new Set(events.map((event) => event.mediaId))
+      if (firstMedia) {
+        starts.set(firstMedia, (starts.get(firstMedia) || 0) + 1)
+      }
+      seen.forEach((mediaId) => {
+        involves.set(mediaId, (involves.get(mediaId) || 0) + 1)
+      })
+    })
+    return { starts, involves }
+  }, [allTimelines])
+
+  function mediaStockStatus(stock: MediaStock) {
+    const baseCount = recipeCountsByBaseStock.get(stock.name) || 0
+    const addedCount = recipeCountsByAddedStock.get(stock.name) || 0
+    if (baseCount > 0) {
+      return {
+        role: 'base stock',
+        detail: formatCountLabel(baseCount, 'recipe'),
+        className: 'bg-emerald-50 text-emerald-700',
+      }
+    }
+    if (addedCount > 0) {
+      return {
+        role: 'supplement stock',
+        detail: `used by ${formatCountLabel(addedCount, 'recipe')}`,
+        className: 'bg-amber-50 text-amber-700',
+      }
+    }
+    return {
+      role: 'no recipe',
+      detail: 'not selectable by experiments until a recipe uses it',
+      className: 'bg-slate-100 text-slate-600',
+    }
+  }
+
+  function mediaRecipeStatus(recipe: MediaRecipeRecord) {
+    const conditionCount = conditionCountsByRecipe.get(recipe.media_id) || 0
+    const tfCount = tfCountsByRecipe.get(recipe.media_id) || 0
+    const startsCount = protocolCountsByRecipe.starts.get(recipe.media_id) || 0
+    const involvesCount = protocolCountsByRecipe.involves.get(recipe.media_id) || 0
+    const protocolLabel = startsCount > 0
+      ? `starts ${formatCountLabel(startsCount, 'protocol')}`
+      : involvesCount > 0
+        ? `appears in ${formatCountLabel(involvesCount, 'protocol')}`
+        : 'no protocol'
+    return [
+      conditionCount > 0 ? formatCountLabel(conditionCount, 'condition') : 'recipe only',
+      protocolLabel,
+      tfCount > 0 ? formatCountLabel(tfCount, 'TF rule') : 'no TF rule',
+    ]
+  }
+
   const currentMediaStockName = mediaMode === 'existing'
     ? selectedMediaStockName
     : draftMediaStockName.trim() || 'MY_NEW_MIX'
@@ -747,7 +1029,9 @@ export function EnvironmentBuilderPage() {
   const defaultExistingMediaStockName = useMemo(() => {
     if (!mediaStocks.length) return ''
     const recipeBackedStocks = new Set(allMediaRecipes.map((recipe) => recipe.base_media))
-    return mediaStocks.find((stock) => recipeBackedStocks.has(stock.name))?.name || mediaStocks[0].name
+    return mediaStocks.find((stock) => stock.name === 'MIX0-57')?.name
+      || mediaStocks.find((stock) => recipeBackedStocks.has(stock.name))?.name
+      || mediaStocks[0].name
   }, [allMediaRecipes, mediaStocks])
 
   const stockMediaOptions = useMemo(
@@ -774,6 +1058,8 @@ export function EnvironmentBuilderPage() {
   )
 
   const currentMediaRecipeId = effectiveMediaRecipe?.media_id || ''
+  const selectedStock = mediaStocks.find((stock) => stock.name === selectedMediaStockName) || null
+  const selectedStockStatus = selectedStock ? mediaStockStatus(selectedStock) : null
   const compatibleConditions = useMemo(() => {
     if (!currentMediaRecipeId) return allConditions
     return allConditions.filter((condition) => condition.nutrients === currentMediaRecipeId)
@@ -799,7 +1085,7 @@ export function EnvironmentBuilderPage() {
     ))
   }, [allTfConditions, currentMediaRecipeId])
 
-  const selectedTfRows = compatibleTfConditions.filter((row) => selectedExistingTfKeys.includes(`${row.tf}|${row.active_tf}|${row.active_nutrients}|${row.inactive_nutrients}`))
+  const selectedTfRows = compatibleTfConditions.filter((row) => selectedExistingTfKeys.includes(tfRuleKey(row)))
   const effectiveTfRows: Array<TfConditionRecord | DraftTfConditionRow> = tfConditionMode === 'existing'
     ? selectedTfRows
     : compactRows(draftTfRows, (row) => (
@@ -808,7 +1094,11 @@ export function EnvironmentBuilderPage() {
 
   const compatibleTimelines = useMemo(() => {
     if (!currentMediaRecipeId) return allTimelines
-    return allTimelines.filter((timeline) => firstTimelineMedia(timeline.events) === currentMediaRecipeId)
+    return sortProtocolsForMedia(allTimelines, currentMediaRecipeId).all
+  }, [allTimelines, currentMediaRecipeId])
+  const compatibleTimelineGroups = useMemo(() => {
+    if (!currentMediaRecipeId) return { starts: allTimelines, involves: [] as TimelineRecord[] }
+    return sortProtocolsForMedia(allTimelines, currentMediaRecipeId)
   }, [allTimelines, currentMediaRecipeId])
 
   const selectedExistingTimeline = compatibleTimelines.find((timeline) => timeline.timeline === selectedTimelineId) || null
@@ -870,7 +1160,7 @@ export function EnvironmentBuilderPage() {
 
   useEffect(() => {
     if (tfConditionMode === 'create') return
-    const compatibleKeys = new Set(compatibleTfConditions.map((row) => `${row.tf}|${row.active_tf}|${row.active_nutrients}|${row.inactive_nutrients}`))
+    const compatibleKeys = new Set(compatibleTfConditions.map((row) => tfRuleKey(row)))
     setSelectedExistingTfKeys((current) => {
       const next = current.filter((key) => compatibleKeys.has(key))
       return next.length === current.length ? current : next
@@ -904,6 +1194,83 @@ export function EnvironmentBuilderPage() {
     return Array.from(new Set(ids)).sort()
   }, [builderMediaRecipes])
 
+  const moleculeIdOptions = useMemo(() => (
+    Array.from(new Set(environmentMolecules.map((row) => row.molecule_id).filter(Boolean))).sort()
+  ), [environmentMolecules])
+
+  const ingredientIds = useMemo(() => parseStringArray(draftMediaRecipe.ingredients), [draftMediaRecipe.ingredients])
+
+  const ingredientEditState = useMemo(() => {
+    const weight = parseRecipeEditArray(draftMediaRecipe.ingredients_weight)
+    const counts = parseRecipeEditArray(draftMediaRecipe.ingredients_counts)
+    const volume = parseRecipeEditArray(draftMediaRecipe.ingredients_volume)
+    const formulaWeights = new Map(environmentMolecules.map((row) => [row.molecule_id, row.formula_weight]))
+    const issues: string[] = []
+
+    if (weight.error) issues.push(`Weight edits: ${weight.error}`)
+    if (counts.error) issues.push(`Count edits: ${counts.error}`)
+    if (volume.error) issues.push(`Volume edits: ${volume.error}`)
+
+    if (ingredientIds.length === 0) {
+      if (weight.values.length || counts.values.length || volume.values.length) {
+        issues.push('Ingredient edit arrays should be [] when no ingredients are listed.')
+      }
+    } else {
+      if (weight.values.length === 0 && counts.values.length === 0) {
+        issues.push('Each listed ingredient needs either a weight edit or a count edit. Otherwise recipe generation cannot determine how much to add or remove.')
+      }
+      if (weight.values.length > 0 && weight.values.length !== ingredientIds.length) {
+        issues.push(`Weight edits has ${weight.values.length} value(s), but Ingredients has ${ingredientIds.length}. These arrays must align by position.`)
+      }
+      if (counts.values.length > 0 && counts.values.length !== ingredientIds.length) {
+        issues.push(`Count edits has ${counts.values.length} value(s), but Ingredients has ${ingredientIds.length}. These arrays must align by position.`)
+      }
+      if (volume.values.length > 0 && volume.values.length !== ingredientIds.length) {
+        issues.push(`Volume edits has ${volume.values.length} value(s), but Ingredients has ${ingredientIds.length}. Use [] or one volume per ingredient.`)
+      }
+      if (weight.values.length > 0 && counts.values.length > 0) {
+        issues.push('Both weight and count edits are present. Runtime recipe generation uses weight first for each ingredient and ignores the corresponding count value.')
+      }
+
+      const finiteWeightWithoutFormula = ingredientIds.filter((ingredientId, index) => {
+        const value = weight.values[index]
+        if (!value || value === 'Infinity' || value === '-Infinity') return false
+        const formulaWeight = formulaWeights.get(ingredientId)
+        return !formulaWeight || formulaWeight === 'None'
+      })
+      if (finiteWeightWithoutFormula.length > 0) {
+        issues.push(`Finite gram additions require formula-weight metadata. Missing or unknown for: ${finiteWeightWithoutFormula.join(', ')}.`)
+      }
+    }
+
+    return { weight, counts, volume, issues }
+  }, [draftMediaRecipe.ingredients_counts, draftMediaRecipe.ingredients_volume, draftMediaRecipe.ingredients_weight, environmentMolecules, ingredientIds])
+
+  const stockOptionsByRole = useMemo(() => {
+    const seen = new Set<string>()
+    const all = stockMediaOptions.map((name) => {
+      const stock = mediaStocks.find((item) => item.name === name)
+      const status = stock ? mediaStockStatus(stock) : { role: 'draft stock', detail: 'current draft', className: 'bg-slate-100 text-slate-600' }
+      seen.add(name)
+      return { name, status }
+    })
+    if (currentMediaStockName && !seen.has(currentMediaStockName)) {
+      all.push({
+        name: currentMediaStockName,
+        status: { role: 'draft stock', detail: 'current draft', className: 'bg-slate-100 text-slate-600' },
+      })
+    }
+    return {
+      supplement: all.filter((item) => item.status.role === 'supplement stock'),
+      base: all.filter((item) => item.status.role === 'base stock'),
+      other: all.filter((item) => item.status.role !== 'supplement stock' && item.status.role !== 'base stock'),
+    }
+  }, [currentMediaStockName, mediaStocks, recipeCountsByAddedStock, recipeCountsByBaseStock, stockMediaOptions])
+
+  const tfGeneSuggestions = useMemo(() => (
+    Array.from(new Set(allTfConditions.map((row) => row.tf).filter(Boolean))).sort()
+  ), [allTfConditions])
+
   const tfComplexSuggestions = useMemo(() => {
     const ids = new Set<string>()
     allTfConditions.forEach((row) => {
@@ -912,42 +1279,88 @@ export function EnvironmentBuilderPage() {
     return Array.from(ids).sort()
   }, [allTfConditions])
 
+  const stateIdSuggestions = useMemo(() => {
+    const ids = new Set<string>()
+    allConditions.forEach((condition) => {
+      jsonObjectKeys(condition.genotype_perturbations).forEach((key) => ids.add(key))
+    })
+    allTfConditions.forEach((row) => {
+      jsonObjectKeys(row.active_genotype_perturbations).forEach((key) => ids.add(key))
+      jsonObjectKeys(row.inactive_genotype_perturbations).forEach((key) => ids.add(key))
+    })
+    return Array.from(ids).sort()
+  }, [allConditions, allTfConditions])
+
+  function tfConditionStatus(row: TfConditionRecord) {
+    const isActiveInCurrentRecipe = row.active_nutrients === currentMediaRecipeId
+    const isInactiveInCurrentRecipe = row.inactive_nutrients === currentMediaRecipeId
+    const conditionListsActive = conditionActiveTfSet.has(row.active_tf)
+    const conditionListsInactive = conditionInactiveTfSet.has(row.active_tf)
+
+    if (isActiveInCurrentRecipe && conditionListsActive) {
+      return { label: 'condition-listed active', className: 'bg-emerald-50 text-emerald-700' }
+    }
+    if (isInactiveInCurrentRecipe && conditionListsInactive) {
+      return { label: 'condition-listed inactive', className: 'bg-rose-50 text-rose-700' }
+    }
+    if (conditionListsActive || conditionListsInactive) {
+      return { label: 'condition lists different state', className: 'bg-amber-50 text-amber-700' }
+    }
+    return { label: 'rule available; condition list silent', className: 'bg-slate-100 text-slate-600' }
+  }
+
   const catalogStats = [
-    { label: 'Growth media', value: mediaStocks.length, description: 'Files under condition/media/*.tsv' },
+    { label: 'Medium stocks', value: mediaStocks.length, description: 'Files under condition/media/*.tsv' },
     { label: 'Environment molecules', value: environmentMolecules.length, description: 'Rows in environment_molecules.tsv' },
-    { label: 'Media formulations', value: allMediaRecipes.length, description: 'Rows in media_recipes.tsv' },
+    { label: 'Media recipes', value: allMediaRecipes.length, description: 'Rows in media_recipes.tsv' },
     { label: 'Growth conditions', value: allConditions.length, description: 'Rows in condition_defs.tsv' },
-    { label: 'TF activation rules', value: allTfConditions.length, description: 'Rows in tf_condition.tsv' },
-    { label: 'Media shift schedules', value: allTimelines.length, description: 'Rows in timelines_def.tsv' },
+    { label: 'TF state rules', value: allTfConditions.length, description: 'Rows in tf_condition.tsv' },
+    { label: 'Media protocols', value: allTimelines.length, description: 'Rows in timelines_def.tsv' },
   ]
 
   const compatibilityWarnings = useMemo(() => {
     const warnings: string[] = []
     if (!currentMediaRecipeId) {
-      warnings.push('Choose or create a compatible media formulation before growth conditions, TF activation rules, or media shift schedules.')
+      const stock = mediaStocks.find((row) => row.name === currentMediaStockName)
+      const addedCount = stock ? recipeCountsByAddedStock.get(stock.name) || 0 : 0
+      if (stock && addedCount > 0) {
+        warnings.push('The selected medium stock is used as a supplement. Choose a base stock such as MIX0-57, or create a media recipe that uses this stock.')
+      } else if (stock) {
+        warnings.push('The selected medium stock has no media recipe yet. Create a recipe before adding growth conditions, TF state rules, or media protocols.')
+      } else {
+        warnings.push('Choose or create a compatible media recipe before growth conditions, TF state rules, or media protocols.')
+      }
+    }
+    if (currentMediaRecipeId && compatibleConditions.length === 0) {
+      warnings.push('This media recipe exists, but no growth condition currently names it. It can still be used as a recipe or protocol target.')
     }
     if (conditionMode === 'create' && currentMediaRecipeId && effectiveCondition?.nutrients !== currentMediaRecipeId) {
-      warnings.push('The draft growth condition nutrients should match the current media formulation to stay compatible.')
+      warnings.push('The draft growth condition nutrients should match the current media recipe to stay compatible.')
     }
     if (tfConditionMode === 'create' && currentMediaRecipeId) {
       const invalidTfDraft = effectiveTfRows.some((row) => (
         row.active_nutrients !== currentMediaRecipeId && row.inactive_nutrients !== currentMediaRecipeId
       ))
       if (invalidTfDraft) {
-        warnings.push('Each draft TF activation rule should reference the current media formulation in either active or inactive nutrients.')
+        warnings.push('Each draft TF state rule should reference the current media recipe in either active or inactive nutrients.')
       }
     }
-    if (currentMediaRecipeId && firstTimelineMedia(effectiveTimelineEvents) !== currentMediaRecipeId) {
-      warnings.push('The media shift schedule should start from the current media formulation.')
+    if (timelineMode === 'create' && currentMediaRecipeId && firstTimelineMedia(effectiveTimelineEvents) !== currentMediaRecipeId) {
+      warnings.push('The media protocol should start from the current media recipe.')
     }
     return warnings
   }, [
+    compatibleConditions.length,
     conditionMode,
+    currentMediaStockName,
     currentMediaRecipeId,
     effectiveCondition,
     effectiveTfRows,
     effectiveTimelineEvents,
+    mediaStocks,
+    recipeCountsByAddedStock,
     tfConditionMode,
+    timelineMode,
   ])
 
   const sectionSnapshots = useMemo<Record<SaveSectionKey, string>>(() => ({
@@ -1057,7 +1470,7 @@ export function EnvironmentBuilderPage() {
     const conditionDraft = drafts.condition?.payload
     if (conditionDraft) {
       const mode = conditionDraft.mode === 'existing' ? 'existing' : 'create'
-      setConditionMode(mode)
+      if (mode === 'existing') setConditionMode('existing')
       setSelectedConditionName(String(conditionDraft.selected || ''))
       if (conditionDraft.draft && typeof conditionDraft.draft === 'object') {
         const nextDraft = conditionDraft.draft as Partial<ConditionRecord>
@@ -1100,7 +1513,7 @@ export function EnvironmentBuilderPage() {
     const timelineDraft = drafts.timeline?.payload
     if (timelineDraft) {
       const mode = timelineDraft.mode === 'existing' ? 'existing' : 'create'
-      setTimelineMode(mode)
+      if (mode === 'existing') setTimelineMode('existing')
       setSelectedTimelineId(String(timelineDraft.selected || ''))
       setDraftTimelineName(String(timelineDraft.name || draftTimelineName))
       setDraftTimelineEvents(String(timelineDraft.events || ''))
@@ -1178,6 +1591,9 @@ export function EnvironmentBuilderPage() {
     setPendingPublishDraft(null)
     setActionMessage(null)
     try {
+      if (section === 'mediaRecipe' && ingredientEditState.issues.length > 0) {
+        throw new Error('Fix the ingredient edit warnings before publishing this media recipe.')
+      }
       const draft = !builderDrafts[section] || isDirty(section)
         ? await persistSectionDraft(section, { quiet: true })
         : builderDrafts[section]
@@ -1262,6 +1678,63 @@ export function EnvironmentBuilderPage() {
 
   function removeMediaRow(id: string) {
     setDraftMediaRows((current) => current.filter((row) => row.id !== id))
+  }
+
+  function addIngredientToRecipe(ingredientId = selectedIngredientId) {
+    if (!ingredientId) return
+    setDraftMediaRecipe((current) => {
+      const nextIngredients = addToJsonArray(current.ingredients, ingredientId)
+      if (nextIngredients === current.ingredients) return current
+      const weight = parseRecipeEditArray(current.ingredients_weight)
+      const counts = parseRecipeEditArray(current.ingredients_counts)
+      const shouldExtendWeight = !weight.error && weight.values.length > 0 && counts.values.length === 0
+      return {
+        ...current,
+        ingredients: nextIngredients,
+        ingredients_weight: shouldExtendWeight ? addToRecipeEditArray(current.ingredients_weight, 'Infinity') : current.ingredients_weight,
+        ingredients_counts: shouldExtendWeight ? current.ingredients_counts : addToRecipeEditArray(current.ingredients_counts, 'Infinity'),
+      }
+    })
+    setSelectedIngredientId('')
+  }
+
+  function removeIngredientFromRecipe(index: number) {
+    setDraftMediaRecipe((current) => ({
+      ...current,
+      ingredients: removeJsonArrayIndex(current.ingredients, index),
+      ingredients_weight: removeJsonArrayIndex(current.ingredients_weight, index),
+      ingredients_counts: removeJsonArrayIndex(current.ingredients_counts, index),
+      ingredients_volume: removeJsonArrayIndex(current.ingredients_volume, index),
+    }))
+  }
+
+  function addConditionTf(field: 'active_tfs' | 'inactive_tfs', complexId: string) {
+    if (!complexId) return
+    setDraftCondition((current) => ({
+      ...current,
+      [field]: addToJsonArray(current[field], complexId),
+    }))
+    if (field === 'active_tfs') {
+      setSelectedConditionActiveTfId('')
+    } else {
+      setSelectedConditionInactiveTfId('')
+    }
+  }
+
+  function removeConditionTf(field: 'active_tfs' | 'inactive_tfs', index: number) {
+    setDraftCondition((current) => ({
+      ...current,
+      [field]: removeJsonArrayIndex(current[field], index),
+    }))
+  }
+
+  function addConditionStatePerturbation(stateId = selectedConditionStateId) {
+    if (!stateId) return
+    setDraftCondition((current) => ({
+      ...current,
+      genotype_perturbations: upsertJsonObjectValue(current.genotype_perturbations, stateId, 0),
+    }))
+    setSelectedConditionStateId('')
   }
 
   function addEnvironmentRowFromExisting(row: EnvironmentMolecule) {
@@ -1356,7 +1829,7 @@ export function EnvironmentBuilderPage() {
     setConditionMode('create')
   }
 
-  const dependencyLevelGuide = 'Work from upstream chemistry to downstream experiment setup. Reuse catalog entries when they already match your experiment, and only use the exchange molecule registry when you introduce a brand-new molecule ID.'
+  const dependencyLevelGuide = 'Answer five questions in order. Each answer becomes the input for the next step: stock, recipe, condition, TF state rules, then protocol.'
 
   const currentMediumReference = currentMediaStockName || draftMediaStockName || effectiveMediaRecipe?.base_media || 'MIX0-57'
   const currentFormulationReference = effectiveMediaRecipe?.media_id || currentMediaRecipeId || 'minimal'
@@ -1370,10 +1843,18 @@ export function EnvironmentBuilderPage() {
   const dependencyMappings: Record<DependencyStepId, string[]> = {
     media: [`base medium = ${currentMediumReference}`],
     environment: [`new ID = ${currentEnvironmentReference}`],
-    mediaRecipe: [`${currentFormulationReference} -> nutrients`, `${currentFormulationReference} -> first event`],
+    mediaRecipe: [`recipe = ${currentFormulationReference}`, `protocol start = ${currentFormulationReference}`],
     condition: [`condition = ${currentConditionReference}`, `nutrients = ${effectiveCondition?.nutrients || currentFormulationReference}`],
     tfCondition: [`TF nutrients = ${currentTfReference}`],
     timeline: [`start = 0 ${currentScheduleStartReference}`],
+  }
+  const dependencyAnswers: Record<DependencyStepId, string> = {
+    media: currentMediumReference,
+    environment: currentEnvironmentReference,
+    mediaRecipe: currentFormulationReference,
+    condition: currentConditionReference,
+    tfCondition: effectiveTfRows.length > 0 ? `${effectiveTfRows.length} rule${effectiveTfRows.length === 1 ? '' : 's'}` : 'no rule selected',
+    timeline: currentScheduleStartReference,
   }
   const sectionSummaries = getSectionSummaries({
     mediaMode,
@@ -1384,6 +1865,7 @@ export function EnvironmentBuilderPage() {
     effectiveCondition,
     effectiveTfRows,
     effectiveTimelineName,
+    effectiveTimelineEvents,
     currentScheduleStartReference,
   })
 
@@ -1442,8 +1924,8 @@ export function EnvironmentBuilderPage() {
       <SectionCard
         sectionId="media"
         highlighted={highlightedSection === 'media'}
-        title="1. Growth Media"
-        subtitle="Choose an existing growth medium file or draft a new one, then list any exchange molecules it needs."
+        title="1. What raw medium stock am I starting from?"
+        subtitle="Choose the molecule and concentration table that a recipe will point to."
         collapsible
         collapsed={collapsedSections.media}
         onToggleCollapse={() => toggleSection('media')}
@@ -1456,21 +1938,33 @@ export function EnvironmentBuilderPage() {
             <label className="block">
               <FieldLabel
                 label="Stock medium"
-                tooltip="Growth medium names come from files under condition/media. They are usually uppercase names such as MIX0-57 or MIX0-844."
+                tooltip="Medium stock names come from files under condition/media. They are usually uppercase names such as MIX0-57 or MIX0-844."
               />
               <select
                 value={selectedMediaStockName}
                 onChange={(event) => setSelectedMediaStockName(event.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               >
-                {mediaStocks.map((stock) => (
-                  <option key={stock.name} value={stock.name}>{stock.name}</option>
-                ))}
+                {mediaStocks.map((stock) => {
+                  const status = mediaStockStatus(stock)
+                  return (
+                    <option key={stock.name} value={stock.name}>
+                      {stock.name} - {status.role} · {status.detail}
+                    </option>
+                  )
+                })}
               </select>
             </label>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-slate-900">Selected medium summary</p>
+                <div>
+                  <p className="text-sm font-medium text-slate-900">Selected stock summary</p>
+                  {selectedStockStatus && (
+                    <span className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${selectedStockStatus.className}`}>
+                      {selectedStockStatus.role}: {selectedStockStatus.detail}
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={forkMediaStock}
@@ -1492,9 +1986,13 @@ export function EnvironmentBuilderPage() {
           </div>
         ) : (
           <div className="mt-4 space-y-5">
+            <div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+              <p className="font-medium text-cyan-950">Create a raw stock only when the reconstruction does not already contain the extracellular mixture you need.</p>
+              <p className="mt-1 leading-6">Each row is one molecule available outside the cell. Use exact molecule IDs from the registry below; finite concentrations constrain availability, while <span className="font-mono">Infinity</span> means unconstrained supply.</p>
+            </div>
             <label className="block">
               <FieldLabel
-                label="New growth medium name"
+                label="New medium stock name"
                 tooltip="Use the file stem only, without .tsv. Repo convention here is usually uppercase names such as MY_NEW_MIX."
               />
               <input
@@ -1508,11 +2006,12 @@ export function EnvironmentBuilderPage() {
                 placeholder="MY_NEW_MIX"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">This creates a raw stock file under <span className="font-mono">condition/media</span>. It is not experiment-selectable until a media recipe uses it.</p>
             </label>
 
             <div>
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-slate-900">Growth medium composition</p>
+                <p className="text-sm font-medium text-slate-900">Stock composition</p>
                 <button
                   type="button"
                   onClick={addMediaRow}
@@ -1526,11 +2025,17 @@ export function EnvironmentBuilderPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Concentration (mmol/L)</p>
                 <span />
               </div>
+              <datalist id="environment-molecule-options">
+                {moleculeIdOptions.map((moleculeId) => (
+                  <option key={moleculeId} value={moleculeId} />
+                ))}
+              </datalist>
               <div className="mt-1 space-y-3">
                 {draftMediaRows.map((row) => (
-                  <div key={row.id} className="grid gap-3 md:grid-cols-[1fr,180px,auto]">
+                  <div key={row.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr),180px,auto]">
                     <input
                       type="text"
+                      list="environment-molecule-options"
                       value={row.molecule_id}
                       onChange={(event) => updateMediaRow(row.id, 'molecule_id', event.target.value)}
                       placeholder="MY_CARBON_SRC"
@@ -1561,10 +2066,10 @@ export function EnvironmentBuilderPage() {
             <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <summary className="cursor-pointer text-sm font-medium text-slate-900">Exchange molecule registry</summary>
               <p className="mt-2 text-sm text-slate-500">
-                Available as in reconstruction `condition/environment_molecules.tsv`. Add existing molecules to the draft or define new ones.
+                Use this only for molecule IDs missing from the reconstruction registry. Existing catalog molecules can be added directly to the stock.
               </p>
-              <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
-                <div>
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(210px,0.75fr),minmax(0,1.25fr)]">
+                <div className="min-w-0">
                   <SearchInput
                     value={environmentSearch}
                     onChange={setEnvironmentSearch}
@@ -1585,7 +2090,7 @@ export function EnvironmentBuilderPage() {
                   </div>
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium text-slate-900">Draft registry rows</p>
                     <button
@@ -1597,7 +2102,7 @@ export function EnvironmentBuilderPage() {
                     </button>
                   </div>
                   <div className="mt-3 space-y-3">
-                    <div className="hidden gap-3 md:grid" style={{ gridTemplateColumns: '1fr 110px 130px auto' }}>
+                    <div className="hidden gap-3 xl:grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 96px 120px auto' }}>
                       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Molecule ID</p>
                       <div className="flex items-center gap-1">
                         <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Location</p>
@@ -1610,9 +2115,10 @@ export function EnvironmentBuilderPage() {
                       <span />
                     </div>
                     {draftEnvironmentRows.map((row) => (
-                      <div key={row.id} className="grid gap-3 md:grid-cols-[1fr,110px,130px,auto]">
+                      <div key={row.id} className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr),96px,120px,auto]">
                         <input
                           type="text"
+                          list="environment-molecule-options"
                           value={row.molecule_id}
                           onChange={(event) => updateEnvironmentRow(row.id, 'molecule_id', event.target.value)}
                           className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -1635,7 +2141,7 @@ export function EnvironmentBuilderPage() {
                         <button
                           type="button"
                           onClick={() => removeEnvironmentRow(row.id)}
-                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
+                          className="self-start rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
                         >
                           Remove
                         </button>
@@ -1656,8 +2162,8 @@ export function EnvironmentBuilderPage() {
       <SectionCard
         sectionId="mediaRecipe"
         highlighted={highlightedSection === 'mediaRecipe'}
-        title="2. Media Formulations"
-        subtitle="Define or choose a named media formulation. Existing options are filtered so they stay compatible with the growth media step above."
+        title="2. How should this media recipe be assembled for experiments?"
+        subtitle="Choose or create the operation that turns raw stocks and ingredient edits into a recipe ID."
         collapsible
         collapsed={collapsedSections.mediaRecipe}
         onToggleCollapse={() => toggleSection('mediaRecipe')}
@@ -1668,23 +2174,25 @@ export function EnvironmentBuilderPage() {
         {mediaRecipeMode === 'existing' ? (
           <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
             <label className="block">
-              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Compatible formulations</span>
+              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Compatible recipes</span>
               <select
                 value={selectedMediaRecipeId}
                 onChange={(event) => setSelectedMediaRecipeId(event.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               >
                 {compatibleMediaRecipes.map((recipe) => (
-                  <option key={recipe.media_id} value={recipe.media_id}>{recipe.media_id}</option>
+                  <option key={recipe.media_id} value={recipe.media_id}>
+                    {recipe.media_id} - {mediaRecipeStatus(recipe).join(' · ')}
+                  </option>
                 ))}
               </select>
               <p className="mt-2 text-xs text-slate-500">
-                Existing formulations are filtered so `base media` matches the current growth media selection.
+                Existing recipes are filtered so their base medium matches the selected medium stock. Supplement-only stocks will not show recipes until they are used through a base recipe.
               </p>
             </label>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
               <div className="flex items-center justify-between gap-3">
-                <p className="font-medium text-slate-900">Formulation summary</p>
+                <p className="font-medium text-slate-900">Recipe summary</p>
                 <button
                   type="button"
                   onClick={forkMediaRecipe}
@@ -1695,22 +2203,36 @@ export function EnvironmentBuilderPage() {
                 </button>
               </div>
               {selectedExistingMediaRecipe ? (
-                <dl className="mt-3 grid gap-2">
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Base media</dt><dd className="font-mono text-slate-900">{selectedExistingMediaRecipe.base_media}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Added media</dt><dd className="font-mono text-slate-900">{selectedExistingMediaRecipe.added_media || 'None'}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Ingredients</dt><dd className="break-words font-mono text-slate-900">{selectedExistingMediaRecipe.ingredients}</dd></div>
-                </dl>
+                <>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {mediaRecipeStatus(selectedExistingMediaRecipe).map((status) => (
+                      <span key={status} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+                        {status}
+                      </span>
+                    ))}
+                  </div>
+                  <dl className="mt-3 grid gap-2">
+                    <div><dt className="text-xs uppercase tracking-wide text-slate-500">Base stock</dt><dd className="font-mono text-slate-900">{selectedExistingMediaRecipe.base_media}</dd></div>
+                    <div><dt className="text-xs uppercase tracking-wide text-slate-500">Added stock</dt><dd className="font-mono text-slate-900">{selectedExistingMediaRecipe.added_media || 'None'}</dd></div>
+                    <div><dt className="text-xs uppercase tracking-wide text-slate-500">Ingredients</dt><dd className="break-words font-mono text-slate-900">{selectedExistingMediaRecipe.ingredients}</dd></div>
+                  </dl>
+                </>
               ) : (
-                <p className="mt-3">No compatible media formulation is currently available for the selected growth medium.</p>
+                <p className="mt-3">No compatible media recipe is currently available for the selected medium stock.</p>
               )}
             </div>
           </div>
         ) : (
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 space-y-4">
+            <div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+              <p className="font-medium text-cyan-950">A media recipe is an assembly operation, not just a name.</p>
+              <p className="mt-1 leading-6">Start from one base stock, optionally mix in a supplement stock, then add or remove specific ingredients. The recipe ID is what growth conditions, media protocols, and experiments reference.</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
               <FieldLabel
-                label="Formulation ID"
-                tooltip="Use lowercase snake_case for named formulation IDs, for example minimal_acetate or my_new_media. This is the name used later in growth conditions and media shift schedules."
+                label="Recipe ID"
+                tooltip="Use lowercase snake_case for named recipe IDs, for example minimal_acetate or my_new_media."
               />
               <input
                 type="text"
@@ -1718,30 +2240,54 @@ export function EnvironmentBuilderPage() {
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, media_id: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">This is the stable ID users will later select in condition and protocol fields.</p>
             </label>
             <label className="block">
               <FieldLabel
                 label="Base medium"
-                tooltip="This should match a stock growth medium file name such as MIX0-57 or MY_NEW_MIX."
+                tooltip="This should match a medium stock file name such as MIX0-57 or MY_NEW_MIX."
               />
               <select
                 value={draftMediaRecipe.base_media}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, base_media: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               >
-                {stockMediaOptions.map((name) => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
+                {!!stockOptionsByRole.base.length && (
+                  <optgroup label="Base stocks">
+                    {stockOptionsByRole.base.map(({ name, status }) => (
+                      <option key={name} value={name}>{name} - {status.detail}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {!!stockOptionsByRole.supplement.length && (
+                  <optgroup label="Supplement stocks">
+                    {stockOptionsByRole.supplement.map(({ name, status }) => (
+                      <option key={name} value={name}>{name} - {status.detail}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {!!stockOptionsByRole.other.length && (
+                  <optgroup label="Other or draft stocks">
+                    {stockOptionsByRole.other.map(({ name, status }) => (
+                      <option key={name} value={name}>{name} - {status.role}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Use the stock that supplies the main extracellular composition.</p>
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Base medium volume (units.L)</span>
+              <FieldLabel
+                label="Base medium volume (L)"
+                tooltip="Relative mixing volume for the base stock. Use 1.0 when this recipe uses only the base stock."
+              />
               <input
                 type="text"
                 value={draftMediaRecipe.base_media_volume}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, base_media_volume: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">For a mixed recipe, this is the base stock fraction or volume used in the recipe.</p>
             </label>
             <label className="block">
               <FieldLabel
@@ -1754,36 +2300,117 @@ export function EnvironmentBuilderPage() {
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               >
                 <option value="">None</option>
-                {stockMediaOptions.map((name) => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
+                {!!stockOptionsByRole.supplement.length && (
+                  <optgroup label="Supplement stocks">
+                    {stockOptionsByRole.supplement.map(({ name, status }) => (
+                      <option key={name} value={name}>{name} - {status.detail}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {!!stockOptionsByRole.base.length && (
+                  <optgroup label="Base stocks, valid but uncommon as mix-ins">
+                    {stockOptionsByRole.base.map(({ name, status }) => (
+                      <option key={name} value={name}>{name} - {status.detail}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {!!stockOptionsByRole.other.length && (
+                  <optgroup label="Other or draft stocks">
+                    {stockOptionsByRole.other.map(({ name, status }) => (
+                      <option key={name} value={name}>{name} - {status.role}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Use this for supplement stocks such as amino-acid mixes. Base stocks are model-valid mix-ins, but uncommon and should be used deliberately.</p>
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Added medium volume (units.L)</span>
+              <FieldLabel
+                label="Added medium volume (L)"
+                tooltip="Relative mixing volume for the added stock. Use 0 when no added stock is selected."
+              />
               <input
                 type="text"
                 value={draftMediaRecipe.added_media_volume}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, added_media_volume: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">For example, amino-acid medium uses base volume <span className="font-mono">0.8</span> and supplement volume <span className="font-mono">0.2</span>.</p>
             </label>
             <label className="block md:col-span-2">
               <FieldLabel
                 label="Ingredients"
-                tooltip={'Write ingredients as a JSON-style list of molecule IDs, for example ["MY_CARBON_SRC", "FDFD"]. Use the exact molecule IDs that appear in environment_molecules.tsv.'}
+                tooltip={'Write ingredients as a JSON-style list of molecule IDs, for example ["GLC"] or ["OXYGEN-MOLECULE"].'}
               />
+              <div className="mb-2 grid gap-2 md:grid-cols-[minmax(0,1fr),auto]">
+                <select
+                  value={selectedIngredientId}
+                  onChange={(event) => setSelectedIngredientId(event.target.value)}
+                  className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                >
+                  <option value="">Choose a catalog molecule...</option>
+                  {moleculeIdOptions.map((moleculeId) => (
+                    <option key={moleculeId} value={moleculeId}>{moleculeId}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => addIngredientToRecipe()}
+                  disabled={!selectedIngredientId}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40"
+                >
+                  Add ingredient
+                </button>
+              </div>
+              {ingredientIds.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {ingredientIds.map((ingredientId, index) => (
+                    <button
+                      key={`${ingredientId}-${index}`}
+                      type="button"
+                      onClick={() => removeIngredientFromRecipe(index)}
+                      className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-medium text-cyan-800 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                      title="Remove ingredient from the encoded ingredient arrays"
+                    >
+                      {ingredientId} x
+                    </button>
+                  ))}
+                </div>
+              )}
               <textarea
                 value={draftMediaRecipe.ingredients}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, ingredients: event.target.value }))}
                 rows={2}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">Use exact molecule IDs. Leave <span className="font-mono">[]</span> when the base/added stocks already define the recipe.</p>
             </label>
+            <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <p className="font-medium text-slate-900">Ingredient edits are position-matched arrays.</p>
+              <p className="mt-1 leading-6">
+                The first value in each edit array applies to the first ingredient, the second value to the second ingredient, and so on.
+                Use either weight edits or count edits to define the amount. Runtime recipe generation uses weight first if both are present.
+              </p>
+              <div className="mt-2 grid gap-2 text-xs leading-5 md:grid-cols-3">
+                <p><span className="font-mono">Infinity</span> means unconstrained availability.</p>
+                <p><span className="font-mono">-Infinity</span> forces the ingredient concentration to zero.</p>
+                <p>Volume edits change the final mixed volume and dilute the resulting medium.</p>
+              </div>
+              {ingredientEditState.issues.length > 0 && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                  <p className="font-medium">Check ingredient edits before publishing</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    {ingredientEditState.issues.map((issue) => (
+                      <li key={issue}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
             <label className="block">
               <FieldLabel
-                label="Ingredients weight (units.g)"
-                tooltip="Write this as a JSON-style list aligned with Ingredients, for example [Infinity] or [-Infinity, Infinity]."
+                label="Ingredient weight edits (g)"
+                tooltip="Model-style bracketed list aligned with Ingredients. Use numbers, Infinity, or -Infinity."
               />
               <textarea
                 value={draftMediaRecipe.ingredients_weight}
@@ -1791,11 +2418,15 @@ export function EnvironmentBuilderPage() {
                 rows={2}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Valid examples: <span className="font-mono">[]</span>, <span className="font-mono">[Infinity]</span>, <span className="font-mono">[-Infinity]</span>, or <span className="font-mono">[0.01]</span>.
+                Finite gram values require formula-weight metadata.
+              </p>
             </label>
             <label className="block">
               <FieldLabel
-                label="Ingredients counts (units.mmol)"
-                tooltip="Write this as a JSON-style list aligned with Ingredients, for example [Infinity]."
+                label="Ingredient count edits (mmol)"
+                tooltip="Model-style bracketed list aligned with Ingredients. Use this for mmol additions/removals when weight is not appropriate."
               />
               <textarea
                 value={draftMediaRecipe.ingredients_counts}
@@ -1803,11 +2434,15 @@ export function EnvironmentBuilderPage() {
                 rows={2}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Valid examples: <span className="font-mono">[]</span>, <span className="font-mono">[Infinity]</span>, <span className="font-mono">[-Infinity]</span>, or <span className="font-mono">[0.2]</span>.
+                Use this when adding a finite amount in mmol or when formula weight is unknown.
+              </p>
             </label>
             <label className="block md:col-span-2">
               <FieldLabel
-                label="Ingredients volume (units.L)"
-                tooltip="Write this as a JSON-style list aligned with Ingredients, for example [] or [0.2]."
+                label="Ingredient volume edits (L)"
+                tooltip="Model-style bracketed list aligned with Ingredients. Use [] for zero added volume, or one volume value per ingredient."
               />
               <textarea
                 value={draftMediaRecipe.ingredients_volume}
@@ -1815,7 +2450,12 @@ export function EnvironmentBuilderPage() {
                 rows={2}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Usually <span className="font-mono">[]</span>, which the model treats as zero added volume for each ingredient.
+                Use values such as <span className="font-mono">[0.025]</span> only when the ingredient addition has a real liquid volume.
+              </p>
             </label>
+            </div>
           </div>
         )}
       </SectionCard>
@@ -1827,8 +2467,8 @@ export function EnvironmentBuilderPage() {
       <SectionCard
         sectionId="condition"
         highlighted={highlightedSection === 'condition'}
-        title="3. Growth Conditions"
-        subtitle="Choose an existing growth condition that fits the selected media formulation, or draft a full condition_defs row."
+        title="3. What biological growth condition should this recipe represent?"
+        subtitle="Choose or create the condition name that appears in experiment condition dropdowns."
         collapsible
         collapsed={collapsedSections.condition}
         onToggleCollapse={() => toggleSection('condition')}
@@ -1850,7 +2490,7 @@ export function EnvironmentBuilderPage() {
                 ))}
               </select>
               <p className="mt-2 text-xs text-slate-500">
-                Existing growth conditions are filtered so `nutrients` matches the current media formulation.
+                Existing growth conditions are filtered so their nutrients field matches the current media recipe.
               </p>
             </label>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
@@ -1872,12 +2512,17 @@ export function EnvironmentBuilderPage() {
                   <div><dt className="text-xs uppercase tracking-wide text-slate-500">Active TFs</dt><dd className="break-words font-mono text-slate-900">{selectedExistingCondition.active_tfs}</dd></div>
                 </dl>
               ) : (
-                <p className="mt-3">No compatible growth condition is available for the current media formulation.</p>
+                <p className="mt-3">No compatible growth condition is available for the current media recipe.</p>
               )}
             </div>
           </div>
         ) : (
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 space-y-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-medium text-amber-950">Create a growth condition only when you can justify the biological metadata.</p>
+              <p className="mt-1 leading-6">The doubling time and TF lists are prior reconstruction metadata, not outputs calculated by this form. If they are unknown, reuse or fork the closest existing condition and edit only what is defensible.</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
               <FieldLabel
                 label="Growth condition name"
@@ -1889,11 +2534,12 @@ export function EnvironmentBuilderPage() {
                 onChange={(event) => setDraftCondition((current) => ({ ...current, condition: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">This name appears in experiment condition dropdowns after publish.</p>
             </label>
             <label className="block">
               <FieldLabel
-                label="Nutrients / formulation ID"
-                tooltip="This should match the formulation ID used by the growth condition, usually the media formulation selected above."
+                label="Nutrients / recipe ID"
+                tooltip="This should match the media recipe ID used by the growth condition, usually the recipe selected above."
               />
               <select
                 value={draftCondition.nutrients}
@@ -1904,11 +2550,12 @@ export function EnvironmentBuilderPage() {
                   <option key={mediaId} value={mediaId}>{mediaId}</option>
                 ))}
               </select>
+              <p className="mt-1 text-xs leading-5 text-slate-500">This should be the media recipe whose biological context you are defining.</p>
             </label>
             <label className="block">
               <FieldLabel
                 label="Doubling time (min)"
-                tooltip="Measured or expected doubling time in minutes under this condition. 44 min is a typical value for minimal glucose medium."
+                tooltip="Measured or literature-supported expected doubling time in minutes. This is catalog metadata, not inferred by the builder."
               />
               <input
                 type="text"
@@ -1916,43 +2563,138 @@ export function EnvironmentBuilderPage() {
                 onChange={(event) => setDraftCondition((current) => ({ ...current, doubling_time: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">Use a measured or literature-supported value. For basal minimal glucose, the catalog uses <span className="font-mono">44.0</span> min.</p>
             </label>
             <label className="block md:col-span-2">
               <FieldLabel
                 label="Genotype perturbations"
-                tooltip={'Write this as a JSON-style object, for example {} or {"EG10325_RNA": 0}.'}
+                tooltip={'JSON-style object mapping model state IDs to forced values. Use {} for no genotype perturbation.'}
               />
+              {stateIdSuggestions.length > 0 && (
+                <div className="mb-2 grid gap-2 md:grid-cols-[minmax(0,1fr),auto]">
+                  <select
+                    value={selectedConditionStateId}
+                    onChange={(event) => setSelectedConditionStateId(event.target.value)}
+                    className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                  >
+                    <option value="">Choose a known state ID...</option>
+                    {stateIdSuggestions.map((stateId) => (
+                      <option key={stateId} value={stateId}>{stateId}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => addConditionStatePerturbation()}
+                    disabled={!selectedConditionStateId}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40"
+                  >
+                    Force to 0
+                  </button>
+                </div>
+              )}
               <textarea
                 value={draftCondition.genotype_perturbations}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, genotype_perturbations: event.target.value }))}
                 rows={2}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500"><span className="font-mono">{'{}'}</span> means no genotype perturbation. Example: <span className="font-mono">{'{"EG10325_RNA": 0}'}</span> forces that RNA state to zero.</p>
             </label>
             <label className="block">
               <FieldLabel
                 label="Active TF complexes"
-                tooltip={'Write this as a JSON-style list of TF complex IDs, for example ["CPLX0-226"].'}
+                tooltip={'JSON-style list of TF complex IDs that are active relative to basal, for example ["CPLX0-226"]. Use [] when none are specified.'}
               />
+              <div className="mb-2 grid gap-2 md:grid-cols-[minmax(0,1fr),auto]">
+                <select
+                  value={selectedConditionActiveTfId}
+                  onChange={(event) => setSelectedConditionActiveTfId(event.target.value)}
+                  className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                >
+                  <option value="">Choose TF complex...</option>
+                  {tfComplexSuggestions.map((complexId) => (
+                    <option key={complexId} value={complexId}>{complexId}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => addConditionTf('active_tfs', selectedConditionActiveTfId)}
+                  disabled={!selectedConditionActiveTfId}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+              {parseStringArray(draftCondition.active_tfs).length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {parseStringArray(draftCondition.active_tfs).map((complexId, index) => (
+                    <button
+                      key={`${complexId}-${index}`}
+                      type="button"
+                      onClick={() => removeConditionTf('active_tfs', index)}
+                      className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                    >
+                      {complexId} x
+                    </button>
+                  ))}
+                </div>
+              )}
               <textarea
                 value={draftCondition.active_tfs}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, active_tfs: event.target.value }))}
                 rows={3}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">List only TF complexes that this condition turns on relative to basal. Use <span className="font-mono">[]</span> for none.</p>
             </label>
             <label className="block">
               <FieldLabel
                 label="Inactive TF complexes"
-                tooltip={'Write this as a JSON-style list of TF complex IDs, for example ["CPLX0-7669"].'}
+                tooltip={'JSON-style list of TF complex IDs that are inactive relative to basal, for example ["CPLX0-7669"]. Use [] when none are specified.'}
               />
+              <div className="mb-2 grid gap-2 md:grid-cols-[minmax(0,1fr),auto]">
+                <select
+                  value={selectedConditionInactiveTfId}
+                  onChange={(event) => setSelectedConditionInactiveTfId(event.target.value)}
+                  className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                >
+                  <option value="">Choose TF complex...</option>
+                  {tfComplexSuggestions.map((complexId) => (
+                    <option key={complexId} value={complexId}>{complexId}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => addConditionTf('inactive_tfs', selectedConditionInactiveTfId)}
+                  disabled={!selectedConditionInactiveTfId}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+              {parseStringArray(draftCondition.inactive_tfs).length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {parseStringArray(draftCondition.inactive_tfs).map((complexId, index) => (
+                    <button
+                      key={`${complexId}-${index}`}
+                      type="button"
+                      onClick={() => removeConditionTf('inactive_tfs', index)}
+                      className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-800 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                    >
+                      {complexId} x
+                    </button>
+                  ))}
+                </div>
+              )}
               <textarea
                 value={draftCondition.inactive_tfs}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, inactive_tfs: event.target.value }))}
                 rows={3}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">List only TF complexes that this condition turns off relative to basal. Use <span className="font-mono">[]</span> for none.</p>
             </label>
+            </div>
           </div>
         )}
       </SectionCard>
@@ -1964,8 +2706,8 @@ export function EnvironmentBuilderPage() {
       <SectionCard
         sectionId="tfCondition"
         highlighted={highlightedSection === 'tfCondition'}
-        title="4. TF Activation Rules"
-        subtitle="Choose compatible TF activation rows or draft new ones using the same columns as tf_condition.tsv."
+        title="4. Which TF state rules belong to this recipe?"
+        subtitle="Choose compatible reconstruction rules that declare when TF complexes are active or inactive."
         collapsible
         collapsed={collapsedSections.tfCondition}
         onToggleCollapse={() => toggleSection('tfCondition')}
@@ -1976,12 +2718,14 @@ export function EnvironmentBuilderPage() {
         {tfConditionMode === 'existing' ? (
           <div className="mt-4 space-y-3">
             <p className="text-sm text-slate-500">
-              Existing TF activation rules are filtered so either `active nutrients` or `inactive nutrients` matches the current media formulation.
+              Existing TF rules are filtered so either active nutrients or inactive nutrients matches the current media recipe.
             </p>
             <div className="space-y-2">
               {compatibleTfConditions.map((row) => {
-                const key = `${row.tf}|${row.active_tf}|${row.active_nutrients}|${row.inactive_nutrients}`
+                const key = tfRuleKey(row)
                 const checked = selectedExistingTfKeys.includes(key)
+                const status = tfConditionStatus(row)
+                const scope = classifyTfRuleScope(row)
 
                 return (
                   <label key={key} className="flex items-start gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm transition-colors hover:bg-slate-50">
@@ -1998,31 +2742,39 @@ export function EnvironmentBuilderPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium text-slate-900">{row.tf} <span className="font-mono text-slate-500">{row.active_tf}</span></p>
-                        {(conditionActiveTfSet.has(row.active_tf) || conditionInactiveTfSet.has(row.active_tf))
-                          ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Consistent with condition</span>
-                          : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">Not in current condition</span>
-                        }
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
+                        <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700">{scope}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">{row.tf_type}</span>
                       </div>
                       <p className="mt-1 break-words font-mono text-xs text-slate-500">
-                        active={row.active_nutrients} inactive={row.inactive_nutrients} type={row.tf_type}
+                        active nutrients={row.active_nutrients} · inactive nutrients={row.inactive_nutrients}
                       </p>
+                      {(hasJsonContent(row.active_genotype_perturbations) || hasJsonContent(row.inactive_genotype_perturbations)) && (
+                        <p className="mt-1 break-words font-mono text-xs text-slate-500">
+                          active genotype={row.active_genotype_perturbations} · inactive genotype={row.inactive_genotype_perturbations}
+                        </p>
+                      )}
                     </div>
                   </label>
                 )
               })}
               {compatibleTfConditions.length === 0 && (
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-                  No existing TF activation rules match the current media formulation yet.
+                  No existing TF state rules match the current media recipe yet.
                 </div>
               )}
             </div>
           </div>
         ) : (
           <div className="mt-4 space-y-3">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-medium text-amber-950">Create TF state rules only for reconstruction-level regulatory states you can justify.</p>
+              <p className="mt-1 leading-6">These rows do not simulate a free-form TF knockout. They define when a TF complex is considered active or inactive under nutrient and optional genotype contexts.</p>
+            </div>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium text-slate-900">Draft TF activation rules</p>
-                <p className="text-sm text-slate-500">All fields from `tf_condition.tsv` are editable here.</p>
+                <p className="text-sm font-medium text-slate-900">Draft TF state rules</p>
+                <p className="text-sm text-slate-500">These rows encode nutrient-dependent active and inactive TF states used by the reconstruction.</p>
               </div>
               <button
                 type="button"
@@ -2036,78 +2788,171 @@ export function EnvironmentBuilderPage() {
             {draftTfRows.map((row) => (
               <div key={row.id} className="rounded-2xl border border-slate-200 p-4">
                 <div className="grid gap-3 md:grid-cols-2">
-                  <input
-                    type="text"
-                    value={row.tf}
-                    onChange={(event) => updateTfDraftRow(row.id, 'tf', event.target.value)}
-                    placeholder="tf"
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                  />
-                  <input
-                    type="text"
-                    list="tf-complex-options"
-                    value={row.active_tf}
-                    onChange={(event) => updateTfDraftRow(row.id, 'active_tf', event.target.value)}
-                    placeholder="active TF complex"
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                  />
-                  <select
-                    value={row.active_nutrients}
-                    onChange={(event) => updateTfDraftRow(row.id, 'active_nutrients', event.target.value)}
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                  >
-                    {availableMediaIds.map((mediaId) => (
-                      <option key={mediaId} value={mediaId}>{mediaId}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={row.inactive_nutrients}
-                    onChange={(event) => updateTfDraftRow(row.id, 'inactive_nutrients', event.target.value)}
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                  >
-                    {availableMediaIds.map((mediaId) => (
-                      <option key={mediaId} value={mediaId}>{mediaId}</option>
-                    ))}
-                  </select>
-                  <textarea
-                    value={row.active_genotype_perturbations}
-                    onChange={(event) => updateTfDraftRow(row.id, 'active_genotype_perturbations', event.target.value)}
-                    rows={2}
-                    placeholder="active genotype perturbations"
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                  />
-                  <textarea
-                    value={row.inactive_genotype_perturbations}
-                    onChange={(event) => updateTfDraftRow(row.id, 'inactive_genotype_perturbations', event.target.value)}
-                    rows={2}
-                    placeholder="inactive genotype perturbations"
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                  />
+                  <label className="block">
+                    <FieldLabel
+                      label="TF gene symbol"
+                      tooltip="Short transcription-factor gene symbol, for example crp, fnr, or arcA."
+                    />
+                    <select
+                      value={row.tf}
+                      onChange={(event) => updateTfDraftRow(row.id, 'tf', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                    >
+                      <option value="">Choose TF gene...</option>
+                      {row.tf && !tfGeneSuggestions.includes(row.tf) && (
+                        <option value={row.tf}>{row.tf} - current draft value</option>
+                      )}
+                      {tfGeneSuggestions.map((tfGene) => (
+                        <option key={tfGene} value={tfGene}>{tfGene}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">Use a TF gene already present in the reconstruction rules.</p>
+                  </label>
+                  <label className="block">
+                    <FieldLabel
+                      label="Active TF complex"
+                      tooltip="Model complex or monomer ID for the active regulatory form."
+                    />
+                    <select
+                      value={row.active_tf}
+                      onChange={(event) => updateTfDraftRow(row.id, 'active_tf', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                    >
+                      <option value="">Choose active TF complex...</option>
+                      {row.active_tf && !tfComplexSuggestions.includes(row.active_tf) && (
+                        <option value={row.active_tf}>{row.active_tf} - current draft value</option>
+                      )}
+                      {tfComplexSuggestions.map((complexId) => (
+                        <option key={complexId} value={complexId}>{complexId}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">Use a model complex or monomer ID already present in TF state rules.</p>
+                  </label>
+                  <label className="block">
+                    <FieldLabel
+                      label="Active nutrient recipe"
+                      tooltip="Recipe context where this TF complex is considered active."
+                    />
+                    <select
+                      value={row.active_nutrients}
+                      onChange={(event) => updateTfDraftRow(row.id, 'active_nutrients', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                    >
+                      {availableMediaIds.map((mediaId) => (
+                        <option key={mediaId} value={mediaId}>{mediaId}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">The media recipe under which the active state applies.</p>
+                  </label>
+                  <label className="block">
+                    <FieldLabel
+                      label="Inactive nutrient recipe"
+                      tooltip="Contrasting recipe context where this TF complex is considered inactive."
+                    />
+                    <select
+                      value={row.inactive_nutrients}
+                      onChange={(event) => updateTfDraftRow(row.id, 'inactive_nutrients', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                    >
+                      {availableMediaIds.map((mediaId) => (
+                        <option key={mediaId} value={mediaId}>{mediaId}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">The comparison recipe where the same TF rule is inactive.</p>
+                  </label>
+                  <label className="block">
+                    <FieldLabel
+                      label="Active genotype context"
+                      tooltip={'JSON-style object for genotype constraints required by the active state. Use {} when none apply.'}
+                    />
+                    {stateIdSuggestions.length > 0 && (
+                      <select
+                        defaultValue=""
+                        onChange={(event) => {
+                          const stateId = event.target.value
+                          if (!stateId) return
+                          updateTfDraftRow(row.id, 'active_genotype_perturbations', upsertJsonObjectValue(row.active_genotype_perturbations, stateId, 0))
+                          event.target.value = ''
+                        }}
+                        className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                      >
+                        <option value="">Add known state ID forced to 0...</option>
+                        {stateIdSuggestions.map((stateId) => (
+                          <option key={stateId} value={stateId}>{stateId}</option>
+                        ))}
+                      </select>
+                    )}
+                    <textarea
+                      value={row.active_genotype_perturbations}
+                      onChange={(event) => updateTfDraftRow(row.id, 'active_genotype_perturbations', event.target.value)}
+                      rows={2}
+                      placeholder="{}"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                    />
+                    <p className="mt-1 text-xs leading-5 text-slate-500"><span className="font-mono">{'{}'}</span> means no genotype constraint for the active state.</p>
+                  </label>
+                  <label className="block">
+                    <FieldLabel
+                      label="Inactive genotype context"
+                      tooltip={'JSON-style object for genotype constraints required by the inactive state. Use {} when none apply.'}
+                    />
+                    {stateIdSuggestions.length > 0 && (
+                      <select
+                        defaultValue=""
+                        onChange={(event) => {
+                          const stateId = event.target.value
+                          if (!stateId) return
+                          updateTfDraftRow(row.id, 'inactive_genotype_perturbations', upsertJsonObjectValue(row.inactive_genotype_perturbations, stateId, 0))
+                          event.target.value = ''
+                        }}
+                        className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                      >
+                        <option value="">Add known state ID forced to 0...</option>
+                        {stateIdSuggestions.map((stateId) => (
+                          <option key={stateId} value={stateId}>{stateId}</option>
+                        ))}
+                      </select>
+                    )}
+                    <textarea
+                      value={row.inactive_genotype_perturbations}
+                      onChange={(event) => updateTfDraftRow(row.id, 'inactive_genotype_perturbations', event.target.value)}
+                      rows={2}
+                      placeholder="{}"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                    />
+                    <p className="mt-1 text-xs leading-5 text-slate-500">Example: <span className="font-mono">{'{"EG10325_RNA": 0}'}</span> means the inactive state depends on that RNA being forced to zero.</p>
+                  </label>
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-3">
-                  <input
-                    type="text"
-                    value={row.tf_type}
-                    onChange={(event) => updateTfDraftRow(row.id, 'tf_type', event.target.value)}
-                    placeholder="1CS or 2CS"
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                  />
+                  <label className="block w-full">
+                    <FieldLabel
+                      label="TF rule class"
+                      tooltip="0CS = no sensor chemistry; 1CS = one-component sensor; 2CS = two-component phosphorelay."
+                    />
+                    <select
+                      value={row.tf_type}
+                      onChange={(event) => updateTfDraftRow(row.id, 'tf_type', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                    >
+                      {row.tf_type && !['0CS', '1CS', '2CS'].includes(row.tf_type) && (
+                        <option value={row.tf_type}>{row.tf_type} - current draft value</option>
+                      )}
+                      <option value="0CS">0CS - no sensor chemistry</option>
+                      <option value="1CS">1CS - one-component sensor</option>
+                      <option value="2CS">2CS - two-component phosphorelay</option>
+                    </select>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">Use the class that matches the TF mechanism encoded by the reconstruction.</p>
+                  </label>
                   <button
                     type="button"
                     onClick={() => removeTfDraftRow(row.id)}
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
+                    className="self-start rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
                   >
                     Remove
                   </button>
                 </div>
               </div>
             ))}
-
-            <datalist id="tf-complex-options">
-              {tfComplexSuggestions.map((complexId) => (
-                <option key={complexId} value={complexId} />
-              ))}
-            </datalist>
           </div>
         )}
       </SectionCard>
@@ -2115,12 +2960,16 @@ export function EnvironmentBuilderPage() {
   }
 
   function renderTimelineSection() {
+    const protocolSummary = summarizeMediaProtocol(effectiveTimelineEvents || recommendedTimelineStart)
+    const selectedProtocolStartsCurrent = Boolean(currentMediaRecipeId && selectedExistingTimeline && firstTimelineMedia(selectedExistingTimeline.events) === currentMediaRecipeId)
+    const selectedProtocolInvolvesCurrent = Boolean(currentMediaRecipeId && selectedExistingTimeline && protocolInvolvesMedia(selectedExistingTimeline, currentMediaRecipeId))
+
     return (
       <SectionCard
         sectionId="timeline"
         highlighted={highlightedSection === 'timeline'}
-        title="5. Media Shift Schedules"
-        subtitle="Choose an existing compatible media shift schedule or draft a new one with the composer below."
+        title="5. Does the environment stay constant or shift over time?"
+        subtitle="Choose or draft the media protocol. One event is static; later events are scheduled shifts."
         collapsible
         collapsed={collapsedSections.timeline}
         onToggleCollapse={() => toggleSection('timeline')}
@@ -2131,24 +2980,52 @@ export function EnvironmentBuilderPage() {
         {timelineMode === 'existing' ? (
           <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
             <label className="block">
-              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Compatible schedules</span>
+              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Compatible protocols</span>
               <select
                 value={selectedTimelineId}
                 onChange={(event) => setSelectedTimelineId(event.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               >
-                {compatibleTimelines.map((timeline) => (
-                  <option key={timeline.timeline} value={timeline.timeline}>{timeline.timeline}</option>
-                ))}
+                {currentMediaRecipeId ? (
+                  <>
+                    {compatibleTimelineGroups.starts.length > 0 && (
+                      <optgroup label="Starts with selected recipe">
+                        {compatibleTimelineGroups.starts.map((timeline) => (
+                          <option key={timeline.timeline} value={timeline.timeline}>{timeline.timeline}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {compatibleTimelineGroups.involves.length > 0 && (
+                      <optgroup label="Shifts into or otherwise involves selected recipe">
+                        {compatibleTimelineGroups.involves.map((timeline) => (
+                          <option key={timeline.timeline} value={timeline.timeline}>{timeline.timeline}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </>
+                ) : (
+                  compatibleTimelines.map((timeline) => (
+                    <option key={timeline.timeline} value={timeline.timeline}>{timeline.timeline}</option>
+                  ))
+                )}
               </select>
               <p className="mt-2 text-xs text-slate-500">
-                Existing schedules are filtered so the first media event matches the current media formulation when one is selected.
+                Protocols are grouped by whether they start with the current recipe or shift into it later.
               </p>
             </label>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-medium text-slate-900">Schedule summary</p>
+              <p className="text-sm font-medium text-slate-900">Protocol summary</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{protocolSummary.label}</span>
+                {timelineMode === 'existing' && selectedExistingTimeline && currentMediaRecipeId && (
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${selectedProtocolStartsCurrent ? 'bg-cyan-50 text-cyan-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {selectedProtocolStartsCurrent ? 'starts here' : selectedProtocolInvolvesCurrent ? 'reaches selected recipe later' : 'different recipe'}
+                  </span>
+                )}
+                <span className="text-xs text-slate-500">{protocolSummary.detail}</span>
+              </div>
               <p className="mt-3 break-words font-mono text-sm text-slate-700">
-                {selectedExistingTimeline?.events || 'No compatible schedule selected.'}
+                {selectedExistingTimeline?.events || 'No compatible protocol selected.'}
               </p>
             </div>
           </div>
@@ -2157,8 +3034,8 @@ export function EnvironmentBuilderPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
                 <FieldLabel
-                  label="Schedule ID"
-                  tooltip="Schedule IDs usually start with a numeric prefix and then a short snake_case name, for example 000028_add_aa_long."
+                  label="Protocol ID"
+                  tooltip="Protocol IDs usually start with a numeric prefix and then a short snake_case name, for example 000028_add_aa_long."
                 />
                 <input
                   type="text"
@@ -2168,21 +3045,26 @@ export function EnvironmentBuilderPage() {
                 />
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Max duration (s)</span>
+                <FieldLabel
+                  label="Protocol view range (hr)"
+                  tooltip="Controls the editable timeline horizon shown in this composer. The published catalog row stores event times in seconds, but users should set the range in hours."
+                />
                 <input
                   type="number"
-                  min={60}
-                  step={60}
-                  value={timelineDurationSec}
-                  onChange={(event) => setTimelineDurationSec(Math.max(60, Number(event.target.value) || 60))}
+                  min={0.25}
+                  step={0.25}
+                  value={timelineDurationSec / 3600}
+                  onChange={(event) => setTimelineDurationSec(Math.max(900, Math.round((Number(event.target.value) || 0.25) * 3600)))}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
                 />
+                <p className="mt-1 text-xs leading-5 text-slate-500">This is only the composer horizon. It is not the simulation division timeout from Design Experiment.</p>
               </label>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
-              <span className="font-medium">Recommended start</span>
-              <span className="font-mono">{recommendedTimelineStart}</span>
+              <span className="font-medium">Recommended first event</span>
+              <span className="font-mono">0 min: {currentMediaRecipeId || 'minimal'}</span>
+              <span className="text-xs text-cyan-700">encoded as <span className="font-mono">{recommendedTimelineStart}</span></span>
               <button
                 type="button"
                 onClick={() => setTimelineSeedVersion((current) => current + 1)}
@@ -2200,12 +3082,16 @@ export function EnvironmentBuilderPage() {
               maxSec={timelineDurationSec}
               initialDefinition={recommendedTimelineStart}
               showLibrarySave={false}
-              entryNounSingular="schedule"
-              entryNounPlural="schedules"
+              entryNounSingular="media protocol"
+              entryNounPlural="media protocols"
             />
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-sm font-medium text-slate-900">Current schedule event string</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-slate-900">Current protocol</p>
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{protocolSummary.label}</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{protocolSummary.detail}</p>
               <p className="mt-2 break-words font-mono text-xs leading-6 text-slate-700">
                 {effectiveTimelineEvents || recommendedTimelineStart}
               </p>
@@ -2222,9 +3108,9 @@ export function EnvironmentBuilderPage() {
         <div className="flex flex-col gap-6 px-6 py-8 lg:flex-row lg:items-end lg:justify-between lg:px-8">
           <div className="max-w-3xl">
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">Simulate</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Experimental Conditions Builder</h1>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Conditions Builder</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-200">
-              Build one experimental-condition flow from upstream chemistry to downstream schedules: growth media, media formulations, growth conditions, TF activation rules, and media shift schedules. Each section can reuse existing catalog entries or draft new ones without switching workflows.
+              Build reusable experiment environments by answering five connected questions: starting stock, named media recipe, growth condition, TF state rules, and media protocol. Published records appear as selectable options when designing simulations.
             </p>
           </div>
 
@@ -2361,8 +3247,8 @@ export function EnvironmentBuilderPage() {
         <summary className="cursor-pointer list-none px-5 py-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-slate-900">Dependency chain</p>
-              <p className="mt-1 text-sm text-slate-500">Follow the main path from medium to schedule. Use the exchange registry only when you need a new molecule ID.</p>
+              <p className="text-sm font-semibold text-slate-900">Five-question dependency map</p>
+              <p className="mt-1 text-sm text-slate-500">Move from raw medium to experiment-ready environment. Use the exchange registry only when you need a new molecule ID.</p>
             </div>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
               {dependencyOpen ? 'Hide' : 'Show'}
@@ -2370,10 +3256,35 @@ export function EnvironmentBuilderPage() {
           </div>
         </summary>
         <div className="border-t border-slate-100 px-5 py-4">
-          <div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3">
+          <div className="grid gap-3 lg:grid-cols-5">
+            {dependencyMainSteps.map((step, index) => {
+              const badge = dependencyBadge(step.id)
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  onClick={() => jumpToDependencyStep(step.id)}
+                  className="group relative rounded-2xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-cyan-300 hover:bg-cyan-50/40"
+                >
+                  {index < dependencyMainSteps.length - 1 && (
+                    <span className="pointer-events-none absolute -right-3 top-1/2 hidden h-px w-3 bg-slate-300 lg:block" />
+                  )}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-600 text-xs font-semibold text-white">{index + 1}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.classes}`}>{badge.label}</span>
+                  </div>
+                  <p className="mt-3 text-sm font-semibold leading-5 text-slate-950">{step.question}</p>
+                  <p className="mt-2 break-words font-mono text-xs text-cyan-800">{dependencyAnswers[step.id]}</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">{step.label}</p>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3">
             <p className="text-sm font-semibold text-cyan-950">How to read this flow</p>
             <p className="mt-1 text-sm leading-6 text-cyan-900">{dependencyLevelGuide}</p>
-            <p className="mt-2 text-sm leading-6 text-cyan-800">Key handoff: formulation ID to growth-condition nutrients to TF nutrient fields to schedule start.</p>
+            <p className="mt-2 text-sm leading-6 text-cyan-800">Key handoff: recipe ID to growth-condition nutrients to TF nutrient fields to protocol start.</p>
           </div>
 
           <div className="mt-4 space-y-4">
@@ -2397,14 +3308,14 @@ export function EnvironmentBuilderPage() {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-900">{step.label}</p>
+                        <p className="text-sm font-semibold text-slate-900">{step.question}</p>
                         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${badge.classes}`}>{badge.label}</span>
                       </div>
                       <span className="text-xs font-medium text-cyan-700">Open section</span>
                     </div>
 
+                    <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">{step.label}</p>
                     <p className="mt-2 text-sm leading-6 text-slate-600">{step.summary}</p>
-                    <p className="mt-1 text-sm leading-6 text-slate-500">{step.definition}</p>
 
                     <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
                       <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">Needs: {step.needs}</span>
@@ -2432,7 +3343,7 @@ export function EnvironmentBuilderPage() {
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-semibold text-amber-950">{dependencyBranchStep.label}</p>
+                            <p className="text-sm font-semibold text-amber-950">{dependencyBranchStep.question}</p>
                             <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${dependencyBadge(dependencyBranchStep.id).classes}`}>
                               {dependencyBadge(dependencyBranchStep.id).label}
                             </span>
@@ -2440,8 +3351,8 @@ export function EnvironmentBuilderPage() {
                           <span className="text-xs font-medium text-amber-800">Open section</span>
                         </div>
 
+                        <p className="mt-1 text-xs font-medium uppercase tracking-wide text-amber-700/80">{dependencyBranchStep.label}</p>
                         <p className="mt-2 text-sm leading-6 text-amber-900">{dependencyBranchStep.summary}</p>
-                        <p className="mt-1 text-sm leading-6 text-amber-800">{dependencyBranchStep.definition}</p>
 
                         <div className="mt-3 flex flex-wrap gap-2 text-xs text-amber-900">
                           <span className="rounded-full border border-amber-200 bg-white/70 px-2.5 py-1">Use: {dependencyBranchStep.needs}</span>
@@ -2503,8 +3414,8 @@ export function EnvironmentBuilderPage() {
         </div>
       )}
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr),410px]">
-        <div className="space-y-4">
+      <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr),410px]">
+        <div className="min-w-0 space-y-4">
           {renderMediaSection()}
           {renderMediaRecipeSection()}
           {renderConditionSection()}
@@ -2512,7 +3423,7 @@ export function EnvironmentBuilderPage() {
           {renderTimelineSection()}
         </div>
 
-        <aside className="space-y-4">
+        <aside className="min-w-0 space-y-4">
           <SavedStatePanel sectionSummaries={sectionSummaries} isSaved={isSaved} isDirty={isDirty} />
         </aside>
       </section>

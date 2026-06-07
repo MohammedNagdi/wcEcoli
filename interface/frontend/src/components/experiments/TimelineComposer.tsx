@@ -324,7 +324,7 @@ export function TimelineComposer({
       return
     }
     if (!parsed.some(ev => ev.timeSec === 0)) {
-      setPresetWarning('Preset must include a starting vial at 0 seconds.')
+      setPresetWarning('Preset must include a starting vial at 0 min.')
       return
     }
     setPresetWarning('')
@@ -671,7 +671,7 @@ export function TimelineComposer({
               onPointerUp={finishMarkerDrag}
               onPointerCancel={finishMarkerDrag}
               className={`absolute top-2 z-10 flex max-w-[150px] -translate-x-1/2 touch-none items-center gap-1 rounded-full border-2 border-white px-2 py-1 text-[11px] font-medium text-white shadow transition-transform ${ev.timeSec === 0 ? 'cursor-not-allowed opacity-90' : isDragging ? 'scale-110 cursor-grabbing ring-2 ring-white/70' : 'cursor-grab hover:scale-105 active:cursor-grabbing'}`}
-              title={ev.timeSec === 0 ? 'Starting vial is fixed at 0s' : `Drag left or right to adjust shift time. Crossing another shift will reorder the ${entryNounSingular}.`}
+              title={ev.timeSec === 0 ? 'Starting vial is fixed at 0 min' : `Drag left or right to adjust shift time. Crossing another shift will reorder the ${entryNounSingular}.`}
               style={{ left: markerLeft(ev.timeSec), backgroundColor: HEX_COLORS[colorIdx(ev.mediaId)] }}
             >
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white" />
@@ -706,7 +706,7 @@ export function TimelineComposer({
 
       <div className="overflow-hidden rounded-lg border border-gray-200">
         <div className="grid grid-cols-[90px_1fr_160px_80px] bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-          <span>Time</span><span>Vial</span><span>Media ID</span><span />
+          <span>Time (min)</span><span>Vial</span><span>Media ID</span><span />
         </div>
         {sorted.map(ev => (
           <div key={ev.id} className="grid grid-cols-[90px_1fr_160px_80px] items-center gap-2 border-t border-gray-100 px-3 py-2">
