@@ -18,6 +18,7 @@ import type {
   DesignOverview, EssentialityStats,
   ComparisonResponse, FailedJobSummary,
   WildtypeDelta, ConditionCatalog,
+  PlatformStatus, DistributionStatus, ProviderLayerStatus, AssistantHarnessStatus,
 } from '../types'
 
 const BASE = '/api'
@@ -468,6 +469,24 @@ export async function compareBatch(
 ): Promise<ComparisonResponse> {
   const qs = includeWildtype ? '' : '?include_wildtype=false'
   return fetchJSON(`/experiments/compare/batch/${batchId}${qs}`)
+}
+
+// --- Platform / assistant planning status ---
+
+export async function getPlatformStatus(): Promise<PlatformStatus> {
+  return fetchJSON('/platform/status')
+}
+
+export async function getDistributionStatus(): Promise<DistributionStatus> {
+  return fetchJSON('/platform/distribution')
+}
+
+export async function getLlmProviderStatus(): Promise<ProviderLayerStatus> {
+  return fetchJSON('/platform/llm-providers')
+}
+
+export async function getAssistantHarnessStatus(): Promise<AssistantHarnessStatus> {
+  return fetchJSON('/platform/assistant')
 }
 
 // --- Health ---

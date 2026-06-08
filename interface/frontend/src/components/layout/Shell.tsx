@@ -20,6 +20,7 @@ const ICON_GENOME = 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 3v2m0 10v2m7-7h-2M5 
 const ICON_EXPERIMENTS = 'M9 3h2v5l3 4v4a1 1 0 01-1 1H7a1 1 0 01-1-1v-4l3-4V3zm-2 5h6m-5 4h4'
 const ICON_ENVIRONMENT = 'M4 6h12M4 10h8m-8 4h12m2-8l2 2-2 2m0 4l2 2-2 2'
 const ICON_RESULTS = 'M4 18h16M4 14l4-4 3 2 5-6 4 4'
+const ICON_ASSISTANT = 'M4 5h12v8H7l-3 3V5zm4 3h4m-4 3h6'
 const ICON_ML = 'M12 4a3 3 0 100 6 3 3 0 000-6zm-5 9a5 5 0 0110 0M4 17h16M8 13v4m8-4v4'
 const ICON_DESIGN = 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'
 const ICON_GUIDE = 'M12 3a7 7 0 00-7 7c0 2.5 1.5 4.5 3.5 5.5V17h7v-1.5c2-1 3.5-3 3.5-5.5a7 7 0 00-7-7zm-2 14h4m-3 3h2'
@@ -50,6 +51,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Analyze',
     items: [
       { path: '/results', label: 'Results', icon: ICON_RESULTS },
+      { path: '/assistant', label: 'Assistant', icon: ICON_ASSISTANT },
     ],
   },
   {

@@ -1,4 +1,4 @@
-"""wcEcoli Platform API — FastAPI application."""
+"""wcEcoli Platform API - FastAPI application."""
 
 import logging
 from contextlib import asynccontextmanager
@@ -12,7 +12,7 @@ from app.config import settings
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Global engine — set during startup
+# Global engine - set during startup
 _engine = None
 
 
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     # (caused by earlier broken TableReader import)
     _auto_reingest_stale_results(_engine)
 
-    logger.info("wcEcoli API ready — database at %s", settings.database_path)
+    logger.info("wcEcoli API ready - database at %s", settings.database_path)
     yield
     logger.info("Shutting down")
 
@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
 def _run_migrations(engine):
     """Apply lightweight schema migrations for columns added after initial release.
 
-    Each migration is idempotent — safe to run multiple times. We check
+    Each migration is idempotent - safe to run multiple times. We check
     PRAGMA table_info to see if the column already exists before ALTER TABLE.
     """
     import sqlite3
@@ -144,7 +144,7 @@ def _auto_reingest_stale_results(engine):
 
     This fixes jobs that were ingested when the TableReader bridge was broken
     (e.g., before the standalone iff_reader replaced wholecell.io.tablereader).
-    Runs once at API startup — only touches jobs marked 'done' with a sim_dir.
+    Runs once at API startup - only touches jobs marked 'done' with a sim_dir.
     """
     from sqlmodel import Session as Sess, select
     from app.db.models import SimulationJob, SimulationResult
@@ -274,6 +274,7 @@ from app.routers.media_recipes import router as media_recipes_router  # noqa: E4
 from app.routers.condition_catalog import router as condition_catalog_router  # noqa: E402
 from app.routers.builder_drafts import router as builder_drafts_router  # noqa: E402
 from app.routers.user_timelines import router as user_timelines_router  # noqa: E402
+from app.routers.platform import router as platform_router  # noqa: E402
 
 app.include_router(genes_router)
 app.include_router(pathways_router)
@@ -287,3 +288,4 @@ app.include_router(media_recipes_router)
 app.include_router(condition_catalog_router)
 app.include_router(builder_drafts_router)
 app.include_router(user_timelines_router)
+app.include_router(platform_router)

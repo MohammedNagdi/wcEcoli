@@ -1,4 +1,4 @@
-﻿"""Results visualization API â€” time-series data for completed simulations.
+"""Results visualization API - time-series data for completed simulations.
 
 Serves mock data when simulation outputs don't exist (development mode),
 or real TableReader-extracted data when simOut directories are present.
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api", tags=["results"])
 logger = logging.getLogger(__name__)
 
 
-# â”€â”€ Response models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Response models
 
 class TimeseriesPoint(BaseModel):
     time: float  # seconds
@@ -47,10 +47,10 @@ class ResultsSummary(BaseModel):
 
 class ResultsResponse(BaseModel):
     summary: list[ResultsSummary]
-    timeseries: dict[str, list[TimeseriesData]]  # channel â†’ [per-seed series]
+    timeseries: dict[str, list[TimeseriesData]]  # channel -> [per-seed series]
 
 
-# â”€â”€ Channel display metadata (label overrides for frontend) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Channel display metadata (label overrides for frontend)
 
 CHANNEL_LABELS: dict[str, str] = {
     "cell_mass": "Cell mass",
@@ -77,7 +77,7 @@ CHANNEL_LABELS: dict[str, str] = {
 }
 
 
-# â”€â”€ Real data extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Real data extraction
 
 def _load_real_timeseries(
     job: SimulationJob,
@@ -137,7 +137,7 @@ def _load_real_timeseries(
     return timeseries if timeseries else None
 
 
-# â”€â”€ Mock data generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Mock data generation
 
 def _generate_mock_timeseries(
     seed: int,
@@ -180,7 +180,7 @@ def _generate_mock_timeseries(
     # RNA mass (~20% of dry mass)
     rna = [m * (0.20 + rng.gauss(0, 0.005)) for m in masses]
 
-    # DNA mass (step function â€” replicates partway through)
+    # DNA mass (step function - replicates partway through)
     dna_base = 4.6  # fg, one genome equivalent
     dna = []
     replication_start = duration_sec * (0.3 + rng.uniform(-0.05, 0.05))
@@ -218,7 +218,7 @@ def _generate_mock_timeseries(
     }
 
 
-# â”€â”€ GET /api/jobs/{id}/timeseries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# GET /api/jobs/{id}/timeseries
 
 @router.get("/jobs/{job_id}/timeseries", response_model=ResultsResponse)
 def get_job_timeseries(job_id: int, session: Session = Depends(get_session)):
@@ -251,10 +251,10 @@ def get_job_timeseries(job_id: int, session: Session = Depends(get_session)):
         for r in db_results
     ]
 
-    # â”€â”€ Try real data first â”€â”€
+    # Try real data first
     timeseries = _load_real_timeseries(job)
 
-    # â”€â”€ Fall back to mock â”€â”€
+    # Fall back to mock
     if timeseries is None:
         timeseries = {}
         num_seeds = max(1, job.seed + 1) if not db_results else max(r.seed for r in db_results) + 1
@@ -286,10 +286,10 @@ def get_job_timeseries(job_id: int, session: Session = Depends(get_session)):
     return ResultsResponse(summary=summary, timeseries=timeseries)
 
 
-# â”€â”€ Feature extraction for ML â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Feature extraction for ML
 
 class FeatureRow(BaseModel):
-    """One row in the ML feature matrix â€” one seed of one experiment."""
+    """One row in the ML feature matrix - one seed of one experiment."""
     experiment_id: int
     experiment_name: str
     job_id: int
@@ -332,9 +332,9 @@ def extract_features(
     that predict simulation outcomes from gene/condition features.
 
     Typical usage:
-    - GET /api/features?variant_type=gene_knockout â†’ all KO results
-    - GET /api/features?mechanistic_only=true â†’ only mechanistic genes
-    - GET /api/features?condition=with_aa â†’ only amino-acid-supplemented
+    - GET /api/features?variant_type=gene_knockout -> all KO results
+    - GET /api/features?mechanistic_only=true -> only mechanistic genes
+    - GET /api/features?condition=with_aa -> only amino-acid-supplemented
     """
     from app.db.models import Gene
 
@@ -451,7 +451,7 @@ def extract_features_csv(
     )
 
 
-# â”€â”€ GET /api/jobs/{id}/debug â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# GET /api/jobs/{id}/debug
 
 @router.get("/jobs/{job_id}/debug")
 def debug_job_data(job_id: int, session: Session = Depends(get_session)):

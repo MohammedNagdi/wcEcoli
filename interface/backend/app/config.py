@@ -1,4 +1,4 @@
-"""Application configuration — reads from environment variables with sensible defaults."""
+"""Application configuration: reads from environment variables with sensible defaults."""
 
 from pathlib import Path
 from pydantic_settings import BaseSettings
@@ -15,6 +15,18 @@ class Settings(BaseSettings):
     docker_image: str = "wcecoli-sim:latest"     # Docker image for simulation worker
     worker_poll_interval: int = 5                # seconds between job polls
     log_tail_lines: int = 200                    # lines of log to keep in DB
+
+    # Local-first distribution and optional artifact bootstrap
+    artifact_bootstrap_source: str = ""          # optional source label, e.g. "huggingface"
+    artifact_bootstrap_repo: str = ""            # optional artifact repository/path
+
+    # Optional BYOK/local LLM provider configuration. Values are never returned by API.
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    openrouter_api_key: str = ""
+    ollama_base_url: str = ""
+    lm_studio_base_url: str = ""
+    vllm_base_url: str = ""
 
     # Derived paths for key data files
     @property

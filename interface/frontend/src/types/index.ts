@@ -762,3 +762,53 @@ export interface StoichiometryNeighborhoodResponse {
   reactions: StoichiometryReaction[]
   note: string
 }
+
+// --- Local platform and assistant scaffolding ---
+
+export interface ArtifactBootstrapStatus {
+  enabled: boolean
+  source: string | null
+  repository: string | null
+  role: string
+}
+
+export interface DistributionStatus {
+  mode: string
+  runtime: string
+  requires_hosted_backend: boolean
+  artifact_bootstrap: ArtifactBootstrapStatus
+  paths: Record<string, string>
+  notes: string[]
+}
+
+export interface ProviderStatus {
+  provider_id: string
+  label: string
+  category: string
+  configured: boolean
+  configuration_hint: string
+}
+
+export interface ProviderLayerStatus {
+  mode: string
+  configured_provider_count: number
+  providers: ProviderStatus[]
+  notes: string[]
+}
+
+export interface AssistantHarnessStatus {
+  state: string
+  provider_required: boolean
+  provider_configured: boolean
+  tool_execution_enabled: boolean
+  confirmation_required_for: string[]
+  context_contract: string[]
+  visible_artifacts: string[]
+  notes: string[]
+}
+
+export interface PlatformStatus {
+  distribution: DistributionStatus
+  providers: ProviderLayerStatus
+  assistant: AssistantHarnessStatus
+}

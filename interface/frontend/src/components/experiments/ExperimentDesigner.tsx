@@ -1422,7 +1422,7 @@ export function ExperimentDesigner() {
         <section className="bg-white rounded-lg border border-gray-200 p-4">
           <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
             Experiment type
-            <HelpTip text="Each experiment type modifies the simulation in a specific way. 'Gene knockout' sets a gene's RNA expression to zero â€” the cell must grow without the protein it encodes. Other variants alter media composition, kinetic parameters, or regulatory logic." />
+            <HelpTip text="Each experiment type modifies the simulation in a specific way. 'Gene knockout' sets a gene's RNA expression to zero - the cell must grow without the protein it encodes. Other variants alter media composition, kinetic parameters, or regulatory logic." />
           </h2>
           <select
             value={variantType}
@@ -1691,7 +1691,7 @@ export function ExperimentDesigner() {
         <section className="bg-white rounded-lg border border-gray-200 p-4">
           <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
             Simulation parameters
-            <HelpTip text="Seeds are independent random replicates â€” each starts from a different initial state. Generations control how many cell divisions are simulated sequentially. More seeds give statistical power; more generations reveal long-term dynamics and potential lethality." />
+            <HelpTip text="Seeds are independent random replicates - each starts from a different initial state. Generations control how many cell divisions are simulated sequentially. More seeds give statistical power; more generations reveal long-term dynamics and potential lethality." />
           </h2>
           <div className="grid grid-cols-3 gap-4">
             <div>

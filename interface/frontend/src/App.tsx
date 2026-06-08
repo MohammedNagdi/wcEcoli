@@ -11,6 +11,7 @@ import { ExperimentGuidePage } from './components/experiments/ExperimentGuidePag
 import { ResultsPage } from './components/results/ResultsPage'
 import { ResultsBrowserPage } from './components/results/ResultsBrowserPage'
 import { ComparisonDashboard } from './components/results/ComparisonDashboard'
+import { AssistantPage } from './components/assistant/AssistantPage'
 import { MLPage } from './components/ml/MLPage'
 import { DesignPage } from './components/design/DesignPage'
 import { GenomeViewerPage } from './components/genome/GenomeViewerPage'
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/results" element={<ResultsBrowserPage />} />
         <Route path="/results/compare" element={<ComparisonDashboard />} />
         <Route path="/results/:jobId" element={<ResultsPage />} />
+        <Route path="/assistant" element={<AssistantPage />} />
         <Route path="/ml" element={<MLPage />} />
         <Route path="/design" element={<DesignPage />} />
       </Routes>
