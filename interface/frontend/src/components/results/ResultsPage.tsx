@@ -348,6 +348,9 @@ export function ResultsPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeChannels, setActiveChannels] = useState<Set<string>>(new Set(DEFAULT_ACTIVE))
   const [chartPreset, setChartPreset] = useState<ChartPresetId>('overview')
+  const [showChannelGroups, setShowChannelGroups] = useState(false)
+  const [showModelDepth, setShowModelDepth] = useState(false)
+  const [showRunTable, setShowRunTable] = useState(false)
 
   useEffect(() => {
     if (!jobId) return
@@ -400,7 +403,7 @@ export function ResultsPage() {
         if (experimentId && jobData.status === 'done') {
           getWtDelta(experimentId)
             .then(setWtDelta)
-            .catch(() => {}) // optional — no delta if no WT
+            .catch(() => {}) // optional: no delta if no WT
         }
       })
       .catch((err) => setError(err.message))
@@ -467,9 +470,6 @@ export function ResultsPage() {
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Single simulation result</p>
             <h1 className="text-2xl font-semibold text-gray-900">{resultTitle}</h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Start with the phenotype summary, then inspect curated time-series presets, then drill into model state variables.
-            </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
             <span className={'rounded-full border px-2.5 py-1 font-medium ' + statusTone(job.status)}>
@@ -483,20 +483,23 @@ export function ResultsPage() {
             </span>
           </div>
         </div>
+        <AnalysisPath
+          hasWildtype={hasWildtype}
+          hasModelOutputs={job.status === 'done'}
+          visibleChannels={visibleChannels.length}
+          totalChannels={channels.length}
+        />
       </div>
 
-      <section className="mb-6 rounded-lg border border-gray-200 bg-white">
+      <section id="phenotype" className="mb-6 rounded-lg border border-gray-200 bg-white">
         <div className="border-b border-gray-100 px-4 py-3">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-gray-900">Outcome summary</h2>
+            <h2 className="text-sm font-semibold text-gray-900">1. Phenotype summary</h2>
             <HelpTip
               text="This section answers whether the simulation completed, how its growth phenotype compares with the condition-matched wildtype when available, and whether the plotted curves are extracted from a completed run."
               position="right"
             />
           </div>
-          <p className="mt-1 text-xs text-gray-500">
-            Use this as the result triage step before opening detailed model outputs.
-          </p>
         </div>
         <div className="grid gap-4 p-4 lg:grid-cols-[1fr,280px]">
           <div>
@@ -528,29 +531,11 @@ export function ResultsPage() {
                 />
               </div>
             )}
-            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Recommended first look</h3>
-              <div className="mt-2 grid gap-3 md:grid-cols-3">
-                <GuidanceItem
-                  title="1. Check the phenotype"
-                  body={strongestWtDelta
-                    ? `${strongestWtDelta.label} has the largest WT delta (${formatPercent(strongestWtDelta.value)}). Start there before interpreting individual molecules.`
-                    : hasWildtype
-                    ? 'A matching WT exists, but no strong aggregate delta was returned. Inspect the curves for subtle timing differences.'
-                    : 'No matching WT comparison is attached. Treat absolute values cautiously and compare against a compatible WT run if possible.'}
-                />
-                <GuidanceItem
-                  title="2. Plot curated channels"
-                  body="Use the chart presets below before enabling every channel. The overview preset is intended to keep the first read small."
-                />
-                <GuidanceItem
-                  title="3. Link to model outputs"
-                  body={focusGeneSymbol
-                    ? `Use Model outputs to inspect ${focusGeneSymbol} RNA/protein, linked regulators, reactions, and metabolites.`
-                    : 'Use Model outputs to search for the RNAs, proteins, reactions, or metabolites suggested by the phenotype.'}
-                />
-              </div>
-            </div>
+            <NextStepCallout
+              strongestWtDelta={strongestWtDelta}
+              hasWildtype={hasWildtype}
+              focusGeneSymbol={focusGeneSymbol}
+            />
           </div>
           <aside className="rounded-lg border border-gray-200 bg-slate-50 p-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Run context</h3>
@@ -579,11 +564,11 @@ export function ResultsPage() {
         onSelectPreset={(preset) => applyPreset(preset, channels)}
       />
 
-      <section className="mb-8 rounded-lg border border-gray-200 bg-white p-4">
+      <section id="timeseries" className="mb-8 rounded-lg border border-gray-200 bg-white p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-gray-900">Time-series workbench</h2>
+              <h2 className="text-sm font-semibold text-gray-900">3. Time-series workbench</h2>
               <HelpTip
                 text="Presets choose a small set of simulation channels for a specific interpretation task. You can still toggle individual channels; doing so creates a custom view."
                 position="right"
@@ -593,8 +578,15 @@ export function ResultsPage() {
               Selected channels are plotted below. Keep the view narrow while forming a hypothesis, then add channels as needed.
             </p>
           </div>
-          <div className="text-xs text-gray-400">
-            {visibleChannels.length} of {channels.length} channels selected
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-gray-400">{visibleChannels.length} of {channels.length} channels selected</span>
+            <button
+              type="button"
+              onClick={() => setShowChannelGroups((current) => !current)}
+              className="rounded-full border border-gray-200 bg-white px-2.5 py-1 font-medium text-gray-600 hover:bg-gray-50"
+            >
+              {showChannelGroups ? 'Hide channels' : 'Customize channels'}
+            </button>
           </div>
         </div>
 
@@ -632,34 +624,36 @@ export function ResultsPage() {
           {selectedPreset?.description ?? 'Custom view: selected manually from the channel groups below.'}
         </p>
 
-        <div className="mt-4 space-y-2 border-t border-gray-100 pt-4">
-          {Object.entries(grouped).map(([groupName, chs]) => (
-            <div key={groupName} className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-medium text-gray-400 w-28 shrink-0">{groupName}</span>
-              {chs.map((ch) => {
-                const cfg = CHANNEL_CONFIG[ch]
-                const active = activeChannels.has(ch)
-                return (
-                  <button
-                    key={ch}
-                    onClick={() => toggleChannel(ch)}
-                    className={'px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ' + (
-                      active
-                        ? 'border-gray-300 bg-white text-gray-800 shadow-sm'
-                        : 'border-transparent bg-gray-100 text-gray-400'
-                    )}
-                  >
-                    <span
-                      className="inline-block w-2 h-2 rounded-full mr-1.5"
-                      style={{ backgroundColor: cfg?.color ?? '#6b7280', opacity: active ? 1 : 0.3 }}
-                    />
-                    {cfg?.title ?? ch}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </div>
+        {showChannelGroups && (
+          <div className="mt-4 space-y-2 border-t border-gray-100 pt-4">
+            {Object.entries(grouped).map(([groupName, chs]) => (
+              <div key={groupName} className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-medium text-gray-400 w-28 shrink-0">{groupName}</span>
+                {chs.map((ch) => {
+                  const cfg = CHANNEL_CONFIG[ch]
+                  const active = activeChannels.has(ch)
+                  return (
+                    <button
+                      key={ch}
+                      onClick={() => toggleChannel(ch)}
+                      className={'px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ' + (
+                        active
+                          ? 'border-gray-300 bg-white text-gray-800 shadow-sm'
+                          : 'border-transparent bg-gray-100 text-gray-400'
+                      )}
+                    >
+                      <span
+                        className="inline-block w-2 h-2 rounded-full mr-1.5"
+                        style={{ backgroundColor: cfg?.color ?? '#6b7280', opacity: active ? 1 : 0.3 }}
+                      />
+                      {cfg?.title ?? ch}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
@@ -675,16 +669,33 @@ export function ResultsPage() {
       )}
 
       {job.status === 'done' && (
-        <section className="mb-8">
-          <div className="mb-3">
-            <h2 className="text-sm font-semibold text-gray-900">Model outputs</h2>
-            <p className="mt-1 text-xs text-gray-500">
-              Use this section after the phenotype and time-series pass. It connects the selected gene to mRNAs, proteins, regulatory edges, reactions, metabolites, and searchable state variables.
-            </p>
+        <section id="model-outputs" className="mb-8">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-900">4. Model outputs</h2>
+                <HelpTip
+                  text="Use this after the phenotype and time-series pass. It links the selected gene to plot-ready RNAs, proteins, reactions, metabolites, and regulatory neighbors when those outputs exist for this run."
+                  position="right"
+                />
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Inspect linked state variables and then search the broader simulation output catalog.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowModelDepth((current) => !current)}
+              className="w-fit rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              {showModelDepth ? 'Hide model-depth note' : 'Show model-depth note'}
+            </button>
           </div>
-          <HelpNote variant="model-depth">
-            <strong>Model depth:</strong>{' '}The wcEcoli model tracks transcription, translation, and degradation for all 4,749 E. coli genes, but only ~1,500 have <em>mechanistic downstream effects</em> (enzymatic reactions, TF regulation, complex formation). The remaining genes are passengers: their mRNA and protein levels are simulated, but knocking them out may not visibly alter growth rate.
-          </HelpNote>
+          {showModelDepth && (
+            <HelpNote variant="model-depth">
+              <strong>Model depth:</strong>{' '}The wcEcoli model tracks transcription, translation, and degradation for all 4,749 E. coli genes, but only ~1,500 have <em>mechanistic downstream effects</em> (enzymatic reactions, TF regulation, complex formation). The remaining genes are passengers: their mRNA and protein levels are simulated, but knocking them out may not visibly alter growth rate.
+            </HelpNote>
+          )}
           <div className="mt-3" />
           <ResultStateExplorer
             jobId={job.id}
@@ -699,10 +710,23 @@ export function ResultsPage() {
         </section>
       )}
 
-      {/* Results table */}
       {results.summary.length > 1 && (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-8">
-          <table className="w-full text-sm">
+        <section id="diagnostics" className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-8">
+          <button
+            type="button"
+            onClick={() => setShowRunTable((current) => !current)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+          >
+            <span>
+              <span className="block text-sm font-semibold text-gray-900">Per-generation diagnostics</span>
+              <span className="mt-0.5 block text-xs text-gray-500">
+                {results.summary.length} summary rows. Open this when checking replicate or generation-level differences.
+              </span>
+            </span>
+            <span className="text-xs font-medium text-gray-500">{showRunTable ? 'Hide table' : 'Show table'}</span>
+          </button>
+          {showRunTable && (
+          <table className="w-full border-t border-gray-100 text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-2.5 font-medium text-gray-500">Seed</th>
@@ -715,27 +739,102 @@ export function ResultsPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {results.summary.map((s, i) => (
-                <tr key={i} className="hover:bg-gray-50">
+                <tr key={`${s.seed}-${s.generation}-${i}`} className="hover:bg-gray-50">
                   <td className="px-4 py-2 font-mono">{s.seed}</td>
                   <td className="px-4 py-2 font-mono">{s.generation}</td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {s.division_time_sec != null ? (s.division_time_sec / 60).toFixed(1) + ' min' : '\u2014'}
+                    {s.division_time_sec != null ? (s.division_time_sec / 60).toFixed(1) + ' min' : '-'}
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {s.final_mass_fg != null ? s.final_mass_fg.toFixed(1) + ' fg' : '\u2014'}
+                    {s.final_mass_fg != null ? s.final_mass_fg.toFixed(1) + ' fg' : '-'}
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {s.growth_rate != null ? (s.growth_rate * 1000).toFixed(3) : '—'}
+                    {s.growth_rate != null ? (s.growth_rate * 1000).toFixed(3) : '-'}
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {s.doubling_time_min != null ? s.doubling_time_min.toFixed(1) + ' min' : '—'}
+                    {s.doubling_time_min != null ? s.doubling_time_min.toFixed(1) + ' min' : '-'}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+          )}
+        </section>
       )}
+      </div>
+    </div>
+  )
+}
+
+function AnalysisPath({
+  hasWildtype,
+  hasModelOutputs,
+  visibleChannels,
+  totalChannels,
+}: {
+  hasWildtype: boolean
+  hasModelOutputs: boolean
+  visibleChannels: number
+  totalChannels: number
+}) {
+  const items = [
+    { href: '#phenotype', label: 'Phenotype', detail: 'growth summary' },
+    { href: '#comparison', label: 'WT baseline', detail: hasWildtype ? 'available' : 'missing' },
+    { href: '#timeseries', label: 'Time-series', detail: `${visibleChannels}/${totalChannels} channels` },
+    { href: '#model-outputs', label: 'Model outputs', detail: hasModelOutputs ? 'available' : 'pending' },
+  ]
+
+  return (
+    <nav className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="Result analysis workflow">
+      {items.map((item, index) => (
+        <a
+          key={item.href}
+          href={item.href}
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs transition-colors hover:bg-gray-50"
+        >
+          <span className="block font-semibold text-gray-800">{index + 1}. {item.label}</span>
+          <span className="mt-0.5 block text-gray-400">{item.detail}</span>
+        </a>
+      ))}
+    </nav>
+  )
+}
+
+function NextStepCallout({
+  strongestWtDelta,
+  hasWildtype,
+  focusGeneSymbol,
+}: {
+  strongestWtDelta: { label: string; value: number } | null
+  hasWildtype: boolean
+  focusGeneSymbol?: string
+}) {
+  const message = strongestWtDelta
+    ? `${strongestWtDelta.label} has the largest WT delta (${formatPercent(strongestWtDelta.value)}). Start with the matching preset, then inspect linked model outputs.`
+    : hasWildtype
+    ? 'A WT baseline exists, but no aggregate metric dominates. Inspect the overview curves before drilling into molecules.'
+    : 'No matching WT comparison is attached. Treat absolute values cautiously and compare against a compatible WT run if possible.'
+
+  return (
+    <div className="mt-4 rounded-lg border border-brand-100 bg-brand-50/50 px-3 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-800">Recommended next step</h3>
+          <p className="mt-1 text-sm text-brand-900">{message}</p>
+          {focusGeneSymbol && (
+            <p className="mt-1 text-xs text-brand-700">
+              Model-output inspection will focus on <span className="font-mono">{focusGeneSymbol}</span>.
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2 text-xs">
+          <a href="#timeseries" className="rounded-full bg-white px-2.5 py-1 font-medium text-brand-700 hover:bg-brand-50">
+            Open plots
+          </a>
+          <a href="#model-outputs" className="rounded-full bg-white px-2.5 py-1 font-medium text-brand-700 hover:bg-brand-50">
+            Open outputs
+          </a>
+        </div>
       </div>
     </div>
   )
@@ -755,19 +854,10 @@ function SummaryCard({ label, value, help, deltaPct }: {
         <p className={'text-xs font-medium mt-0.5 ' + (
           deltaPct > 5 ? 'text-red-600' : deltaPct < -5 ? 'text-emerald-600' : 'text-gray-400'
         )}>
-          {deltaPct > 0 ? '↑' : deltaPct < 0 ? '↓' : '↔'}{' '}
+          {deltaPct > 0 ? 'up' : deltaPct < 0 ? 'down' : 'same'}{' '}
           {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% vs WT
         </p>
       )}
-    </div>
-  )
-}
-
-function GuidanceItem({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-      <p className="text-xs font-semibold text-gray-800">{title}</p>
-      <p className="mt-1 text-xs leading-relaxed text-gray-500">{body}</p>
     </div>
   )
 }
@@ -802,11 +892,11 @@ function ComparisonBaseline({
   const pendingStatus = wtDelta?.wt_experiment_id && wtDelta.wt_status && !hasWildtype
 
   return (
-    <section className="mb-8 rounded-lg border border-gray-200 bg-white">
+    <section id="comparison" className="mb-8 rounded-lg border border-gray-200 bg-white">
       <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-gray-900">Comparison baseline</h2>
+            <h2 className="text-sm font-semibold text-gray-900">2. WT baseline</h2>
             <HelpTip
               text="This uses the latest completed wildtype experiment with the same condition. It is a phenotype reference, not proof of causality and not necessarily a perfect seed or timeline match."
               position="right"

@@ -404,7 +404,7 @@ function BatchCard({
   }, [batchMenuOpen, openExperimentMenuId])
 
   const formatDate = (iso: string) => {
-    if (!iso) return '—'
+    if (!iso) return '-'
     const d = new Date(iso)
     return d.toLocaleDateString('en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -413,7 +413,7 @@ function BatchCard({
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-      {/* Header — clickable to expand */}
+      {/* Header: clickable to expand */}
       <div
         className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
         onClick={() => onToggleExpand(batch.batch_id)}
@@ -469,7 +469,7 @@ function BatchCard({
                 {isRunning ? (
                   <span className="flex items-center gap-1.5">
                     <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Submitting…
+                    Submitting...
                   </span>
                 ) : (
                   `Run all (${draft} draft)`
@@ -619,7 +619,7 @@ function BatchCard({
           {!detail ? (
             <div className="text-center py-4 text-gray-400 text-sm">
               <div className="inline-block w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mr-1.5" />
-              Loading experiments…
+              Loading experiments...
             </div>
           ) : (
             <div className="max-h-[400px] overflow-y-auto">

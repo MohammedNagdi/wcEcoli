@@ -49,7 +49,7 @@ const CHART_COLORS = [
 ]
 
 const MAX_SELECTED = 5
-const BROWSE_LIMIT = 30
+const BROWSE_LIMIT = 100
 
 type SelectedMolecule = {
   molecule_type: string
@@ -752,12 +752,12 @@ export function MoleculeExplorer({
   const resultGroups = Object.entries(searchResults).filter(([, ids]) => ids.length > 0)
   const selectedBrowseType = types.find((type) => type.molecule_type === browseType)
   const suggestedSearches = [
-    geneSymbol,
-    'GLC',
-    'ACET',
-    'FBA',
-    'RNA',
-  ].filter((item): item is string => Boolean(item))
+    geneSymbol ? { term: geneSymbol, description: 'Focus gene symbol' } : null,
+    { term: 'GLC', description: 'Glucose metabolite/output search' },
+    { term: 'ACET', description: 'Acetate metabolite/output search' },
+    { term: 'FBA', description: 'Flux-balance analysis outputs and objective' },
+    { term: 'RNA', description: 'RNA output families and RNA IDs' },
+  ].filter((item): item is { term: string; description: string } => Boolean(item))
 
   return (
     <div>
@@ -793,14 +793,15 @@ export function MoleculeExplorer({
                     Search path
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-gray-500">
-                    Search accepts biological names first. Gene symbols resolve to their model outputs when possible; output IDs are still supported for exact lookup.
+                    Use the chips below as example searches. They do not filter the catalog or select a biological category; they just fill the search box with common terms. Gene symbols resolve to their model outputs when possible, and raw output IDs are still supported for exact lookup.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {suggestedSearches.map((term) => (
+                  {suggestedSearches.map(({ term, description }) => (
                     <button
                       key={term}
                       type="button"
+                      title={description}
                       onClick={() => {
                         setSearchQuery(term)
                         setExplorerOpen(true)

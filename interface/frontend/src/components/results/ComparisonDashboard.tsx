@@ -6,12 +6,12 @@ import type { ComparisonResponse, ComparisonExperiment, ComparisonDelta, Experim
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function fmt(val: number | null | undefined, decimals = 1): string {
-  if (val == null) return '—'
+  if (val == null) return '-'
   return val.toFixed(decimals)
 }
 
 function DeltaBadge({ pct }: { pct: number | null }) {
-  if (pct == null) return <span className="text-gray-300">—</span>
+  if (pct == null) return <span className="text-gray-300">-</span>
   const isPositive = pct > 0
   const isNeutral = Math.abs(pct) < 2
   const color = isNeutral
@@ -19,7 +19,7 @@ function DeltaBadge({ pct }: { pct: number | null }) {
     : isPositive
       ? 'text-amber-700 bg-amber-50'
       : 'text-blue-700 bg-blue-50'
-  const arrow = isNeutral ? '~' : isPositive ? '↑' : '↓'
+  const arrow = isNeutral ? '~' : isPositive ? 'up' : 'down'
   return (
     <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${color}`}>
       {arrow} {Math.abs(pct).toFixed(1)}%
@@ -147,7 +147,7 @@ function ComparisonTable({
     >
       {label}
       {sortKey === col && (
-        <span className="ml-1 text-brand-500">{sortDir === 'asc' ? '↑' : '↓'}</span>
+        <span className="ml-1 text-brand-500">{sortDir === 'asc' ? 'asc' : 'desc'}</span>
       )}
     </th>
   )
@@ -161,7 +161,7 @@ function ComparisonTable({
               className="text-left px-4 py-2.5 font-medium text-gray-500 cursor-pointer hover:text-gray-700"
               onClick={() => onSort('gene')}
             >
-              Gene {sortKey === 'gene' && <span className="text-brand-500">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+              Gene {sortKey === 'gene' && <span className="text-brand-500">{sortDir === 'asc' ? 'asc' : 'desc'}</span>}
             </th>
             <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-24">Condition</th>
             <th className="text-center px-4 py-2.5 font-medium text-gray-500 w-20">Seeds</th>
@@ -194,7 +194,7 @@ function ComparisonTable({
               <td className="px-4 py-3 text-right font-mono text-gray-600">
                 {data.wildtype.growth_rate.mean != null
                   ? (data.wildtype.growth_rate.mean * 1000).toFixed(2)
-                  : '—'} ×10⁻³/s
+                  : '-'} x10^-3/s
               </td>
               <td className="px-4 py-3 text-right font-mono text-gray-600">
                 {fmt(data.wildtype.doubling_time_min.mean)} min
@@ -230,7 +230,7 @@ function ComparisonTable({
                 <td className="px-4 py-3 text-right font-mono text-gray-600">
                   {comp.growth_rate.mean != null
                     ? (comp.growth_rate.mean * 1000).toFixed(2)
-                    : '—'}
+                    : '-'}
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-gray-600">
                   {fmt(comp.doubling_time_min.mean)} {comp.doubling_time_min.mean != null && <span className="text-gray-400">min</span>}
@@ -241,7 +241,7 @@ function ComparisonTable({
                       {delta ? (
                         <DeltaBadge pct={delta.growth_rate_pct} />
                       ) : (
-                        <span className="text-gray-300">—</span>
+                        <span className="text-gray-300">-</span>
                       )}
                     </div>
                   </td>
@@ -310,7 +310,7 @@ function MetricBarChart({
                 />
               </div>
               <span className="text-xs font-mono text-gray-500 w-20 text-right">
-                {val != null ? `${val.toFixed(d)} ${unit}` : '—'}
+                {val != null ? `${val.toFixed(d)} ${unit}` : '-'}
               </span>
             </div>
           )
@@ -326,10 +326,10 @@ function DeltaSummaryCards({ deltas }: { deltas: ComparisonDelta[] }) {
   if (deltas.length === 0) return null
 
   const metrics = [
-    { key: 'division_time_pct' as const, label: 'Division time', desc: 'Slower division → growth defect' },
-    { key: 'final_mass_pct' as const, label: 'Final mass', desc: 'Lower mass → impaired growth' },
-    { key: 'growth_rate_pct' as const, label: 'Growth rate', desc: 'Lower rate → fitness cost' },
-    { key: 'doubling_time_pct' as const, label: 'Doubling time', desc: 'Longer → slower proliferation' },
+    { key: 'division_time_pct' as const, label: 'Division time', desc: 'Slower division suggests growth defect' },
+    { key: 'final_mass_pct' as const, label: 'Final mass', desc: 'Lower mass suggests impaired growth' },
+    { key: 'growth_rate_pct' as const, label: 'Growth rate', desc: 'Lower rate suggests fitness cost' },
+    { key: 'doubling_time_pct' as const, label: 'Doubling time', desc: 'Longer means slower proliferation' },
   ]
 
   return (
@@ -349,7 +349,7 @@ function DeltaSummaryCards({ deltas }: { deltas: ComparisonDelta[] }) {
                 <DeltaBadge pct={avg} />
               </p>
               <p className="text-[10px] text-gray-400 mt-1">
-                Max: {max != null ? `${max.toFixed(1)}%` : '—'}
+                Max: {max != null ? `${max.toFixed(1)}%` : '-'}
               </p>
               <p className="text-[10px] text-gray-300 mt-0.5">{desc}</p>
             </div>
@@ -378,7 +378,7 @@ function WildtypeSuggestionBanner({
     <div className={`border rounded-lg px-4 py-3 flex items-start gap-3 ${
       isInProgress ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'
     }`}>
-      <span className="text-lg mt-0.5">{isInProgress ? '⏳' : '💡'}</span>
+      <span className="text-xs font-semibold uppercase tracking-wide mt-1">{isInProgress ? 'Pending' : 'Hint'}</span>
       <div className="flex-1">
         <p className={`text-sm font-medium ${isInProgress ? 'text-amber-800' : 'text-blue-800'}`}>
           {suggestion.message}
@@ -391,7 +391,7 @@ function WildtypeSuggestionBanner({
               className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700
                          disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
             >
-              {creating ? 'Creating…' : `Create wildtype (${suggestion.condition}, ${suggestion.recommended_seeds} seeds)`}
+              {creating ? 'Creating...' : `Create wildtype (${suggestion.condition}, ${suggestion.recommended_seeds} seeds)`}
             </button>
             <span className="text-[11px] text-blue-500">
               variant: {suggestion.variant_type}, index: {suggestion.variant_index}
@@ -537,7 +537,7 @@ export function ComparisonDashboard() {
           to="/results"
           className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
         >
-          ← Back to results
+          {'<-'} Back to results
         </Link>
       </div>
 
@@ -564,7 +564,7 @@ export function ComparisonDashboard() {
           {loading ? (
             <span className="flex items-center gap-2">
               <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              Comparing…
+              Comparing...
             </span>
           ) : (
             `Compare ${selected.size} experiment${selected.size !== 1 ? 's' : ''}`
@@ -622,7 +622,7 @@ export function ComparisonDashboard() {
               wildtype={data.wildtype}
               metricKey="growth_rate"
               title="Growth rate"
-              unit="×10⁻³/s"
+              unit="x10^-3/s"
               transform={(v) => v * 1000}
               decimals={2}
             />

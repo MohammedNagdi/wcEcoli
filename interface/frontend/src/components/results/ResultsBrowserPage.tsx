@@ -133,7 +133,7 @@ function MetricWithCI({ metric, unit, decimals = 1, transform }: {
   transform?: (v: number) => number
 }) {
   const t = transform ?? ((v: number) => v)
-  if (metric.mean == null) return <span className="text-gray-300">{'—'}</span>
+  if (metric.mean == null) return <span className="text-gray-300">{'-'}</span>
   const meanStr = t(metric.mean).toFixed(decimals)
   if (metric.n < 2 || metric.std == null) {
     return <span className="font-mono">{meanStr} {unit}</span>
@@ -142,7 +142,7 @@ function MetricWithCI({ metric, unit, decimals = 1, transform }: {
   const ciH = metric.ci_upper != null ? t(metric.ci_upper).toFixed(decimals) : '?'
   return (
     <span className="font-mono" title={'95% CI: [' + ciL + ', ' + ciH + '], n=' + metric.n}>
-      {meanStr} <span className="text-gray-400">{'±'} {t(metric.std).toFixed(decimals)}</span>
+      {meanStr} <span className="text-gray-400">{'+/-'} {t(metric.std).toFixed(decimals)}</span>
       <span className="text-gray-300 text-[10px] ml-1">{unit}</span>
     </span>
   )
@@ -153,7 +153,7 @@ function DeltaIndicator({ pct, label }: { pct: number | null; label: string }) {
   const isNeutral = Math.abs(pct) < 2
   const isPositive = pct > 0
   const color = isNeutral ? 'text-gray-500' : isPositive ? 'text-amber-600' : 'text-blue-600'
-  const arrow = isNeutral ? '~' : isPositive ? '↑' : '↓'
+  const arrow = isNeutral ? '~' : isPositive ? 'up' : 'down'
   return (
     <span className={`text-xs font-medium ${color}`} title={`${label}: ${pct > 0 ? '+' : ''}${pct.toFixed(1)}% vs wildtype`}>
       {arrow}{Math.abs(pct).toFixed(1)}%
@@ -320,7 +320,7 @@ function ExperimentCard({
             </div>
             <div>
               <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Growth rate</p>
-              <p className="text-sm"><MetricWithCI metric={agg.growth_rate} unit={'×10⁻³/s'} decimals={2} transform={(v) => v * 1000} /></p>
+              <p className="text-sm"><MetricWithCI metric={agg.growth_rate} unit={'x10^-3/s'} decimals={2} transform={(v) => v * 1000} /></p>
             </div>
             <div>
               <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Doubling time</p>
@@ -335,19 +335,19 @@ function ExperimentCard({
           <div className="grid grid-cols-4 gap-3 text-xs">
             <div>
               <span className="text-gray-400">Division: </span>
-              <span className="font-mono">{agg.seeds[0].division_time_sec != null ? (agg.seeds[0].division_time_sec / 60).toFixed(1) + ' min' : '—'}</span>
+              <span className="font-mono">{agg.seeds[0].division_time_sec != null ? (agg.seeds[0].division_time_sec / 60).toFixed(1) + ' min' : '-'}</span>
             </div>
             <div>
               <span className="text-gray-400">Mass: </span>
-              <span className="font-mono">{agg.seeds[0].final_mass_fg != null ? agg.seeds[0].final_mass_fg.toFixed(1) + ' fg' : '—'}</span>
+              <span className="font-mono">{agg.seeds[0].final_mass_fg != null ? agg.seeds[0].final_mass_fg.toFixed(1) + ' fg' : '-'}</span>
             </div>
             <div>
               <span className="text-gray-400">Growth: </span>
-              <span className="font-mono">{agg.seeds[0].growth_rate != null ? (agg.seeds[0].growth_rate * 1000).toFixed(2) : '—'}</span>
+              <span className="font-mono">{agg.seeds[0].growth_rate != null ? (agg.seeds[0].growth_rate * 1000).toFixed(2) : '-'}</span>
             </div>
             <div>
               <span className="text-gray-400">Doubling: </span>
-              <span className="font-mono">{agg.seeds[0].doubling_time_min != null ? agg.seeds[0].doubling_time_min.toFixed(1) + ' min' : '—'}</span>
+              <span className="font-mono">{agg.seeds[0].doubling_time_min != null ? agg.seeds[0].doubling_time_min.toFixed(1) + ' min' : '-'}</span>
             </div>
           </div>
         </div>
@@ -396,10 +396,10 @@ function ExperimentCard({
                         {statusLabel(job.status)}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-600">{seed?.division_time_sec != null ? (seed.division_time_sec / 60).toFixed(1) + ' min' : '—'}</td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-600">{seed?.final_mass_fg != null ? seed.final_mass_fg.toFixed(1) + ' fg' : '—'}</td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-600">{seed?.growth_rate != null ? (seed.growth_rate * 1000).toFixed(3) : '—'}</td>
-                    <td className="px-4 py-2 text-right font-mono text-gray-600">{seed?.doubling_time_min != null ? seed.doubling_time_min.toFixed(1) + ' min' : '—'}</td>
+                    <td className="px-4 py-2 text-right font-mono text-gray-600">{seed?.division_time_sec != null ? (seed.division_time_sec / 60).toFixed(1) + ' min' : '-'}</td>
+                    <td className="px-4 py-2 text-right font-mono text-gray-600">{seed?.final_mass_fg != null ? seed.final_mass_fg.toFixed(1) + ' fg' : '-'}</td>
+                    <td className="px-4 py-2 text-right font-mono text-gray-600">{seed?.growth_rate != null ? (seed.growth_rate * 1000).toFixed(3) : '-'}</td>
+                    <td className="px-4 py-2 text-right font-mono text-gray-600">{seed?.doubling_time_min != null ? seed.doubling_time_min.toFixed(1) + ' min' : '-'}</td>
                     <td className="px-4 py-2 text-right">
                       {job.status === 'done' && (
                         <Link to={'/results/' + job.id} className="text-[10px] font-medium text-brand-600 hover:text-brand-700 px-2 py-1 rounded hover:bg-brand-50 transition-colors">
@@ -597,7 +597,7 @@ export function ResultsBrowserPage() {
   }
 
   const formatDate = (iso: string) => {
-    if (!iso) return '—'
+    if (!iso) return '-'
     return new Date(iso).toLocaleString('en-US', {
       month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit',
@@ -605,9 +605,9 @@ export function ResultsBrowserPage() {
   }
 
   const formatDuration = (start: string, end: string) => {
-    if (!start || !end) return '—'
+    if (!start || !end) return '-'
     const ms = new Date(end).getTime() - new Date(start).getTime()
-    if (ms < 0) return '—'
+    if (ms < 0) return '-'
     const totalSec = Math.floor(ms / 1000)
     const h = Math.floor(totalSec / 3600)
     const m = Math.floor((totalSec % 3600) / 60)
