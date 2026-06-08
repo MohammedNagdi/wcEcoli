@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Line } from 'react-chartjs-2'
 import {
+  getMoleculeIds,
   getMoleculeTypes,
   getMoleculeTimeseries,
   searchMolecules,
@@ -48,6 +49,7 @@ const CHART_COLORS = [
 ]
 
 const MAX_SELECTED = 5
+const BROWSE_LIMIT = 30
 
 type SelectedMolecule = {
   molecule_type: string
@@ -97,6 +99,18 @@ function formatDeltaPct(value: number | null | undefined) {
 
 function variableKey(variable: ResultStateVariable) {
   return variable.molecule_type + ':' + variable.id
+}
+
+function variableSortScore(variable: ResultStateVariable) {
+  if (variable.rank_score != null && Number.isFinite(variable.rank_score)) return variable.rank_score
+  if (variable.delta_pct != null && Number.isFinite(variable.delta_pct)) return Math.abs(variable.delta_pct)
+  if (variable.delta != null && Number.isFinite(variable.delta)) return Math.abs(variable.delta)
+  return 0
+}
+
+function variableName(variable: ResultStateVariable) {
+  const type = STATE_TYPE_LABELS[variable.display_type] ?? variable.display_type
+  return `${variable.gene_symbol} ${type}`
 }
 
 function downsample(points: { time: number; value: number }[], max = 500) {
@@ -370,6 +384,10 @@ export function ResultStateExplorer({
 
   const availableVariables = data.variables.filter((variable) => variable.available)
   const topVariables = availableVariables.slice(0, 16)
+  const changedVariables = [...availableVariables]
+    .filter((variable) => variableSortScore(variable) > 0)
+    .sort((a, b) => variableSortScore(b) - variableSortScore(a))
+    .slice(0, 3)
   const regulatoryEdges = data.edges.filter((edge) => edge.edge_type === 'regulates')
   const isGeneKnockout = variantType === 'gene_knockout'
   const focusLabel = isGeneKnockout ? 'gene knockout target' : 'experiment focus gene'
@@ -400,6 +418,62 @@ export function ResultStateExplorer({
 
       <div className="p-4 space-y-4">
         <StoichiometryPanel data={stoichiometry} />
+
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-900">
+                What to inspect first
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-indigo-800">
+                Start with the largest available final-value shifts versus the matching WT. This ranks model outputs for inspection; it does not prove which molecule caused the phenotype.
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-700">
+              {data.wt_job_id ? `WT job #${data.wt_job_id}` : 'No WT baseline'}
+            </span>
+          </div>
+
+          {data.wt_job_id && changedVariables.length > 0 ? (
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              {changedVariables.map((variable) => {
+                const key = variableKey(variable)
+                const isPlotted = Boolean(plotted[key])
+                return (
+                  <button
+                    key={`priority-${key}-${variable.role}`}
+                    type="button"
+                    onClick={() => togglePlot(variable)}
+                    disabled={plottingKey === key}
+                    className="rounded-md border border-indigo-100 bg-white px-3 py-2 text-left transition-colors hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <span className="block truncate text-xs font-semibold text-gray-900">
+                      {variableName(variable)}
+                    </span>
+                    <span className="mt-0.5 block truncate font-mono text-[11px] text-gray-500">
+                      {variable.id}
+                    </span>
+                    <span className="mt-1 flex items-center justify-between gap-2 text-[11px]">
+                      <span className="text-gray-400">{ROLE_LABELS[variable.role] ?? variable.role}</span>
+                      <span className="font-mono font-semibold text-indigo-700">
+                        {formatDeltaPct(variable.delta_pct)}
+                      </span>
+                    </span>
+                    <span className="mt-1 block text-[11px] font-medium text-brand-700">
+                      {plottingKey === key ? 'Loading...' : isPlotted ? 'Hide plot' : 'Plot this output'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-md border border-indigo-100 bg-white px-3 py-2 text-xs text-indigo-800">
+              {data.wt_job_id
+                ? 'No shifted linked outputs were detected in the final-value comparison. Use the table below for absolute trajectories.'
+                : 'No condition-matched WT job is available, so linked outputs are shown without relative prioritization.'}
+            </p>
+          )}
+        </div>
 
         {regulatoryEdges.length > 0 && (
           <div>
@@ -550,7 +624,14 @@ export function MoleculeExplorer({
   const [loadingTs, setLoadingTs] = useState(false)
   const [typesLoading, setTypesLoading] = useState(true)
   const [explorerOpen, setExplorerOpen] = useState(false)
+  const [browseType, setBrowseType] = useState<string | null>(null)
+  const [browseSearch, setBrowseSearch] = useState('')
+  const [browseIds, setBrowseIds] = useState<string[]>([])
+  const [browseCount, setBrowseCount] = useState(0)
+  const [browseLoading, setBrowseLoading] = useState(false)
+  const [browseError, setBrowseError] = useState<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const browseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     setTypesLoading(true)
@@ -561,6 +642,33 @@ export function MoleculeExplorer({
       .catch(() => {})
       .finally(() => setTypesLoading(false))
   }, [jobId])
+
+  useEffect(() => {
+    if (!browseType || !explorerOpen) return
+    if (browseDebounceRef.current) clearTimeout(browseDebounceRef.current)
+    browseDebounceRef.current = setTimeout(() => {
+      setBrowseLoading(true)
+      setBrowseError(null)
+      getMoleculeIds(jobId, browseType, {
+        search: browseSearch.trim() || undefined,
+        limit: BROWSE_LIMIT,
+      })
+        .then((res) => {
+          setBrowseIds(res.ids)
+          setBrowseCount(res.count)
+        })
+        .catch((err) => {
+          setBrowseIds([])
+          setBrowseCount(0)
+          setBrowseError(err.message ?? 'Failed to load output IDs')
+        })
+        .finally(() => setBrowseLoading(false))
+    }, 200)
+
+    return () => {
+      if (browseDebounceRef.current) clearTimeout(browseDebounceRef.current)
+    }
+  }, [jobId, browseType, browseSearch, explorerOpen])
 
   const doSearch = useCallback(
     (q: string) => {
@@ -640,8 +748,16 @@ export function MoleculeExplorer({
   if (types.length === 0) return null
 
   const totalCount = outputSeriesTotal(types).toLocaleString()
-  const searchPlaceholder = 'Search gene, protein, metabolite, reaction, or raw output ID...'
+  const searchPlaceholder = 'Search a gene, protein/metabolite name, reaction, or output ID...'
   const resultGroups = Object.entries(searchResults).filter(([, ids]) => ids.length > 0)
+  const selectedBrowseType = types.find((type) => type.molecule_type === browseType)
+  const suggestedSearches = [
+    geneSymbol,
+    'GLC',
+    'ACET',
+    'FBA',
+    'RNA',
+  ].filter((item): item is string => Boolean(item))
 
   return (
     <div>
@@ -670,11 +786,48 @@ export function MoleculeExplorer({
 
         {explorerOpen && (
           <div className="p-4">
+            <div className="mb-3 rounded-lg border border-gray-200 bg-slate-50 px-3 py-3">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Search path
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                    Search accepts biological names first. Gene symbols resolve to their model outputs when possible; output IDs are still supported for exact lookup.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {suggestedSearches.map((term) => (
+                    <button
+                      key={term}
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery(term)
+                        setExplorerOpen(true)
+                      }}
+                      className="rounded-full border border-gray-200 bg-white px-2 py-1 font-mono text-[11px] text-gray-600 hover:bg-gray-50"
+                    >
+                      {term}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
               {types.map((t) => (
-                <div
+                <button
                   key={t.molecule_type}
-                  className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
+                  type="button"
+                  onClick={() => {
+                    setBrowseType(t.molecule_type)
+                    setBrowseSearch('')
+                  }}
+                  className={'rounded-md border px-3 py-2 text-left transition-colors ' + (
+                    browseType === t.molecule_type
+                      ? 'border-brand-300 bg-brand-50'
+                      : 'border-gray-200 bg-gray-50 hover:bg-white'
+                  )}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-gray-700">{outputTypeLabel(t.molecule_type)}</span>
@@ -683,9 +836,92 @@ export function MoleculeExplorer({
                   <p className="mt-1 text-[11px] leading-4 text-gray-400">
                     {TYPE_DESCRIPTIONS[t.molecule_type] ?? 'Simulation output series.'}
                   </p>
-                </div>
+                </button>
               ))}
             </div>
+
+            {selectedBrowseType && (
+              <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="text-xs font-semibold text-gray-800">
+                      Browse {outputTypeLabel(selectedBrowseType.molecule_type)}
+                    </div>
+                    <p className="mt-1 text-xs text-gray-400">
+                      Showing plottable output IDs from this family. Filter within the family, then select up to {MAX_SELECTED} outputs to plot together.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBrowseType(null)
+                      setBrowseSearch('')
+                      setBrowseIds([])
+                      setBrowseCount(0)
+                    }}
+                    className="self-start rounded-md px-2 py-1 text-xs font-medium text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                  >
+                    Close browse
+                  </button>
+                </div>
+                <div className="mt-3 grid gap-3 lg:grid-cols-[260px,1fr]">
+                  <input
+                    type="text"
+                    value={browseSearch}
+                    onChange={(event) => setBrowseSearch(event.target.value)}
+                    placeholder={`Filter ${outputTypeLabel(selectedBrowseType.molecule_type).toLowerCase()}...`}
+                    className="rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                  />
+                  <div className="min-w-0">
+                    {browseLoading ? (
+                      <div className="flex items-center gap-2 rounded-md border border-gray-100 px-3 py-2 text-xs text-gray-400">
+                        <div className="h-3.5 w-3.5 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+                        Loading output IDs...
+                      </div>
+                    ) : browseError ? (
+                      <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
+                        {browseError}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mb-2 text-xs text-gray-400">
+                          {browseCount.toLocaleString()} matching output series
+                          {browseCount > BROWSE_LIMIT ? `, first ${BROWSE_LIMIT} shown` : ''}
+                        </div>
+                        <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto">
+                          {browseIds.map((id) => {
+                            const item = { molecule_type: selectedBrowseType.molecule_type, id }
+                            const key = selectedKey(item)
+                            const isSelected = selected.some((x) => selectedKey(x) === key)
+                            const canSelect = isSelected || selected.length < MAX_SELECTED
+                            return (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => canSelect && toggleSelect(item)}
+                                disabled={!canSelect}
+                                className={'rounded-full border px-2 py-1 font-mono text-[11px] transition-colors ' + (
+                                  isSelected
+                                    ? 'border-brand-300 bg-brand-50 text-brand-700'
+                                    : canSelect
+                                    ? 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-white'
+                                    : 'cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300'
+                                )}
+                              >
+                                {compactMoleculeId(id)}
+                              </button>
+                            )
+                          })}
+                          {browseIds.length === 0 && (
+                            <span className="text-xs text-gray-400">No output IDs match this filter.</span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="relative mb-3">
               <input
