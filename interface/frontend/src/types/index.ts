@@ -286,6 +286,10 @@ export interface BatchSummary {
   name: string
   created_at: string
   total: number
+  targets: string[]
+  variant_types: string[]
+  conditions: string[]
+  timelines: string[]
   draft: number
   queued: number
   running: number

@@ -15,6 +15,7 @@ from app.services.multi_gene_knockout import (
     strip_multi_gene_targets,
     with_multi_gene_targets,
 )
+from app.services.experiment_identity import experiment_environment_key
 from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
 
 
@@ -49,6 +50,17 @@ class BatchResponse(BaseModel):
     experiment_ids: list[int]
     skipped: int = 0
     skipped_genes: list[str] = []
+
+
+class ResolvedBatchRecord(BaseModel):
+    variant_index: int
+    gene_symbol: str = ""
+    gene_symbols: list[str] = []
+    ko_indices: list[int] = []
+    condition: str
+    timeline: str
+    sim_params: str
+    seed: int
 
 
 def _parse_sim_params(raw: str) -> dict[str, Any]:
@@ -130,18 +142,30 @@ def _find_or_create_batch_wildtype(
     sim_params: str,
     seed: int,
     now: str,
-) -> int:
-    existing = session.exec(
+) -> tuple[int, bool]:
+    target_key = experiment_environment_key(
+        session,
+        condition=condition,
+        timeline=timeline,
+        sim_params=sim_params,
+    )
+    candidates = session.exec(
         select(Experiment).where(
-            Experiment.batch_id == batch_id,
             Experiment.variant_type == "wildtype",
             Experiment.condition == condition,
-            Experiment.timeline == timeline,
-            Experiment.sim_params == sim_params,
         )
-    ).first()
-    if existing and existing.id is not None:
-        return existing.id
+    ).all()
+    for existing in candidates:
+        if existing.id is None:
+            continue
+        existing_key = experiment_environment_key(
+            session,
+            condition=existing.condition,
+            timeline=existing.timeline,
+            sim_params=existing.sim_params,
+        )
+        if existing_key == target_key:
+            return existing.id, False
 
     experiment = Experiment(
         name=f"Wildtype control seed {seed}",
@@ -161,7 +185,64 @@ def _find_or_create_batch_wildtype(
     session.flush()
     if experiment.id is None:
         raise HTTPException(500, "Failed to create wildtype experiment")
-    return experiment.id
+    return experiment.id, True
+
+
+def _resolve_batch_records(body: BatchRequest, session: Session) -> list[ResolvedBatchRecord]:
+    resolved: list[ResolvedBatchRecord] = []
+    seen: dict[tuple[Any, ...], int] = {}
+
+    for i, record in enumerate(body.records, start=1):
+        condition, timeline, sim_params = _record_base(session, record)
+        variant_index = record.variant_index
+        gene_symbol = record.gene_symbol.strip()
+        gene_symbols: list[str] = []
+        ko_indices: list[int] = []
+
+        if body.variant_type == "gene_knockout" and gene_symbol:
+            gene = _resolve_gene(session, gene_symbol)
+            variant_index = gene.ko_index
+            gene_symbol = gene.symbol
+            ko_indices = [variant_index]
+        elif body.variant_type == MULTI_GENE_KNOCKOUT_TYPE:
+            sim_params, gene_symbols, ko_indices = with_multi_gene_targets(
+                sim_params,
+                record.gene_symbols,
+                session,
+            )
+            variant_index = 0
+            gene_symbol = ",".join(gene_symbols)
+
+        semantic_key = (
+            body.variant_type,
+            tuple(ko_indices) if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE else variant_index,
+            condition,
+            timeline,
+            sim_params,
+        )
+        if semantic_key in seen:
+            first = seen[semantic_key]
+            raise HTTPException(
+                400,
+                (
+                    f"Records {first} and {i} resolve to the same simulation. "
+                    "Remove one row or change the target, seed, generation count, duration, or media protocol."
+                ),
+            )
+        seen[semantic_key] = i
+
+        resolved.append(ResolvedBatchRecord(
+            variant_index=variant_index,
+            gene_symbol=gene_symbol,
+            gene_symbols=gene_symbols,
+            ko_indices=ko_indices,
+            condition=condition,
+            timeline=timeline,
+            sim_params=sim_params,
+            seed=record.seed,
+        ))
+
+    return resolved
 
 
 def create_typed_batch(body: BatchRequest, session: Session) -> BatchResponse:
@@ -173,44 +254,28 @@ def create_typed_batch(body: BatchRequest, session: Session) -> BatchResponse:
     batch_name = body.name.strip()
     created_ids: list[int] = []
     wildtype_keys: set[tuple[str, str, str, int]] = set()
+    resolved_records = _resolve_batch_records(body, session)
 
-    for record in body.records:
-        condition, timeline, sim_params = _record_base(session, record)
-        variant_index = record.variant_index
-        gene_symbol = record.gene_symbol.strip()
-
-        if body.variant_type == "gene_knockout" and gene_symbol:
-            gene = _resolve_gene(session, gene_symbol)
-            variant_index = gene.ko_index
-            gene_symbol = gene.symbol
-        elif body.variant_type == MULTI_GENE_KNOCKOUT_TYPE:
-            sim_params, canonical_symbols, ko_indices = with_multi_gene_targets(
-                sim_params,
-                record.gene_symbols,
-                session,
-            )
-            variant_index = 0
-            gene_symbol = ",".join(canonical_symbols)
-
+    for record in resolved_records:
         if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE:
-            name = f"Multi-KO [{','.join(str(index) for index in ko_indices)}] seed {record.seed}"
-        elif gene_symbol:
-            name = f"KO {gene_symbol} seed {record.seed}"
+            name = f"Multi-KO [{','.join(str(index) for index in record.ko_indices)}] seed {record.seed}"
+        elif record.gene_symbol:
+            name = f"KO {record.gene_symbol} seed {record.seed}"
         else:
-            name = f"{body.variant_type}[{variant_index}] seed {record.seed}"
+            name = f"{body.variant_type}[{record.variant_index}] seed {record.seed}"
 
         experiment = Experiment(
             name=name,
             description=batch_name,
             variant_type=body.variant_type,
-            variant_index=variant_index,
-            condition=condition,
-            timeline=timeline,
-            sim_params=sim_params,
+            variant_index=record.variant_index,
+            condition=record.condition,
+            timeline=record.timeline,
+            sim_params=record.sim_params,
             status="draft",
             created_at=now,
             updated_at=now,
-            gene_symbol=gene_symbol,
+            gene_symbol=record.gene_symbol,
             batch_id=batch_id,
         )
         session.add(experiment)
@@ -221,14 +286,14 @@ def create_typed_batch(body: BatchRequest, session: Session) -> BatchResponse:
 
         if body.include_wildtype:
             wildtype_sim_params = (
-                strip_multi_gene_targets(sim_params)
+                strip_multi_gene_targets(record.sim_params)
                 if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE
-                else sim_params
+                else record.sim_params
             )
-            wildtype_keys.add((condition, timeline, wildtype_sim_params, record.seed))
+            wildtype_keys.add((record.condition, record.timeline, wildtype_sim_params, record.seed))
 
     for condition, timeline, sim_params, seed in sorted(wildtype_keys):
-        wt_id = _find_or_create_batch_wildtype(
+        wt_id, created = _find_or_create_batch_wildtype(
             session,
             batch_id=batch_id,
             batch_name=batch_name,
@@ -238,7 +303,7 @@ def create_typed_batch(body: BatchRequest, session: Session) -> BatchResponse:
             seed=seed,
             now=now,
         )
-        if wt_id not in created_ids:
+        if created and wt_id not in created_ids:
             created_ids.append(wt_id)
 
     session.commit()

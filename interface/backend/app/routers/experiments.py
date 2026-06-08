@@ -20,6 +20,7 @@ from app.routers.jobs import (
     RunResponse,
     create_simulation_jobs_for_experiment,
 )
+from app.services.experiment_identity import experiment_environment_key
 from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
 from app.services.multi_gene_knockout import (
     MULTI_GENE_KNOCKOUT_TYPE,
@@ -626,12 +627,18 @@ def _find_or_create_wildtype(
     now: str,
     batch_id: str = "",
 ) -> int:
-    """Find an existing wildtype experiment for this condition, or create one.
+    """Find an existing wildtype experiment for this run environment, or create one.
 
-    Returns the experiment ID. Deduplicates across all statuses — a WT that's
-    queued, running, or done is reused rather than creating a duplicate.
+    Returns the experiment ID. Deduplicates across all statuses, but only when
+    condition, resolved timeline, seed set, generation count, and duration all match.
     """
-    existing_wt = session.exec(
+    target_key = experiment_environment_key(
+        session,
+        condition=condition,
+        timeline=timeline,
+        sim_params=sim_params,
+    )
+    existing_wts = session.exec(
         select(Experiment).where(
             Experiment.variant_type == "wildtype",
             Experiment.condition == condition,
@@ -640,12 +647,25 @@ def _find_or_create_wildtype(
             Experiment.status.desc(),
             Experiment.created_at.desc(),
         )
-    ).first()
+    ).all()
 
-    if existing_wt:
-        logger.info("Reusing existing WT experiment #%d (%s) for condition '%s'",
-                     existing_wt.id, existing_wt.status, condition)
-        return existing_wt.id
+    for existing_wt in existing_wts:
+        if existing_wt.id is None:
+            continue
+        existing_key = experiment_environment_key(
+            session,
+            condition=existing_wt.condition,
+            timeline=existing_wt.timeline,
+            sim_params=existing_wt.sim_params,
+        )
+        if existing_key == target_key:
+            logger.info(
+                "Reusing existing WT experiment #%d (%s) for condition '%s'",
+                existing_wt.id,
+                existing_wt.status,
+                condition,
+            )
+            return existing_wt.id
 
     wt = Experiment(
         name=f"Wildtype control ({condition})",
@@ -771,6 +791,10 @@ class BatchSummary(BaseModel):
     name: str
     created_at: str
     total: int
+    targets: list[str] = []
+    variant_types: list[str] = []
+    conditions: list[str] = []
+    timelines: list[str] = []
     draft: int = 0
     queued: int = 0
     running: int = 0
@@ -827,6 +851,24 @@ def _batch_status_counts(experiments: list[Experiment]) -> dict[str, int]:
         if bucket in status_counts:
             status_counts[bucket] += 1
     return status_counts
+
+
+def _batch_facets(experiments: list[Experiment]) -> dict[str, list[str]]:
+    targets = sorted({
+        symbol.strip()
+        for exp in experiments
+        for symbol in (exp.gene_symbol or "").split(",")
+        if symbol.strip()
+    })
+    variant_types = sorted({exp.variant_type for exp in experiments if exp.variant_type})
+    conditions = sorted({exp.condition for exp in experiments if exp.condition})
+    timelines = sorted({exp.timeline for exp in experiments if exp.timeline})
+    return {
+        "targets": targets,
+        "variant_types": variant_types,
+        "conditions": conditions,
+        "timelines": timelines,
+    }
 
 
 def _get_batch_experiments(batch_id: str, session: Session) -> list[Experiment]:
@@ -897,6 +939,7 @@ def list_batches(session: Session = Depends(get_session)):
             name=name,
             created_at=first.created_at,
             total=len(exps),
+            **_batch_facets(exps),
             **status_counts,
         ))
 
@@ -930,6 +973,7 @@ def get_batch_detail(batch_id: str, session: Session = Depends(get_session)):
         name=name,
         created_at=first.created_at,
         total=len(experiments),
+        **_batch_facets(experiments),
         experiments=exp_out,
         **status_counts,
     )

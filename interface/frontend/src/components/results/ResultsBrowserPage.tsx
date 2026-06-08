@@ -28,12 +28,20 @@ function validView(value: string | null): ViewMode {
 
 function timelineLabel(value: string | null | undefined): string {
   const timeline = (value || '').trim()
-  return timeline || 'No timeline'
+  return timeline || 'No time-varying protocol'
 }
 
 function timelineValue(value: string | null | undefined): string {
   const timeline = (value || '').trim()
   return timeline || NO_TIMELINE
+}
+
+function protocolLabel(exp: Experiment): string {
+  return timelineLabel(exp.timeline)
+}
+
+function batchLabel(exp: Experiment): string {
+  return exp.description?.trim() || exp.name?.trim() || 'Batch'
 }
 
 function viewLabel(viewMode: ViewMode): string {
@@ -59,17 +67,17 @@ function experimentSearchText(exp: Experiment, jobs: SimulationJob[] = []): stri
   return [
     exp.name,
     resultIdentity(exp),
+    batchLabel(exp),
     exp.description,
     exp.gene_symbol,
     exp.variant_type,
     variantLabel(exp.variant_type),
     String(exp.variant_index ?? ''),
     exp.condition,
-    exp.timeline,
-    exp.batch_id,
-    String(exp.id),
-    ...jobs.map((job) => String(job.id)),
+    protocolLabel(exp),
+    exp.variant_type === 'wildtype' ? 'control baseline wt' : '',
     ...jobs.map((job) => job.status),
+    ...jobs.map((job) => statusLabel(job.status)),
   ].filter(Boolean).join(' ').toLowerCase()
 }
 
@@ -177,7 +185,8 @@ function ExperimentCard({
   const totalSeeds = jobs.length
   const hasMultipleSeeds = totalSeeds > 1
   const identity = resultIdentity(exp)
-  const timeline = timelineLabel(exp.timeline)
+  const timeline = protocolLabel(exp)
+  const batchName = batchLabel(exp)
   const latestJob = [...jobs].sort((a, b) => b.id - a.id)[0]
   const statusSummary = [
     doneJobs.length > 0 ? `${doneJobs.length} done` : '',
@@ -225,8 +234,10 @@ function ExperimentCard({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
             <span>{variantLabel(exp.variant_type)}</span>
             <span>Variant index <span className="font-mono text-gray-500">{exp.variant_index}</span></span>
-            {exp.batch_id && exp.name && exp.name !== identity && (
-              <span className="truncate">Batch <span className="font-mono text-gray-500">{exp.batch_id}</span></span>
+            {exp.batch_id && (
+              <span className="truncate" title={`Internal batch ID: ${exp.batch_id}`}>
+                Batch <span className="text-gray-500">{batchName}</span>
+              </span>
             )}
             {exp.gene_symbol && (
               <span>Gene: <span className="font-mono text-bio-gene">{exp.gene_symbol}</span></span>
@@ -238,7 +249,7 @@ function ExperimentCard({
             )}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-            <span className="font-medium text-gray-500">Timeline</span>
+            <span className="font-medium text-gray-500">Protocol</span>
             <span className="max-w-full truncate rounded bg-gray-50 px-2 py-1 font-mono text-[11px] text-gray-600" title={timeline}>
               {timeline}
             </span>
@@ -417,6 +428,7 @@ export function ResultsBrowserPage() {
   const [seedFilter, setSeedFilter] = useState('all')
   const [timelineFilter, setTimelineFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [datePreset, setDatePreset] = useState<DatePreset>('any')
   const [customDate, setCustomDate] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Experiment | null>(null)
@@ -463,6 +475,7 @@ export function ResultsBrowserPage() {
     setSeedFilter('all')
     setTimelineFilter('all')
     setTypeFilter('all')
+    setStatusFilter('all')
     setDatePreset('any')
     setCustomDate('')
   }
@@ -523,12 +536,15 @@ export function ResultsBrowserPage() {
     ...[...experiments.values()].map((exp) => exp.variant_type),
     ...jobs.map((job) => job.variant_type),
   ])].sort((a, b) => variantLabel(a).localeCompare(variantLabel(b)))
+  const statusOptions = [...new Set(jobs.map((job) => job.status))]
+    .sort((a, b) => statusLabel(a).localeCompare(statusLabel(b)))
 
   const experimentMatchesFilters = (exp: Experiment, expJobs: SimulationJob[]) => {
     if (normalizedQuery && !experimentSearchText(exp, expJobs).includes(normalizedQuery)) return false
     if (seedFilter !== 'all' && !expJobs.some((job) => String(job.seed) === seedFilter)) return false
     if (timelineFilter !== 'all' && timelineValue(exp.timeline) !== timelineFilter) return false
     if (typeFilter !== 'all' && exp.variant_type !== typeFilter) return false
+    if (statusFilter !== 'all' && !expJobs.some((job) => job.status === statusFilter)) return false
     return matchesDatePreset(latestJobDate(expJobs, exp), datePreset, customDate)
   }
 
@@ -536,12 +552,14 @@ export function ResultsBrowserPage() {
     const exp = experiments.get(job.experiment_id)
     const jobSearchText = [
       exp ? experimentSearchText(exp, [job]) : '',
+      exp ? batchLabel(exp) : '',
       job.variant_type,
       variantLabel(job.variant_type),
       String(job.variant_index ?? ''),
       job.condition,
       job.timeline,
       job.status,
+      statusLabel(job.status),
       job.phase,
       job.error_message,
       String(job.id),
@@ -552,6 +570,7 @@ export function ResultsBrowserPage() {
     if (seedFilter !== 'all' && String(job.seed) !== seedFilter) return false
     if (timelineFilter !== 'all' && timelineValue(job.timeline || exp?.timeline) !== timelineFilter) return false
     if (typeFilter !== 'all' && (exp?.variant_type || job.variant_type) !== typeFilter) return false
+    if (statusFilter !== 'all' && job.status !== statusFilter) return false
     return matchesDatePreset(parseDate(job.started_at) ?? parseDate(job.created_at), datePreset, customDate)
   }
 
@@ -566,6 +585,7 @@ export function ResultsBrowserPage() {
     || seedFilter !== 'all'
     || timelineFilter !== 'all'
     || typeFilter !== 'all'
+    || statusFilter !== 'all'
     || datePreset !== 'any'
   )
   const filteredIdentityCounts = new Map<string, number>()
@@ -676,30 +696,34 @@ export function ResultsBrowserPage() {
               </h2>
               <p className="text-xs text-gray-400">
                 {viewMode === 'jobs'
-                  ? 'Filter raw jobs by seed, timeline, type, or run date.'
-                  : 'Filter biological result groups without showing the raw job log.'}
+                  ? 'Filter raw execution records by status, seed, protocol, type, or run date.'
+                  : 'Filter by target gene, batch name, experiment type, condition, protocol, status, or run date.'}
               </p>
             </div>
           </div>
-          <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr),120px,180px,180px,150px,150px]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr),120px,170px,170px,150px,150px,150px]">
             <SearchInput
               value={query}
               onChange={setQuery}
-              placeholder={viewMode === 'jobs' ? 'Search jobs...' : 'Search outcomes...'}
+              placeholder={viewMode === 'jobs' ? 'Search job ID, target, protocol...' : 'Search gene, batch, condition...'}
             />
             <select value={seedFilter} onChange={(event) => setSeedFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by seed">
               <option value="all">All seeds</option>
               {seedOptions.map((seed) => <option key={seed} value={String(seed)}>Seed {seed}</option>)}
             </select>
             <select value={timelineFilter} onChange={(event) => setTimelineFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by timeline">
-              <option value="all">All timelines</option>
+              <option value="all">All protocols</option>
               {timelineOptions.map((timeline) => (
-                <option key={timeline} value={timeline}>{timeline === NO_TIMELINE ? 'No timeline' : timeline}</option>
+                <option key={timeline} value={timeline}>{timeline === NO_TIMELINE ? 'No time-varying protocol' : timeline}</option>
               ))}
             </select>
             <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by experiment type">
               <option value="all">All types</option>
               {typeOptions.map((type) => <option key={type} value={type}>{variantLabel(type)}</option>)}
+            </select>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by job status">
+              <option value="all">All statuses</option>
+              {statusOptions.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
             </select>
             <select value={datePreset} onChange={(event) => handleDatePresetChange(event.target.value as DatePreset)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by date">
               <option value="any">Any date</option>
@@ -750,7 +774,7 @@ export function ResultsBrowserPage() {
           {filteredExpIds.length === 0 ? (
             <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
               <p className="text-gray-500 font-medium mb-1">No matching experiments</p>
-              <p className="text-sm text-gray-400 mb-4">Adjust search, seed, timeline, type, or date filters.</p>
+              <p className="text-sm text-gray-400 mb-4">Adjust target, seed, protocol, type, status, or date filters.</p>
               {filtersActive && (
                 <button type="button" onClick={clearFilters} className="inline-flex items-center px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors">
                   Clear filters
@@ -781,7 +805,7 @@ export function ResultsBrowserPage() {
           {filteredJobs.length === 0 ? (
             <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
               <p className="text-gray-500 font-medium mb-1">No matching jobs</p>
-              <p className="text-sm text-gray-400 mb-4">Adjust search, seed, timeline, type, or date filters.</p>
+              <p className="text-sm text-gray-400 mb-4">Adjust job search, seed, protocol, type, status, or date filters.</p>
               {filtersActive && (
                 <button type="button" onClick={clearFilters} className="inline-flex items-center px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors">
                   Clear filters

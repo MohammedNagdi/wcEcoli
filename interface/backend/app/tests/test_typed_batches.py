@@ -188,6 +188,66 @@ def test_typed_batch_allows_same_variant_with_different_explicit_seeds():
         tempdir.cleanup()
 
 
+def test_typed_gene_knockout_batch_rejects_duplicate_effective_ko_records():
+    tempdir, _, client = _build_client()
+    try:
+        response = client.post(
+            "/api/experiments/batch",
+            json={
+                "name": "duplicate KO index",
+                "variant_type": "gene_knockout",
+                "records": [
+                    {"gene_symbol": "abcA", "seed": 0, "generations": 1, "sim_params": "{}"},
+                    {"gene_symbol": "abcC", "seed": 0, "generations": 1, "sim_params": "{}"},
+                ],
+            },
+        )
+        assert response.status_code == 400, response.text
+        assert "resolve to the same simulation" in response.text
+    finally:
+        tempdir.cleanup()
+
+
+def test_typed_batch_reuses_existing_matching_wildtype_control():
+    tempdir, engine, client = _build_client()
+    try:
+        with Session(engine) as session:
+            session.add(Experiment(
+                name="Existing basal WT",
+                variant_type="wildtype",
+                condition="basal",
+                timeline="",
+                sim_params=json.dumps({"seeds": 1, "generations": 1, "length_sec": 10800}),
+                status="done",
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            ))
+            session.commit()
+
+        response = client.post(
+            "/api/experiments/batch",
+            json={
+                "name": "reuse WT",
+                "variant_type": "gene_knockout",
+                "include_wildtype": True,
+                "records": [
+                    {"gene_symbol": "abcB", "seed": 0, "generations": 1, "sim_params": "{}"},
+                ],
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["created"] == 1
+
+        with Session(engine) as session:
+            wildtypes = session.exec(select(Experiment).where(Experiment.variant_type == "wildtype")).all()
+            batch_experiments = session.exec(select(Experiment).where(Experiment.batch_id != "")).all()
+            assert len(wildtypes) == 1
+            assert len(batch_experiments) == 1
+            assert batch_experiments[0].gene_symbol == "abcB"
+    finally:
+        tempdir.cleanup()
+
+
 def test_create_typed_multi_gene_knockout_batch_with_matching_wildtypes():
     tempdir, engine, client = _build_client()
     try:

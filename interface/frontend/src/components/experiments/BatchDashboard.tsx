@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { cancelBatch, deleteBatch, deleteExperiment, getBatches, getBatchDetail, resumeBatch, runBatch } from '../../api/client'
-import { statusLabel } from '../../utils/labels'
+import { statusLabel, variantLabel } from '../../utils/labels'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { SearchInput } from '../common/SearchInput'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
@@ -17,6 +17,16 @@ const STATUS_COLORS: Record<string, string> = {
   done:         'bg-green-50 text-green-700',
   failed:       'bg-red-50 text-red-700',
   cancelled:    'bg-gray-100 text-gray-600',
+}
+
+function batchSearchText(batch: BatchSummary): string {
+  return [
+    batch.name,
+    ...batch.targets,
+    ...batch.variant_types,
+    ...batch.conditions,
+    ...batch.timelines,
+  ].filter(Boolean).join(' ').toLowerCase()
 }
 
 export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: string }) {
@@ -212,7 +222,7 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
 
   const normalizedQuery = query.trim().toLowerCase()
   const visibleBatches = normalizedQuery
-    ? batches.filter((batch) => batch.name.toLowerCase().includes(normalizedQuery))
+    ? batches.filter((batch) => batchSearchText(batch).includes(normalizedQuery))
     : batches
 
   if (loading) {
@@ -258,7 +268,7 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
           <SearchInput
             value={query}
             onChange={setQuery}
-            placeholder="Search batches..."
+            placeholder="Search batch, gene, condition, protocol..."
           />
           <div className="flex items-center justify-between gap-3 text-xs text-gray-400 sm:justify-end">
             <span>
@@ -280,7 +290,7 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
       {visibleBatches.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-500 font-medium mb-1">No matching batches</p>
-          <p className="text-sm text-gray-400">Adjust the batch name search.</p>
+          <p className="text-sm text-gray-400">Adjust batch, gene, condition, protocol, or type search.</p>
         </div>
       ) : visibleBatches.map((batch) => (
         <BatchCard
@@ -378,6 +388,9 @@ function BatchCard({
   const actionBusy = isRunning || isCancelling || isResuming || isDeleting
   const [batchMenuOpen, setBatchMenuOpen] = useState(false)
   const [openExperimentMenuId, setOpenExperimentMenuId] = useState<number | null>(null)
+  const targetSummary = batch.targets.length > 0 ? batch.targets.slice(0, 4).join(', ') : 'No target gene'
+  const typeSummary = batch.variant_types.map(variantLabel).join(', ')
+  const conditionSummary = batch.conditions.length > 0 ? batch.conditions.join(', ') : 'No condition'
 
   useEffect(() => {
     if (openExperimentMenuId == null && !batchMenuOpen) return
@@ -427,6 +440,9 @@ function BatchCard({
             </div>
             <p className="text-xs text-gray-400 mt-0.5 ml-5">
               {formatDate(batch.created_at)} · {total} experiment{total !== 1 ? 's' : ''}
+            </p>
+            <p className="mt-1 ml-5 truncate text-xs text-gray-500" title={`${targetSummary} | ${typeSummary} | ${conditionSummary}`}>
+              {targetSummary}{batch.targets.length > 4 ? ` +${batch.targets.length - 4}` : ''} · {typeSummary} · {conditionSummary}
             </p>
           </div>
 
