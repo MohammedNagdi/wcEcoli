@@ -22,6 +22,7 @@ from app.services.assistant_harness import (
     record_provenance,
     resolve_confirmation,
     store_message,
+    tool_call_to_out,
 )
 
 
@@ -383,6 +384,10 @@ def test_read_only_inspect_result_execution_records_tool_call_and_provenance():
         tool_calls = session.exec(select(AssistantToolCall)).all()
         assert len(tool_calls) == 1
         assert tool_calls[0].status == "executed"
+        tool_call_out = tool_call_to_out(tool_calls[0])
+        assert tool_call_out.tool_name == "inspect_result"
+        assert tool_call_out.arguments["job_id"] == job.id
+        assert tool_call_out.result["summary"]["result_count"] == 1
     finally:
         session.close()
         engine.dispose()

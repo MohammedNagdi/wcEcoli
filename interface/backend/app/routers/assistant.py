@@ -15,6 +15,7 @@ from app.db.models import (
     AssistantConversation,
     AssistantMessage,
     AssistantProvenance,
+    AssistantToolCall,
 )
 from app.main import get_session
 from app.services.assistant_harness import (
@@ -26,6 +27,7 @@ from app.services.assistant_harness import (
     AssistantMessageOut,
     AssistantToolExecutionOut,
     AssistantToolExecutionRequest,
+    AssistantToolCallOut,
     AssistantToolPreviewOut,
     AssistantToolPreviewRequest,
     AssistantToolSpec,
@@ -48,6 +50,7 @@ from app.services.assistant_harness import (
     record_provenance,
     resolve_confirmation,
     store_message,
+    tool_call_to_out,
 )
 from app.services.assistant_runtime import generate_assistant_runtime_reply
 
@@ -210,6 +213,21 @@ def list_confirmations(
         stmt = stmt.where(AssistantConfirmation.conversation_id == conversation_id)
     records = session.exec(stmt.order_by(AssistantConfirmation.id.desc())).all()
     return [confirmation_to_out(record) for record in records]
+
+
+@router.get("/tool-calls", response_model=list[AssistantToolCallOut])
+def list_tool_calls(
+    conversation_id: int | None = Query(None),
+    status: str | None = Query(None),
+    session: Session = Depends(get_session),
+) -> list[AssistantToolCallOut]:
+    stmt = select(AssistantToolCall)
+    if conversation_id is not None:
+        stmt = stmt.where(AssistantToolCall.conversation_id == conversation_id)
+    if status:
+        stmt = stmt.where(AssistantToolCall.status == status)
+    records = session.exec(stmt.order_by(AssistantToolCall.id.desc())).all()
+    return [tool_call_to_out(record) for record in records]
 
 
 @router.post("/confirmations/{confirmation_id}/resolve", response_model=ConfirmationOut)

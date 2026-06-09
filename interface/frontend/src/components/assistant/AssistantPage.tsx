@@ -6,8 +6,11 @@ import {
   createAssistantConversation,
   createAssistantMessage,
   executeAssistantTool,
+  getAssistantConfirmations,
   getAssistantConversations,
   getAssistantMessages,
+  getAssistantProvenance,
+  getAssistantToolCalls,
   getConditions,
   getPlatformStatus,
   previewAssistantTool,
@@ -20,6 +23,9 @@ import type {
   AssistantToolSpec,
   AssistantConversation,
   AssistantMessage,
+  AssistantConfirmation,
+  AssistantProvenance,
+  AssistantToolCall,
   Condition,
   Gene,
   PlatformStatus,
@@ -348,6 +354,25 @@ function messageStatusTone(status: string): 'neutral' | 'ready' | 'blocked' | 'p
   return 'neutral'
 }
 
+function actionStatusTone(status: string): 'neutral' | 'ready' | 'blocked' | 'planned' {
+  if (['executed', 'used', 'approved', 'completed'].includes(status)) return 'ready'
+  if (['pending', 'pending_confirmation', 'confirmation_required', 'proposed'].includes(status)) return 'planned'
+  if (['rejected', 'cancelled', 'failed', 'validation_failed', 'adapter_not_enabled'].includes(status)) return 'blocked'
+  return 'neutral'
+}
+
+function compactJson(value: unknown, maxLength = 140): string {
+  const text = JSON.stringify(value ?? {}, null, 0)
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text
+}
+
+function formatDateTime(value: string): string {
+  if (!value) return 'not recorded'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
+}
+
 function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolean }) {
   const location = useLocation()
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
@@ -558,6 +583,162 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
                 {sending ? 'Sending...' : 'Send'}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AssistantAuditPanel() {
+  const [confirmations, setConfirmations] = useState<AssistantConfirmation[]>([])
+  const [toolCalls, setToolCalls] = useState<AssistantToolCall[]>([])
+  const [provenance, setProvenance] = useState<AssistantProvenance[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  async function loadAuditTrail() {
+    setLoading(true)
+    setError(null)
+    try {
+      const [confirmationRows, toolCallRows, provenanceRows] = await Promise.all([
+        getAssistantConfirmations(),
+        getAssistantToolCalls(),
+        getAssistantProvenance(),
+      ])
+      setConfirmations(confirmationRows)
+      setToolCalls(toolCallRows)
+      setProvenance(provenanceRows)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAuditTrail()
+  }, [])
+
+  const pendingConfirmations = confirmations.filter((item) => item.status === 'pending')
+  const recentConfirmations = confirmations.slice(0, 5)
+  const recentToolCalls = toolCalls.slice(0, 5)
+  const recentProvenance = provenance.slice(0, 5)
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Assistant audit trail</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+            Review pending confirmations, tool-call records, and provider provenance. This panel is intentionally read-only:
+            approvals and execution still happen inside explicit guided flows.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusPill tone={pendingConfirmations.length > 0 ? 'planned' : 'ready'}>
+            {`${pendingConfirmations.length} pending`}
+          </StatusPill>
+          <button
+            type="button"
+            onClick={loadAuditTrail}
+            disabled={loading}
+            className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {loading && <div className="mt-3 text-sm text-gray-500">Loading assistant audit trail...</div>}
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+        <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-gray-900">Confirmations</h3>
+            <StatusPill>{confirmations.length.toString()}</StatusPill>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-gray-500">
+            User approvals are stored before any side-effecting tool can run.
+          </p>
+          <div className="mt-3 space-y-2">
+            {recentConfirmations.length === 0 && (
+              <div className="rounded-md border border-dashed border-gray-200 bg-white p-3 text-xs text-gray-500">
+                No confirmations recorded yet.
+              </div>
+            )}
+            {recentConfirmations.map((confirmation) => (
+              <div key={confirmation.id} className="rounded-md border border-gray-100 bg-white p-3 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono font-semibold text-gray-900">#{confirmation.id} {confirmation.action}</span>
+                  <StatusPill tone={actionStatusTone(confirmation.status)}>
+                    {confirmation.status.replace(/_/g, ' ')}
+                  </StatusPill>
+                </div>
+                <div className="mt-2 font-mono text-gray-500">{compactJson(confirmation.payload)}</div>
+                <div className="mt-2 text-gray-400">{formatDateTime(confirmation.created_at)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-gray-900">Tool calls</h3>
+            <StatusPill>{toolCalls.length.toString()}</StatusPill>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-gray-500">
+            Tool records show validation failures, required confirmations, and completed adapter runs.
+          </p>
+          <div className="mt-3 space-y-2">
+            {recentToolCalls.length === 0 && (
+              <div className="rounded-md border border-dashed border-gray-200 bg-white p-3 text-xs text-gray-500">
+                No tool calls recorded yet.
+              </div>
+            )}
+            {recentToolCalls.map((toolCall) => (
+              <div key={toolCall.id} className="rounded-md border border-gray-100 bg-white p-3 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono font-semibold text-gray-900">#{toolCall.id} {toolCall.tool_name}</span>
+                  <StatusPill tone={actionStatusTone(toolCall.status)}>
+                    {toolCall.status.replace(/_/g, ' ')}
+                  </StatusPill>
+                </div>
+                <div className="mt-2 font-mono text-gray-500">{compactJson(toolCall.arguments)}</div>
+                <div className="mt-2 text-gray-400">{formatDateTime(toolCall.updated_at || toolCall.created_at)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-gray-900">Provenance</h3>
+            <StatusPill>{provenance.length.toString()}</StatusPill>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-gray-500">
+            Provenance records provider/model metadata and sanitized request/response summaries.
+          </p>
+          <div className="mt-3 space-y-2">
+            {recentProvenance.length === 0 && (
+              <div className="rounded-md border border-dashed border-gray-200 bg-white p-3 text-xs text-gray-500">
+                No provenance records yet.
+              </div>
+            )}
+            {recentProvenance.map((record) => (
+              <div key={record.id} className="rounded-md border border-gray-100 bg-white p-3 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono font-semibold text-gray-900">#{record.id} {record.provider_id || 'no provider'}</span>
+                  <StatusPill>{record.model || 'no model'}</StatusPill>
+                </div>
+                <div className="mt-2 text-gray-500">
+                  Hash <span className="font-mono">{record.prompt_hash.slice(0, 12)}</span>
+                </div>
+                <div className="mt-2 font-mono text-gray-500">{compactJson(record.response)}</div>
+                <div className="mt-2 text-gray-400">{formatDateTime(record.created_at)}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -1044,6 +1225,8 @@ export function AssistantPage() {
         <AssistantChatPanel providerConfigured={Boolean(status?.assistant.provider_configured)} />
 
         <AssistantRunFlow />
+
+        <AssistantAuditPanel />
 
         <Card title="Assistant UI surfaces" issue="#12">
           <p className="text-sm leading-6 text-gray-600">

@@ -269,6 +269,18 @@ class AssistantToolExecutionOut(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class AssistantToolCallOut(BaseModel):
+    id: int
+    conversation_id: int | None
+    message_id: int | None
+    tool_name: str
+    status: str
+    arguments: dict[str, Any]
+    result: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
 class ConfirmationCreate(BaseModel):
     action: str
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -1142,6 +1154,20 @@ def provenance_to_out(record: AssistantProvenance) -> ProvenanceOut:
         request=from_json(record.request_json, {}),
         response=from_json(record.response_json, {}),
         created_at=record.created_at,
+    )
+
+
+def tool_call_to_out(record: AssistantToolCall) -> AssistantToolCallOut:
+    return AssistantToolCallOut(
+        id=record.id or 0,
+        conversation_id=record.conversation_id or None,
+        message_id=record.message_id,
+        tool_name=record.tool_name,
+        status=record.status,
+        arguments=from_json(record.arguments_json, {}),
+        result=from_json(record.result_json, {}),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
     )
 
 

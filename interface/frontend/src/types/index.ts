@@ -884,6 +884,30 @@ export interface AssistantConfirmation {
   resolved_at: string
 }
 
+export interface AssistantToolCall {
+  id: number
+  conversation_id: number | null
+  message_id: number | null
+  tool_name: string
+  status: string
+  arguments: Record<string, unknown>
+  result: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface AssistantProvenance {
+  id: number
+  conversation_id: number | null
+  message_id: number | null
+  provider_id: string
+  model: string
+  prompt_hash: string
+  request: Record<string, unknown>
+  response: Record<string, unknown>
+  created_at: string
+}
+
 export interface AssistantToolPreview {
   tool_name: string
   valid: boolean

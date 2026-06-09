@@ -20,7 +20,7 @@ import type {
   WildtypeDelta, ConditionCatalog,
   PlatformStatus, DistributionStatus, ProviderLayerStatus, AssistantHarnessStatus,
   AssistantToolSpec, AssistantConversation, AssistantExchange, AssistantContext, AssistantMessage, AssistantConfirmation,
-  AssistantToolPreview, AssistantToolExecution,
+  AssistantToolPreview, AssistantToolExecution, AssistantToolCall, AssistantProvenance,
 } from '../types'
 
 const BASE = '/api'
@@ -588,6 +588,26 @@ export async function resolveAssistantConfirmation(
 export async function getAssistantConfirmations(status?: string): Promise<AssistantConfirmation[]> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : ''
   return fetchJSON(`/assistant/confirmations${qs}`)
+}
+
+export async function getAssistantToolCalls(filters: {
+  status?: string
+  conversation_id?: number
+} = {}): Promise<AssistantToolCall[]> {
+  const params = new URLSearchParams()
+  if (filters.status) params.set('status', filters.status)
+  if (filters.conversation_id !== undefined) params.set('conversation_id', String(filters.conversation_id))
+  const qs = params.toString()
+  return fetchJSON(`/assistant/tool-calls${qs ? `?${qs}` : ''}`)
+}
+
+export async function getAssistantProvenance(filters: {
+  conversation_id?: number
+} = {}): Promise<AssistantProvenance[]> {
+  const params = new URLSearchParams()
+  if (filters.conversation_id !== undefined) params.set('conversation_id', String(filters.conversation_id))
+  const qs = params.toString()
+  return fetchJSON(`/assistant/provenance${qs ? `?${qs}` : ''}`)
 }
 
 // --- Health ---
