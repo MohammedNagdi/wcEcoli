@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   createAssistantConfirmation,
+  createAssistantConversation,
+  createAssistantMessage,
   executeAssistantTool,
+  getAssistantConversations,
+  getAssistantMessages,
   getConditions,
   getPlatformStatus,
   previewAssistantTool,
@@ -14,6 +18,8 @@ import type {
   AssistantToolExecution,
   AssistantToolPreview,
   AssistantToolSpec,
+  AssistantConversation,
+  AssistantMessage,
   Condition,
   Gene,
   PlatformStatus,
@@ -333,6 +339,229 @@ function ConditionSelect({
         Pick the saved growth condition the model should use unless the experiment type overrides it internally.
       </p>
     </label>
+  )
+}
+
+function messageStatusTone(status: string): 'neutral' | 'ready' | 'blocked' | 'planned' {
+  if (status === 'completed') return 'ready'
+  if (status.includes('failed') || status.includes('no_provider') || status.includes('not_configured')) return 'blocked'
+  return 'neutral'
+}
+
+function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolean }) {
+  const location = useLocation()
+  const [conversations, setConversations] = useState<AssistantConversation[]>([])
+  const [activeConversation, setActiveConversation] = useState<AssistantConversation | null>(null)
+  const [messages, setMessages] = useState<AssistantMessage[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const context = useMemo(() => ({
+    route: `${location.pathname}${location.search}`,
+    selected_gene: null,
+    selected_experiment: null,
+    selected_job: null,
+    selected_result: null,
+    assistant_surface: 'central',
+  }), [location.pathname, location.search])
+
+  async function loadConversationMessages(conversation: AssistantConversation) {
+    setError(null)
+    setActiveConversation(conversation)
+    try {
+      const rows = await getAssistantMessages(conversation.id)
+      setMessages(rows)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function loadConversations() {
+    setLoading(true)
+    setError(null)
+    try {
+      const rows = await getAssistantConversations()
+      setConversations(rows)
+      if (rows[0]) {
+        await loadConversationMessages(rows[0])
+      } else {
+        setActiveConversation(null)
+        setMessages([])
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadConversations()
+  }, [])
+
+  async function startNewChat() {
+    setError(null)
+    setActiveConversation(null)
+    setMessages([])
+    setInput('')
+  }
+
+  async function ensureConversation(content: string): Promise<AssistantConversation> {
+    if (activeConversation) return activeConversation
+    const title = content.trim().slice(0, 64) || 'Assistant chat'
+    const conversation = await createAssistantConversation({
+      title,
+      assistant_surface: 'central',
+      context,
+    })
+    setActiveConversation(conversation)
+    setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)])
+    return conversation
+  }
+
+  async function sendMessage() {
+    const content = input.trim()
+    if (!content || sending) return
+    setSending(true)
+    setError(null)
+    try {
+      const conversation = await ensureConversation(content)
+      setInput('')
+      const exchange = await createAssistantMessage(conversation.id, { content, context })
+      setMessages((current) => [...current, exchange.user_message, exchange.assistant_message])
+      setActiveConversation(exchange.conversation)
+      setConversations((current) => [
+        exchange.conversation,
+        ...current.filter((item) => item.id !== exchange.conversation.id),
+      ])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Assistant chat</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+            Chat receives the current page context and can answer normally. It cannot execute tools, queue simulations, or edit data.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <StatusPill tone={providerConfigured ? 'ready' : 'blocked'}>
+            {providerConfigured ? 'provider configured' : 'no provider'}
+          </StatusPill>
+          <StatusPill tone="planned">no tool access</StatusPill>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <aside className="rounded-md border border-gray-100 bg-gray-50 p-3">
+          <button
+            type="button"
+            onClick={startNewChat}
+            className="w-full rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white"
+          >
+            New chat
+          </button>
+          <div className="mt-3 max-h-72 space-y-2 overflow-auto">
+            {loading && <div className="text-xs text-gray-500">Loading conversations...</div>}
+            {!loading && conversations.length === 0 && (
+              <div className="text-xs leading-5 text-gray-500">No saved conversations yet.</div>
+            )}
+            {conversations.map((conversation) => (
+              <button
+                key={conversation.id}
+                type="button"
+                onClick={() => loadConversationMessages(conversation)}
+                className={`w-full rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                  activeConversation?.id === conversation.id
+                    ? 'border-brand-200 bg-white text-gray-900'
+                    : 'border-gray-100 bg-white/70 text-gray-600 hover:bg-white'
+                }`}
+              >
+                <div className="truncate font-medium">{conversation.title}</div>
+                <div className="mt-1 text-gray-400">{conversation.status.replace(/_/g, ' ')}</div>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <div className="flex min-h-[420px] flex-col rounded-md border border-gray-100">
+          <div className="border-b border-gray-100 px-4 py-3">
+            <div className="text-sm font-medium text-gray-900">
+              {activeConversation?.title ?? 'New assistant conversation'}
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              Context: <span className="font-mono">{context.route || '/assistant'}</span>
+            </div>
+          </div>
+
+          <div className="flex-1 space-y-3 overflow-auto bg-gray-50 px-4 py-4">
+            {messages.length === 0 && (
+              <div className="rounded-md border border-dashed border-gray-200 bg-white p-4 text-sm leading-6 text-gray-500">
+                Ask about the current page, a result you are inspecting, or what the platform can safely do next. If no provider is configured,
+                the platform will store the message and return a clear no-provider response.
+              </div>
+            )}
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`rounded-md border p-3 ${
+                  message.role === 'user'
+                    ? 'ml-auto max-w-[82%] border-brand-100 bg-brand-50'
+                    : 'mr-auto max-w-[88%] border-gray-200 bg-white'
+                }`}
+              >
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    {message.role === 'user' ? 'You' : 'Assistant'}
+                  </span>
+                  <StatusPill tone={messageStatusTone(message.status)}>
+                    {message.status.replace(/_/g, ' ')}
+                  </StatusPill>
+                </div>
+                <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">{message.content}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="border-t border-gray-100 bg-white p-3">
+            {error && <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</div>}
+            <label htmlFor="assistant-chat-input" className="sr-only">Assistant message</label>
+            <textarea
+              id="assistant-chat-input"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault()
+                  sendMessage()
+                }
+              }}
+              placeholder="Ask about the selected route or what to inspect next..."
+              className="h-24 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-800"
+            />
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs text-gray-500">Ctrl+Enter sends. Chat cannot perform side effects.</span>
+              <button
+                type="button"
+                onClick={sendMessage}
+                disabled={sending || !input.trim()}
+                className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {sending ? 'Sending...' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -812,6 +1041,8 @@ export function AssistantPage() {
           </div>
         </Card>
 
+        <AssistantChatPanel providerConfigured={Boolean(status?.assistant.provider_configured)} />
+
         <AssistantRunFlow />
 
         <Card title="Assistant UI surfaces" issue="#12">
@@ -819,21 +1050,9 @@ export function AssistantPage() {
             This page is the central assistant route. Contextual copilot entry points should later appear in Workspace,
             Conditions Builder, Experiments, Results, ML, and Genome Design after the harness and provider layer are active.
           </p>
-          <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4">
-            <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Chat input</label>
-            <textarea
-              disabled
-              value=""
-              placeholder="Provider-backed chat is still disabled. Use the guided run flow above to exercise the confirmation-bound tool path."
-              className="mt-2 h-24 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-500"
-            />
-            <button
-              type="button"
-              disabled
-              className="mt-3 rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-500"
-            >
-              Send disabled
-            </button>
+          <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm leading-6 text-gray-600">
+            Central chat is now active on this page. Contextual entry points are still pending and should pass richer page state into
+            the same message/runtime path.
           </div>
         </Card>
       </div>

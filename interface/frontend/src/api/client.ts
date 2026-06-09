@@ -19,7 +19,7 @@ import type {
   ComparisonResponse, FailedJobSummary,
   WildtypeDelta, ConditionCatalog,
   PlatformStatus, DistributionStatus, ProviderLayerStatus, AssistantHarnessStatus,
-  AssistantToolSpec, AssistantConversation, AssistantExchange, AssistantContext, AssistantConfirmation,
+  AssistantToolSpec, AssistantConversation, AssistantExchange, AssistantContext, AssistantMessage, AssistantConfirmation,
   AssistantToolPreview, AssistantToolExecution,
 } from '../types'
 
@@ -544,6 +544,10 @@ export async function createAssistantConversation(data: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
+}
+
+export async function getAssistantMessages(conversationId: number): Promise<AssistantMessage[]> {
+  return fetchJSON(`/assistant/conversations/${conversationId}/messages`)
 }
 
 export async function createAssistantMessage(
