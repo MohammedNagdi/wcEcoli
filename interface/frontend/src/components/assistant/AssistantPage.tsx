@@ -373,6 +373,12 @@ function formatDateTime(value: string): string {
   return date.toLocaleString()
 }
 
+function parseOptionalNumber(value: string | null): number | null {
+  if (!value) return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolean }) {
   const location = useLocation()
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
@@ -383,14 +389,22 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const context = useMemo(() => ({
-    route: `${location.pathname}${location.search}`,
-    selected_gene: null,
-    selected_experiment: null,
-    selected_job: null,
-    selected_result: null,
-    assistant_surface: 'central',
-  }), [location.pathname, location.search])
+  const context = useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    return {
+      route: params.get('route') || `${location.pathname}${location.search}`,
+      selected_gene: params.get('gene') || null,
+      selected_experiment: parseOptionalNumber(params.get('experiment')),
+      selected_job: parseOptionalNumber(params.get('job')),
+      selected_result: parseOptionalNumber(params.get('result')),
+      assistant_surface: params.get('surface') || 'central',
+    }
+  }, [location.pathname, location.search])
+
+  const suggestedPrompt = useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    return params.get('prompt') || ''
+  }, [location.search])
 
   async function loadConversationMessages(conversation: AssistantConversation) {
     setError(null)
@@ -425,6 +439,12 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
   useEffect(() => {
     loadConversations()
   }, [])
+
+  useEffect(() => {
+    if (suggestedPrompt && !input.trim() && messages.length === 0) {
+      setInput(suggestedPrompt)
+    }
+  }, [suggestedPrompt, input, messages.length])
 
   async function startNewChat() {
     setError(null)
@@ -524,6 +544,8 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
             </div>
             <div className="mt-1 text-xs text-gray-500">
               Context: <span className="font-mono">{context.route || '/assistant'}</span>
+              {context.selected_gene && <span> · gene <span className="font-mono">{context.selected_gene}</span></span>}
+              {context.selected_job != null && <span> · job <span className="font-mono">#{context.selected_job}</span></span>}
             </div>
           </div>
 

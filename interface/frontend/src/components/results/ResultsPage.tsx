@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useLocation } from 'react-router-dom'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -338,6 +338,7 @@ function TimeseriesChart({
 
 export function ResultsPage() {
   const { jobId } = useParams<{ jobId: string }>()
+  const location = useLocation()
   const { setWorkspaceUrlState } = useUrlWorkspaceState()
   const [job, setJob] = useState<SimulationJob | null>(null)
   const [experiment, setExperiment] = useState<Experiment | null>(null)
@@ -460,6 +461,15 @@ export function ResultsPage() {
   const hasWildtype = Boolean(wtDelta?.has_wildtype)
   const comparisonMetricRows = comparisonRows(primarySummary, wtDelta)
   const comparisonPresets = suggestedComparisonPresets(wtDelta)
+  const assistantParams = new URLSearchParams({
+    surface: 'results',
+    route: `${location.pathname}${location.search}`,
+    job: String(job.id),
+    prompt: 'Help me interpret this simulation result. Start with the phenotype summary, WT comparison, and the most useful model outputs to inspect next.',
+  })
+  if (focusGeneSymbol) assistantParams.set('gene', focusGeneSymbol)
+  if (experiment?.id != null) assistantParams.set('experiment', String(experiment.id))
+  const assistantHref = `/assistant?${assistantParams.toString()}`
 
   return (
     <div className="h-full overflow-y-auto pr-1">
@@ -472,6 +482,12 @@ export function ResultsPage() {
             <h1 className="text-2xl font-semibold text-gray-900">{resultTitle}</h1>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
+            <Link
+              to={assistantHref}
+              className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 font-medium text-brand-700 hover:bg-brand-100"
+            >
+              Ask Assistant
+            </Link>
             <span className={'rounded-full border px-2.5 py-1 font-medium ' + statusTone(job.status)}>
               {statusLabel(job.status)}
             </span>

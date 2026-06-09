@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 import { GeneCatalogPage } from '../genes/GeneCatalogPage'
@@ -125,6 +125,8 @@ function SelectedGeneSummary({
   selectedGene: string | null
   onSelectGene: (symbol: string) => void
 }) {
+  const location = useLocation()
+
   if (loading && selectedGene) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-gray-400">
@@ -144,6 +146,13 @@ function SelectedGeneSummary({
   const length = gene.left_end_pos && gene.right_end_pos
     ? Math.abs(gene.right_end_pos - gene.left_end_pos) + 1
     : null
+  const assistantParams = new URLSearchParams({
+    surface: 'workspace',
+    route: `${location.pathname}${location.search}`,
+    gene: gene.symbol,
+    prompt: 'Help me inspect this selected gene. Summarize its model state IDs, pathway context, regulation, and which experiment or result views would be useful next.',
+  })
+  const assistantHref = `/assistant?${assistantParams.toString()}`
 
   return (
     <div className="flex h-full flex-col">
@@ -153,6 +162,12 @@ function SelectedGeneSummary({
           <p className="text-xs text-gray-400">{gene.ecoli_id}</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
+          <Link
+            to={assistantHref}
+            className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
+          >
+            Ask Assistant
+          </Link>
           <Link
             to={'/genome?gene=' + encodeURIComponent(gene.symbol)}
             className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
