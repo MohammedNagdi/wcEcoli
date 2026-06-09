@@ -29,7 +29,9 @@ from app.db.models import (
     SimulationJob,
     SimulationResult,
     Timeline,
+    Variant,
 )
+from app.services.experiment_creation import ExperimentCreateData, create_experiment_record
 
 
 AssistantSurface = Literal[
@@ -365,15 +367,20 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             name="create_experiment",
             label="Create experiment draft",
             description="Prepare a draft experiment from validated variant, condition, timeline, and simulation parameters.",
-            status="registered_disabled",
+            status="confirmation_execution_enabled",
             requires_confirmation=True,
             side_effect=True,
             argument_schema={
+                "name": "string",
+                "description": "string",
                 "variant_type": "string",
                 "variant_index": "integer",
                 "condition": "string",
                 "timeline": "string",
                 "sim_params": "object",
+                "gene_symbol": "string",
+                "gene_symbols": "array",
+                "include_wildtype": "boolean",
             },
             result_schema={"experiment_id": "integer", "status": "draft"},
         ),
@@ -418,7 +425,7 @@ def get_assistant_harness_status() -> AssistantHarnessStatus:
         provider_configured=provider_configured,
         tool_execution_enabled=True,
         tool_preview_enabled=True,
-        execution_enabled_tools=["inspect_result", "run_simulation"],
+        execution_enabled_tools=["inspect_result", "create_experiment", "run_simulation"],
         side_effect_execution_enabled=True,
         db_persistence_enabled=True,
         confirmation_required_for=CONFIRMATION_REQUIRED_ACTIONS,
@@ -430,7 +437,7 @@ def get_assistant_harness_status() -> AssistantHarnessStatus:
             "Messages, confirmations, and provenance can be stored before tool execution is enabled.",
             "Registered tools support dry-run validation previews without side effects.",
             "Read-only result inspection can execute immediately.",
-            "run_simulation can execute only after an approved matching confirmation; other side-effecting tools remain adapter-disabled.",
+            "create_experiment and run_simulation can execute only after approved matching confirmations; other side-effecting tools remain adapter-disabled.",
             "Future execution must use registered typed tools and explicit confirmation for side effects.",
         ],
     )
@@ -498,14 +505,60 @@ def _object_arg(args: dict[str, Any], key: str, errors: list[str]) -> dict[str, 
     return value
 
 
+def _bool_arg(
+    args: dict[str, Any],
+    key: str,
+    errors: list[str],
+    *,
+    required: bool = False,
+) -> bool:
+    value = args.get(key)
+    if value is None or value == "":
+        if required:
+            errors.append(f"Missing required boolean argument '{key}'.")
+        return False
+    if not isinstance(value, bool):
+        errors.append(f"Argument '{key}' must be a boolean.")
+        return False
+    return value
+
+
+def _string_list_arg(args: dict[str, Any], key: str, errors: list[str]) -> list[str]:
+    value = args.get(key, [])
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        errors.append(f"Argument '{key}' must be an array of strings.")
+        return []
+    strings: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            errors.append(f"Argument '{key}[{index}]' must be a string.")
+            continue
+        cleaned = item.strip()
+        if cleaned:
+            strings.append(cleaned)
+    return strings
+
+
 def _preview_create_experiment(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
+    name = _string_arg(args, "name", errors, required=False)
+    description = _string_arg(args, "description", errors, required=False)
     variant_type = _string_arg(args, "variant_type", errors)
     variant_index = _int_arg(args, "variant_index", errors, minimum=0)
     condition = _string_arg(args, "condition", errors)
     timeline = _string_arg(args, "timeline", errors, required=False)
     sim_params = _object_arg(args, "sim_params", errors)
+    gene_symbol = _string_arg(args, "gene_symbol", errors, required=False)
+    gene_symbols = _string_list_arg(args, "gene_symbols", errors)
+    include_wildtype = _bool_arg(args, "include_wildtype", errors)
+
+    if variant_type:
+        variant = session.exec(select(Variant).where(Variant.name == variant_type)).first()
+        if not variant:
+            errors.append(f"Variant type '{variant_type}' does not exist.")
 
     if condition:
         condition_record = session.exec(
@@ -522,16 +575,28 @@ def _preview_create_experiment(session: Session, args: dict[str, Any]) -> tuple[
     else:
         warnings.append("No time-varying protocol was supplied; the experiment would use a static condition.")
 
+    sim_params_json = to_json(sim_params)
+    default_name = f"{gene_symbol} {variant_type}".strip() if gene_symbol else f"{variant_type} experiment"
+
     normalized = {
+        "name": name or default_name,
+        "description": description,
         "variant_type": variant_type,
         "variant_index": variant_index,
         "condition": condition,
         "timeline": timeline,
-        "sim_params": sim_params,
+        "sim_params": sim_params_json,
+        "gene_symbol": gene_symbol,
+        "gene_symbols": gene_symbols,
+        "include_wildtype": include_wildtype,
     }
     preview = {
         "action": "would_create_experiment_draft",
-        "summary": f"Create a {variant_type or 'variant'} draft under condition {condition or 'unknown'}.",
+        "summary": f"Create '{normalized['name']}' as a {variant_type or 'variant'} draft under condition {condition or 'unknown'}.",
+        "variant_type": variant_type,
+        "condition": condition,
+        "timeline": timeline or "No time-varying protocol",
+        "include_wildtype": include_wildtype,
         "side_effect_if_executed": "A new experiment row would be created.",
     }
     return normalized, preview, warnings, errors
@@ -635,7 +700,7 @@ def preview_tool(
         valid=not errors,
         requires_confirmation=spec.requires_confirmation,
         side_effect=spec.side_effect,
-        execution_enabled=False,
+        execution_enabled=tool_name in {"inspect_result", "create_experiment", "run_simulation"},
         normalized_arguments=normalized,
         preview=preview,
         warnings=warnings,
@@ -750,6 +815,37 @@ def _execute_inspect_result(
             "rows": summary_rows,
         },
         "links": links,
+    }
+
+
+def _execute_create_experiment(
+    session: Session,
+    normalized_arguments: dict[str, Any],
+) -> dict[str, Any]:
+    result = create_experiment_record(
+        session,
+        ExperimentCreateData.model_validate(normalized_arguments),
+    )
+    experiment = result.experiment
+    return {
+        "action": "created_experiment_draft",
+        "experiment": {
+            "id": experiment.id,
+            "name": experiment.name,
+            "description": experiment.description,
+            "status": experiment.status,
+            "variant_type": experiment.variant_type,
+            "variant_index": experiment.variant_index,
+            "condition": experiment.condition,
+            "timeline": experiment.timeline,
+            "gene_symbol": experiment.gene_symbol,
+            "sim_params": experiment.sim_params,
+        },
+        "wildtype_experiment_id": result.wildtype_experiment_id,
+        "links": [
+            {"label": "Experiment queue", "path": f"/experiments?experiment={experiment.id}"},
+            {"label": "Edit similar experiment", "path": f"/experiments/new?variant={experiment.variant_type}"},
+        ],
     }
 
 
@@ -873,8 +969,12 @@ def execute_tool(
                 errors=confirmation_errors,
             )
 
-        if tool_name == "run_simulation":
-            result = _execute_run_simulation(session, preview.normalized_arguments)
+        if tool_name in {"create_experiment", "run_simulation"}:
+            result = (
+                _execute_create_experiment(session, preview.normalized_arguments)
+                if tool_name == "create_experiment"
+                else _execute_run_simulation(session, preview.normalized_arguments)
+            )
             tool_call = _record_tool_call(
                 session,
                 conversation_id=request.conversation_id,

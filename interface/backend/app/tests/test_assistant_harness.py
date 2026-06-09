@@ -1,7 +1,7 @@
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
-from app.db.models import AssistantConfirmation, AssistantToolCall, Condition, Experiment, SimulationJob, SimulationResult
+from app.db.models import AssistantConfirmation, AssistantToolCall, Condition, Experiment, Gene, SimulationJob, SimulationResult, Variant
 from app.services.assistant_harness import (
     AssistantContext,
     AssistantConversationCreate,
@@ -46,7 +46,7 @@ def test_assistant_status_exposes_provider_and_tool_contracts_without_execution(
     assert status.tool_execution_enabled is True
     assert status.tool_preview_enabled is True
     assert status.side_effect_execution_enabled is True
-    assert status.execution_enabled_tools == ["inspect_result", "run_simulation"]
+    assert status.execution_enabled_tools == ["inspect_result", "create_experiment", "run_simulation"]
     assert status.db_persistence_enabled is True
     assert "route" in status.context_contract
     tool_names = {tool.name for tool in status.tool_registry}
@@ -107,6 +107,7 @@ def test_tool_preview_validates_arguments_without_execution():
     engine, session = _build_session()
     try:
         session.add(Condition(name="basal", nutrients="minimal"))
+        session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
         session.add(Experiment(name="dnaA knockout", variant_type="gene_knockout", variant_index=0, condition="basal"))
         session.commit()
 
@@ -124,7 +125,7 @@ def test_tool_preview_validates_arguments_without_execution():
         )
         assert create_preview.valid is True
         assert create_preview.requires_confirmation is True
-        assert create_preview.execution_enabled is False
+        assert create_preview.execution_enabled is True
         assert create_preview.normalized_arguments["condition"] == "basal"
 
         run_preview = preview_tool(
@@ -134,6 +135,76 @@ def test_tool_preview_validates_arguments_without_execution():
         )
         assert run_preview.valid is True
         assert run_preview.preview["action"] == "would_queue_simulation_job"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_create_experiment_execution_requires_approved_matching_confirmation_and_creates_draft_once():
+    engine, session = _build_session()
+    try:
+        session.add(Condition(name="basal", nutrients="minimal"))
+        session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
+        session.add(Gene(ecoli_id="EG10001", symbol="dnaA", ko_index=42))
+        session.commit()
+
+        arguments = {
+            "name": "dnaA knockout",
+            "description": "Assistant-created draft",
+            "variant_type": "gene_knockout",
+            "variant_index": 0,
+            "condition": "basal",
+            "timeline": "",
+            "sim_params": {"seeds": 1, "generations": 1, "length_sec": 10800},
+            "gene_symbol": "dnaA",
+            "gene_symbols": [],
+            "include_wildtype": False,
+        }
+        preview = preview_tool(session, "create_experiment", AssistantToolPreviewRequest(arguments=arguments))
+        assert preview.valid is True
+        assert preview.normalized_arguments["variant_index"] == 0
+        assert preview.normalized_arguments["sim_params"] == '{"generations":1,"length_sec":10800,"seeds":1}'
+
+        missing_confirmation = execute_tool(
+            session,
+            "create_experiment",
+            AssistantToolExecutionRequest(arguments=arguments),
+        )
+        assert missing_confirmation.executed is False
+        assert missing_confirmation.status == "confirmation_required"
+
+        confirmation = create_confirmation(
+            session,
+            ConfirmationCreate(
+                action="create_experiment",
+                payload=preview.normalized_arguments,
+            ),
+        )
+        resolve_confirmation(session, confirmation, ConfirmationResolve(status="approved", note="Approved for test."))
+        executed = execute_tool(
+            session,
+            "create_experiment",
+            AssistantToolExecutionRequest(arguments=arguments, confirmation_id=confirmation.id),
+        )
+        assert executed.executed is True
+        assert executed.status == "executed"
+        assert executed.result["experiment"]["id"] == 1
+        assert executed.result["experiment"]["variant_index"] == 42
+        assert executed.result["experiment"]["gene_symbol"] == "dnaA"
+
+        used_confirmation = session.get(AssistantConfirmation, confirmation.id)
+        assert used_confirmation.status == "used"
+
+        replay = execute_tool(
+            session,
+            "create_experiment",
+            AssistantToolExecutionRequest(arguments=arguments, confirmation_id=confirmation.id),
+        )
+        assert replay.executed is False
+        assert replay.status == "confirmation_required"
+
+        experiments = session.exec(select(Experiment)).all()
+        assert len(experiments) == 1
     finally:
         session.close()
         engine.dispose()

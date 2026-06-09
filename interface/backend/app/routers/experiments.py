@@ -15,11 +15,12 @@ from sqlmodel import Session, col, select
 from app.config import settings
 from app.db.models import Condition, Experiment, Gene, SimulationJob, SimulationResult, TFEdge, Variant
 from app.main import get_session
-from app.routers.jobs import (
+from app.services.job_queue import (
     RunJobRequest,
     RunResponse,
     create_simulation_jobs_for_experiment,
 )
+from app.services.experiment_creation import ExperimentCreateData, create_experiment_record
 from app.services.experiment_identity import experiment_environment_key
 from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
 from app.services.multi_gene_knockout import (
@@ -708,78 +709,10 @@ def create_experiment(
     session: Session = Depends(get_session),
 ):
     """Create a new experiment configuration."""
-    now = datetime.now(timezone.utc).isoformat()
-
-    variant = session.exec(
-        select(Variant).where(Variant.name == body.variant_type)
-    ).first()
-    if not variant:
-        raise HTTPException(400, f"Unknown variant type: {body.variant_type}")
-
-    if body.variant_type == "gene_knockout" and body.gene_symbol:
-        gene = session.exec(
-            select(Gene).where(col(Gene.symbol).ilike(body.gene_symbol))
-        ).first()
-        if not gene:
-            raise HTTPException(400, f"Unknown gene: {body.gene_symbol}")
-        body.variant_index = gene.ko_index
-
-    sim_params = body.sim_params
-    gene_symbol = body.gene_symbol
-    if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE:
-        if body.gene_symbol:
-            raise HTTPException(400, "Use gene_symbols for multi_gene_knockout")
-        sim_params, canonical_symbols, _ = with_multi_gene_targets(
-            body.sim_params,
-            body.gene_symbols,
-            session,
-        )
-        body.variant_index = 0
-        gene_symbol = ",".join(canonical_symbols)
-
-    condition, timeline = _normalized_experiment_environment(
-        session,
-        body.variant_type,
-        body.variant_index,
-        body.condition or "basal",
-        body.timeline or "",
-    )
-
-    experiment = Experiment(
-        name=body.name,
-        description=body.description,
-        variant_type=body.variant_type,
-        variant_index=body.variant_index,
-        condition=condition,
-        timeline=timeline,
-        sim_params=sim_params,
-        status="draft",
-        created_at=now,
-        updated_at=now,
-        gene_symbol=gene_symbol,
-    )
-    session.add(experiment)
-    session.flush()  # get the ID before potential WT creation
-
-    # Auto-create wildtype control if requested
-    wt_id: int | None = None
-    if body.include_wildtype:
-        wildtype_sim_params = (
-            strip_multi_gene_targets(sim_params)
-            if body.variant_type == MULTI_GENE_KNOCKOUT_TYPE
-            else sim_params
-        )
-        wt_id = _find_or_create_wildtype(
-            session, condition, timeline, wildtype_sim_params, now,
-        )
-
-    session.commit()
-    session.refresh(experiment)
-
-    out = ExperimentOut.model_validate(experiment, from_attributes=True)
-    # Attach WT experiment ID in the response for the frontend
-    if wt_id is not None:
-        out.wildtype_experiment_id = wt_id
+    result = create_experiment_record(session, ExperimentCreateData.model_validate(body.model_dump()))
+    out = ExperimentOut.model_validate(result.experiment, from_attributes=True)
+    if result.wildtype_experiment_id is not None:
+        out.wildtype_experiment_id = result.wildtype_experiment_id
     return out
 
 
