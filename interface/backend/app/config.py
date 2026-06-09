@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     ollama_base_url: str = ""
     lm_studio_base_url: str = ""
     vllm_base_url: str = ""
+    assistant_provider: str = ""                 # optional default provider id, e.g. openai
+    assistant_model: str = ""                    # optional default chat model
+    assistant_request_timeout_sec: int = 30
 
     # Derived paths for key data files
     @property

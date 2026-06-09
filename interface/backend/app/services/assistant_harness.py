@@ -32,6 +32,7 @@ from app.db.models import (
     Variant,
 )
 from app.services.experiment_creation import ExperimentCreateData, create_experiment_record
+from app.services.assistant_runtime import RUNTIME_PROVIDER_SPECS
 
 
 AssistantSurface = Literal[
@@ -143,6 +144,9 @@ class ProviderStatus(BaseModel):
     configuration_hint: str
     endpoint_configured: bool = False
     secret_configured: bool = False
+    runtime_supported: bool = False
+    default_model: str = ""
+    selected_for_runtime: bool = False
 
 
 class ProviderLayerStatus(BaseModel):
@@ -325,12 +329,14 @@ def configured(value: str | None) -> bool:
 
 def get_provider_statuses() -> list[ProviderStatus]:
     statuses: list[ProviderStatus] = []
+    selected_provider = (settings.assistant_provider or "").strip()
     for definition in PROVIDER_DEFINITIONS:
         secret_value = getattr(settings, definition.secret_setting, "") if definition.secret_setting else ""
         endpoint_value = getattr(settings, definition.endpoint_setting, "") if definition.endpoint_setting else ""
         secret_is_configured = configured(secret_value)
         endpoint_is_configured = configured(endpoint_value)
         is_configured = secret_is_configured or endpoint_is_configured
+        runtime_spec = RUNTIME_PROVIDER_SPECS.get(definition.provider_id)
         statuses.append(
             ProviderStatus(
                 provider_id=definition.provider_id,
@@ -341,6 +347,9 @@ def get_provider_statuses() -> list[ProviderStatus]:
                 configuration_hint=definition.configuration_hint,
                 endpoint_configured=endpoint_is_configured,
                 secret_configured=secret_is_configured,
+                runtime_supported=runtime_spec is not None,
+                default_model=runtime_spec.default_model if runtime_spec else "",
+                selected_for_runtime=selected_provider == definition.provider_id,
             )
         )
     return statuses
@@ -355,7 +364,8 @@ def get_provider_layer_status() -> ProviderLayerStatus:
         providers=providers,
         notes=[
             "Provider status reports configuration presence only; API keys are never returned.",
-            "Health checks are intentionally non-networked at this layer; future adapters can add provider-specific checks.",
+            "Runtime support indicates whether the assistant can call that provider without exposing tools.",
+            "Status checks are intentionally non-networked; provider calls happen only when a user sends an assistant message.",
             "The scientific platform remains usable when no LLM provider is configured.",
         ],
     )

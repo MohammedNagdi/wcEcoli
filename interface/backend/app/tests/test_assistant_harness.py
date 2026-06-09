@@ -1,7 +1,9 @@
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
+from app.config import settings
 from app.db.models import AssistantConfirmation, AssistantToolCall, Condition, Experiment, Gene, SimulationJob, SimulationResult, Variant
+from app.services.assistant_runtime import generate_assistant_runtime_reply
 from app.services.assistant_harness import (
     AssistantContext,
     AssistantConversationCreate,
@@ -32,6 +34,11 @@ def _build_session():
     )
     SQLModel.metadata.create_all(engine)
     return engine, Session(engine)
+
+
+def _restore_runtime_settings(snapshot: dict[str, object]) -> None:
+    for key, value in snapshot.items():
+        setattr(settings, key, value)
 
 
 def test_assistant_status_exposes_provider_and_tool_contracts_without_execution():
@@ -101,6 +108,72 @@ def test_assistant_message_round_trip_records_blocked_response_and_provenance():
     finally:
         session.close()
         engine.dispose()
+
+
+def test_assistant_runtime_reports_no_provider_without_network():
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+        "openrouter_api_key": settings.openrouter_api_key,
+        "lm_studio_base_url": settings.lm_studio_base_url,
+        "vllm_base_url": settings.vllm_base_url,
+        "ollama_base_url": settings.ollama_base_url,
+    }
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_model = ""
+        settings.openai_api_key = ""
+        settings.openrouter_api_key = ""
+        settings.lm_studio_base_url = ""
+        settings.vllm_base_url = ""
+        settings.ollama_base_url = ""
+        result = generate_assistant_runtime_reply(
+            "Explain this result.",
+            {"route": "/results/2", "selected_gene": "dnaA"},
+        )
+        assert result.status == "no_provider_configured"
+        assert "no model call" in result.content
+    finally:
+        _restore_runtime_settings(snapshot)
+
+
+def test_openai_compatible_runtime_uses_configured_provider_without_tools():
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_transport(url, headers, payload, timeout):
+        calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+        return {"choices": [{"message": {"content": "Provider response"}}], "id": "test-response"}
+
+    try:
+        settings.assistant_provider = "openai"
+        settings.assistant_model = "test-model"
+        settings.openai_api_key = "test-key"
+        result = generate_assistant_runtime_reply(
+            "What should I inspect next?",
+            {"route": "/results/2", "selected_gene": "dnaA"},
+            transport=fake_transport,
+        )
+        assert result.status == "completed"
+        assert result.provider_id == "openai"
+        assert result.model == "test-model"
+        assert result.content == "Provider response"
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["url"] == "https://api.openai.com/v1/chat/completions"
+        assert call["headers"]["Authorization"] == "Bearer test-key"
+        payload = call["payload"]
+        assert payload["model"] == "test-model"
+        assert "tools" not in payload
+        assert payload["messages"][0]["role"] == "system"
+        assert payload["messages"][1]["role"] == "user"
+    finally:
+        _restore_runtime_settings(snapshot)
 
 
 def test_tool_preview_validates_arguments_without_execution():

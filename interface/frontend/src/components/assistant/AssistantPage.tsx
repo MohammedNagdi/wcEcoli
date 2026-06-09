@@ -62,6 +62,13 @@ function ProviderRow({ provider }: { provider: ProviderStatus }) {
         <div className="text-xs text-gray-500">
           {provider.configuration_hint} Health: {provider.health.replace(/_/g, ' ')}.
         </div>
+        <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
+          <StatusPill tone={provider.runtime_supported ? 'ready' : 'neutral'}>
+            {provider.runtime_supported ? 'runtime adapter' : 'status only'}
+          </StatusPill>
+          {provider.default_model && <StatusPill>{provider.default_model}</StatusPill>}
+          {provider.selected_for_runtime && <StatusPill tone="planned">selected</StatusPill>}
+        </div>
       </div>
       <StatusPill tone={provider.configured ? 'ready' : 'neutral'}>
         {provider.configured ? 'Configured' : provider.category}

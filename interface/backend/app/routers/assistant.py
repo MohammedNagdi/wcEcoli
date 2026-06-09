@@ -49,6 +49,7 @@ from app.services.assistant_harness import (
     resolve_confirmation,
     store_message,
 )
+from app.services.assistant_runtime import generate_assistant_runtime_reply
 
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
@@ -145,32 +146,37 @@ def create_message(
         raise HTTPException(status_code=422, detail="Message content must not be empty.")
 
     user_message = store_message(session, conversation, "user", data.content, data.context)
-    assistant_content = (
-        "Assistant runtime is scaffolded but disabled. The request context was stored, "
-        "and no provider call or tool execution was attempted."
+    runtime_result = generate_assistant_runtime_reply(data.content, data.context.model_dump())
+    assistant_status = (
+        "completed"
+        if runtime_result.status == "completed"
+        else runtime_result.status
     )
     assistant_message = store_message(
         session,
         conversation,
         "assistant",
-        assistant_content,
+        runtime_result.content,
         data.context,
-        status="blocked_not_enabled",
+        status=assistant_status,
     )
     provenance = record_provenance(
         session,
         conversation_id=conversation.id,
         message_id=assistant_message.id,
-        provider_id="",
-        model="",
+        provider_id=runtime_result.provider_id,
+        model=runtime_result.model,
         request={
             "content_length": len(data.content),
             "context": data.context.model_dump(),
             "tool_execution_enabled": False,
+            "tool_access": "none",
+            "runtime_request": runtime_result.request,
         },
         response={
-            "status": "blocked_not_enabled",
-            "reason": "assistant runtime is scaffolded but disabled",
+            "status": runtime_result.status,
+            "runtime_response": runtime_result.response,
+            "error": runtime_result.error,
         },
     )
     return AssistantExchangeOut(

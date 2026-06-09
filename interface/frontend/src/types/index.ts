@@ -790,6 +790,9 @@ export interface ProviderStatus {
   configuration_hint: string
   endpoint_configured: boolean
   secret_configured: boolean
+  runtime_supported: boolean
+  default_model: string
+  selected_for_runtime: boolean
 }
 
 export interface ProviderLayerStatus {
