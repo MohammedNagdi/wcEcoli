@@ -22,10 +22,12 @@ from app.db.models import (
     AssistantConversation,
     AssistantMessage,
     AssistantProvenance,
+    AssistantToolCall,
     BuilderSectionDraft,
     Condition,
     Experiment,
     SimulationJob,
+    SimulationResult,
     Timeline,
 )
 
@@ -44,7 +46,7 @@ AssistantSurface = Literal[
 
 ProviderCategory = Literal["hosted_byok", "local_runtime"]
 ProviderHealthState = Literal["not_configured", "configured_not_checked"]
-AssistantState = Literal["scaffolded_disabled", "provider_configured_tools_disabled"]
+AssistantState = Literal["scaffolded_disabled", "provider_configured_tools_disabled", "read_only_tools_enabled"]
 AssistantMessageRole = Literal["user", "assistant", "system"]
 ConfirmationStatus = Literal["pending", "approved", "rejected", "cancelled"]
 
@@ -165,6 +167,8 @@ class AssistantHarnessStatus(BaseModel):
     provider_configured: bool
     tool_execution_enabled: bool
     tool_preview_enabled: bool
+    execution_enabled_tools: list[str]
+    side_effect_execution_enabled: bool
     db_persistence_enabled: bool
     confirmation_required_for: list[str]
     context_contract: list[str]
@@ -234,6 +238,27 @@ class AssistantToolPreviewOut(BaseModel):
     execution_enabled: bool
     normalized_arguments: dict[str, Any] = Field(default_factory=dict)
     preview: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class AssistantToolExecutionRequest(BaseModel):
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    context: AssistantContext = Field(default_factory=AssistantContext)
+    confirmation_id: int | None = None
+    conversation_id: int | None = None
+
+
+class AssistantToolExecutionOut(BaseModel):
+    tool_name: str
+    executed: bool
+    status: str
+    requires_confirmation: bool
+    confirmation_id: int | None = None
+    tool_call_id: int | None = None
+    provenance_id: int | None = None
+    normalized_arguments: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
 
@@ -376,7 +401,7 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             name="inspect_result",
             label="Inspect result",
             description="Read a completed result and return structured links to phenotype, time-series, and model-output views.",
-            status="registered_disabled",
+            status="execution_enabled",
             requires_confirmation=False,
             side_effect=False,
             argument_schema={"job_id": "integer", "gene": "string"},
@@ -388,11 +413,13 @@ def get_tool_registry() -> list[AssistantToolSpec]:
 def get_assistant_harness_status() -> AssistantHarnessStatus:
     provider_configured = get_provider_layer_status().configured_provider_count > 0
     return AssistantHarnessStatus(
-        state="provider_configured_tools_disabled" if provider_configured else "scaffolded_disabled",
+        state="read_only_tools_enabled",
         provider_required=True,
         provider_configured=provider_configured,
-        tool_execution_enabled=False,
+        tool_execution_enabled=True,
         tool_preview_enabled=True,
+        execution_enabled_tools=["inspect_result"],
+        side_effect_execution_enabled=False,
         db_persistence_enabled=True,
         confirmation_required_for=CONFIRMATION_REQUIRED_ACTIONS,
         context_contract=CONTEXT_CONTRACT,
@@ -402,6 +429,7 @@ def get_assistant_harness_status() -> AssistantHarnessStatus:
             "This is the durable harness foundation, not a live LLM runtime.",
             "Messages, confirmations, and provenance can be stored before tool execution is enabled.",
             "Registered tools support dry-run validation previews without side effects.",
+            "Read-only result inspection can execute; side-effecting tools remain confirmation-gated and adapter-disabled.",
             "Future execution must use registered typed tools and explicit confirmation for side effects.",
         ],
     )
@@ -611,6 +639,252 @@ def preview_tool(
         preview=preview,
         warnings=warnings,
         errors=errors,
+    )
+
+
+def _record_tool_call(
+    session: Session,
+    *,
+    conversation_id: int | None,
+    tool_name: str,
+    status: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+) -> AssistantToolCall:
+    timestamp = now_iso()
+    record = AssistantToolCall(
+        conversation_id=conversation_id or 0,
+        message_id=None,
+        tool_name=tool_name,
+        status=status,
+        arguments_json=to_json(arguments),
+        result_json=to_json(result),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def _confirmation_allows_execution(
+    session: Session,
+    *,
+    tool_name: str,
+    confirmation_id: int | None,
+    normalized_arguments: dict[str, Any],
+) -> tuple[AssistantConfirmation | None, list[str]]:
+    if confirmation_id is None:
+        return None, [f"Tool '{tool_name}' requires an approved confirmation before execution."]
+    confirmation = session.get(AssistantConfirmation, confirmation_id)
+    if not confirmation:
+        return None, [f"Confirmation {confirmation_id} does not exist."]
+    errors: list[str] = []
+    if confirmation.action != tool_name:
+        errors.append(f"Confirmation {confirmation_id} is for '{confirmation.action}', not '{tool_name}'.")
+    if confirmation.status != "approved":
+        errors.append(f"Confirmation {confirmation_id} is {confirmation.status}, not approved.")
+    confirmed_payload = from_json(confirmation.payload_json, {})
+    if confirmed_payload != normalized_arguments:
+        errors.append("Confirmation payload does not match normalized tool arguments.")
+    return confirmation, errors
+
+
+def _execute_inspect_result(
+    session: Session,
+    normalized_arguments: dict[str, Any],
+) -> dict[str, Any]:
+    job_id = normalized_arguments.get("job_id")
+    gene = normalized_arguments.get("gene") or ""
+    job = session.get(SimulationJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Simulation job {job_id} not found.")
+    experiment = session.get(Experiment, job.experiment_id)
+    results = session.exec(
+        select(SimulationResult)
+        .where(SimulationResult.job_id == job.id)
+        .order_by(SimulationResult.seed, SimulationResult.generation)
+    ).all()
+    summary_rows = [
+        {
+            "seed": result.seed,
+            "generation": result.generation,
+            "division_time_sec": result.division_time_sec,
+            "final_mass_fg": result.final_mass_fg,
+            "growth_rate": result.growth_rate,
+            "doubling_time_min": result.doubling_time_min,
+            "divided": result.divided,
+        }
+        for result in results
+    ]
+    links = [
+        {"label": "Results detail", "path": f"/results/{job.id}"},
+        {"label": "Molecule explorer", "path": f"/results/{job.id}?view=model-outputs"},
+    ]
+    if gene:
+        links.append({"label": f"Gene-focused results for {gene}", "path": f"/results/{job.id}?gene={gene}"})
+        links.append({"label": f"Workspace context for {gene}", "path": f"/?gene={gene}"})
+
+    return {
+        "job": {
+            "id": job.id,
+            "status": job.status,
+            "condition": job.condition,
+            "seed": job.seed,
+            "generations": job.generations,
+            "timeline": job.timeline,
+        },
+        "experiment": {
+            "id": experiment.id if experiment else job.experiment_id,
+            "name": experiment.name if experiment else "",
+            "variant_type": experiment.variant_type if experiment else job.variant_type,
+            "variant_index": experiment.variant_index if experiment else job.variant_index,
+            "gene_symbol": experiment.gene_symbol if experiment else gene,
+            "condition": experiment.condition if experiment else job.condition,
+        },
+        "summary": {
+            "result_count": len(summary_rows),
+            "completed": job.status == "done",
+            "rows": summary_rows,
+        },
+        "links": links,
+    }
+
+
+def execute_tool(
+    session: Session,
+    tool_name: str,
+    request: AssistantToolExecutionRequest,
+) -> AssistantToolExecutionOut:
+    spec = get_tool_spec(tool_name)
+    preview = preview_tool(
+        session,
+        tool_name,
+        AssistantToolPreviewRequest(arguments=request.arguments, context=request.context),
+    )
+    if not preview.valid:
+        tool_call = _record_tool_call(
+            session,
+            conversation_id=request.conversation_id,
+            tool_name=tool_name,
+            status="validation_failed",
+            arguments=preview.normalized_arguments,
+            result={"errors": preview.errors, "warnings": preview.warnings},
+        )
+        return AssistantToolExecutionOut(
+            tool_name=tool_name,
+            executed=False,
+            status="validation_failed",
+            requires_confirmation=spec.requires_confirmation,
+            confirmation_id=request.confirmation_id,
+            tool_call_id=tool_call.id,
+            normalized_arguments=preview.normalized_arguments,
+            result=preview.preview,
+            warnings=preview.warnings,
+            errors=preview.errors,
+        )
+
+    confirmation: AssistantConfirmation | None = None
+    confirmation_errors: list[str] = []
+    if spec.side_effect:
+        confirmation, confirmation_errors = _confirmation_allows_execution(
+            session,
+            tool_name=tool_name,
+            confirmation_id=request.confirmation_id,
+            normalized_arguments=preview.normalized_arguments,
+        )
+        if confirmation_errors:
+            tool_call = _record_tool_call(
+                session,
+                conversation_id=request.conversation_id,
+                tool_name=tool_name,
+                status="confirmation_required",
+                arguments=preview.normalized_arguments,
+                result={"errors": confirmation_errors},
+            )
+            return AssistantToolExecutionOut(
+                tool_name=tool_name,
+                executed=False,
+                status="confirmation_required",
+                requires_confirmation=True,
+                confirmation_id=request.confirmation_id,
+                tool_call_id=tool_call.id,
+                normalized_arguments=preview.normalized_arguments,
+                result=preview.preview,
+                warnings=preview.warnings,
+                errors=confirmation_errors,
+            )
+
+        adapter_error = f"Tool '{tool_name}' has an approved confirmation, but side-effect execution is not enabled yet."
+        tool_call = _record_tool_call(
+            session,
+            conversation_id=request.conversation_id,
+            tool_name=tool_name,
+            status="adapter_not_enabled",
+            arguments=preview.normalized_arguments,
+            result={"errors": [adapter_error], "confirmation_id": confirmation.id if confirmation else None},
+        )
+        provenance = record_provenance(
+            session,
+            conversation_id=request.conversation_id,
+            message_id=None,
+            provider_id="assistant_harness",
+            model="tool_adapter",
+            request={
+                "tool_name": tool_name,
+                "arguments": preview.normalized_arguments,
+                "confirmation_id": request.confirmation_id,
+            },
+            response={"status": "adapter_not_enabled", "errors": [adapter_error]},
+        )
+        return AssistantToolExecutionOut(
+            tool_name=tool_name,
+            executed=False,
+            status="adapter_not_enabled",
+            requires_confirmation=True,
+            confirmation_id=request.confirmation_id,
+            tool_call_id=tool_call.id,
+            provenance_id=provenance.id,
+            normalized_arguments=preview.normalized_arguments,
+            result=preview.preview,
+            warnings=preview.warnings,
+            errors=[adapter_error],
+        )
+
+    if tool_name != "inspect_result":
+        raise HTTPException(status_code=404, detail=f"No execution adapter registered for '{tool_name}'.")
+
+    result = _execute_inspect_result(session, preview.normalized_arguments)
+    tool_call = _record_tool_call(
+        session,
+        conversation_id=request.conversation_id,
+        tool_name=tool_name,
+        status="executed",
+        arguments=preview.normalized_arguments,
+        result=result,
+    )
+    provenance = record_provenance(
+        session,
+        conversation_id=request.conversation_id,
+        message_id=None,
+        provider_id="assistant_harness",
+        model="tool_adapter",
+        request={"tool_name": tool_name, "arguments": preview.normalized_arguments},
+        response={"status": "executed", "result_keys": sorted(result.keys())},
+    )
+    return AssistantToolExecutionOut(
+        tool_name=tool_name,
+        executed=True,
+        status="executed",
+        requires_confirmation=False,
+        confirmation_id=None,
+        tool_call_id=tool_call.id,
+        provenance_id=provenance.id,
+        normalized_arguments=preview.normalized_arguments,
+        result=result,
+        warnings=preview.warnings,
+        errors=[],
     )
 
 

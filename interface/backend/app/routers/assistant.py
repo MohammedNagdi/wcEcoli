@@ -24,6 +24,8 @@ from app.services.assistant_harness import (
     AssistantHarnessStatus,
     AssistantMessageCreate,
     AssistantMessageOut,
+    AssistantToolExecutionOut,
+    AssistantToolExecutionRequest,
     AssistantToolPreviewOut,
     AssistantToolPreviewRequest,
     AssistantToolSpec,
@@ -36,6 +38,7 @@ from app.services.assistant_harness import (
     conversation_to_out,
     create_confirmation,
     create_conversation,
+    execute_tool,
     get_assistant_harness_status,
     get_provider_layer_status,
     get_tool_registry,
@@ -73,6 +76,17 @@ def preview_assistant_tool(
     session: Session = Depends(get_session),
 ) -> AssistantToolPreviewOut:
     return preview_tool(session, tool_name, data)
+
+
+@router.post("/tools/{tool_name}/execute", response_model=AssistantToolExecutionOut)
+def execute_assistant_tool(
+    tool_name: str,
+    data: AssistantToolExecutionRequest,
+    session: Session = Depends(get_session),
+) -> AssistantToolExecutionOut:
+    if data.conversation_id is not None and not session.get(AssistantConversation, data.conversation_id):
+        raise HTTPException(status_code=404, detail="Assistant conversation not found.")
+    return execute_tool(session, tool_name, data)
 
 
 @router.get("/conversations", response_model=list[AssistantConversationOut])

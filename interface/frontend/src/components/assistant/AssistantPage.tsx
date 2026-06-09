@@ -179,7 +179,13 @@ export function AssistantPage() {
             <div className="flex justify-between gap-4">
               <span className="text-gray-500">Tool execution</span>
               <span className="font-medium text-gray-900">
-                {status?.assistant.tool_execution_enabled ? 'Enabled' : 'Disabled'}
+                {status?.assistant.tool_execution_enabled ? 'Partial' : 'Disabled'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-500">Side-effect execution</span>
+              <span className="font-medium text-gray-900">
+                {status?.assistant.side_effect_execution_enabled ? 'Enabled' : 'Disabled'}
               </span>
             </div>
             <div className="flex justify-between gap-4">
@@ -194,6 +200,12 @@ export function AssistantPage() {
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-600">
+            <div className="font-medium text-gray-900">Executable now</div>
+            <div className="mt-1">
+              {(status?.assistant.execution_enabled_tools ?? []).join(', ') || 'No tools'}
+            </div>
+          </div>
+          <div className="mt-4 text-sm text-gray-600">
             <div className="font-medium text-gray-900">Confirmation required for</div>
             <div className="mt-1">
               {(status?.assistant.confirmation_required_for ?? ['run_simulation', 'publish_condition']).join(', ')}
@@ -203,8 +215,8 @@ export function AssistantPage() {
 
         <Card title="Registered tools" issue="#11">
           <p className="text-sm leading-6 text-gray-600">
-            Tools are visible to the UI as typed contracts. Dry-run previews can validate arguments and local references, but
-            execution remains disabled until adapters and confirmation handling are completed.
+            Tools are visible to the UI as typed contracts. Dry-run previews can validate arguments and local references.
+            Read-only result inspection can execute now; side-effecting adapters remain disabled behind confirmations.
           </p>
           <div className="mt-4 rounded-md border border-gray-100 px-3">
             {(status?.assistant.tool_registry ?? []).map((tool) => (

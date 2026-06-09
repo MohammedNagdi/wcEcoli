@@ -1,16 +1,18 @@
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
-from app.db.models import AssistantConfirmation, Condition, Experiment
+from app.db.models import AssistantConfirmation, AssistantToolCall, Condition, Experiment, SimulationJob, SimulationResult
 from app.services.assistant_harness import (
     AssistantContext,
     AssistantConversationCreate,
     AssistantMessageCreate,
     AssistantToolPreviewRequest,
+    AssistantToolExecutionRequest,
     ConfirmationCreate,
     ConfirmationResolve,
     create_confirmation,
     create_conversation,
+    execute_tool,
     get_assistant_harness_status,
     get_provider_layer_status,
     message_to_out,
@@ -41,8 +43,10 @@ def test_assistant_status_exposes_provider_and_tool_contracts_without_execution(
         assert "endpoint_setting" not in payload
 
     status = get_assistant_harness_status()
-    assert status.tool_execution_enabled is False
+    assert status.tool_execution_enabled is True
     assert status.tool_preview_enabled is True
+    assert status.side_effect_execution_enabled is False
+    assert status.execution_enabled_tools == ["inspect_result"]
     assert status.db_persistence_enabled is True
     assert "route" in status.context_contract
     tool_names = {tool.name for tool in status.tool_registry}
@@ -179,6 +183,95 @@ def test_confirmations_can_be_recorded_and_resolved_without_execution():
 
         records = session.exec(select(AssistantConfirmation)).all()
         assert len(records) == 1
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_read_only_inspect_result_execution_records_tool_call_and_provenance():
+    engine, session = _build_session()
+    try:
+        experiment = Experiment(
+            name="dnaA knockout",
+            variant_type="gene_knockout",
+            variant_index=0,
+            condition="basal",
+            gene_symbol="dnaA",
+            status="done",
+        )
+        session.add(experiment)
+        session.flush()
+        job = SimulationJob(
+            experiment_id=experiment.id,
+            status="done",
+            condition="basal",
+            seed=0,
+            generations=1,
+            variant_type="gene_knockout",
+            variant_index=0,
+        )
+        session.add(job)
+        session.flush()
+        session.add(
+            SimulationResult(
+                job_id=job.id,
+                experiment_id=experiment.id,
+                seed=0,
+                generation=0,
+                final_mass_fg=1000.0,
+                growth_rate=0.1,
+                divided=True,
+            )
+        )
+        session.commit()
+
+        executed = execute_tool(
+            session,
+            "inspect_result",
+            AssistantToolExecutionRequest(arguments={"job_id": job.id, "gene": "dnaA"}),
+        )
+        assert executed.executed is True
+        assert executed.status == "executed"
+        assert executed.result["summary"]["result_count"] == 1
+        assert executed.tool_call_id is not None
+        assert executed.provenance_id is not None
+
+        tool_calls = session.exec(select(AssistantToolCall)).all()
+        assert len(tool_calls) == 1
+        assert tool_calls[0].status == "executed"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_side_effect_execution_requires_approved_matching_confirmation_and_remains_disabled():
+    engine, session = _build_session()
+    try:
+        experiment = Experiment(name="dnaA knockout", variant_type="gene_knockout", variant_index=0, condition="basal")
+        session.add(experiment)
+        session.commit()
+
+        request = AssistantToolExecutionRequest(arguments={"experiment_id": 1, "seed": 0, "generations": 1})
+        missing_confirmation = execute_tool(session, "run_simulation", request)
+        assert missing_confirmation.executed is False
+        assert missing_confirmation.status == "confirmation_required"
+
+        confirmation = create_confirmation(
+            session,
+            ConfirmationCreate(
+                action="run_simulation",
+                payload={"experiment_id": 1, "seed": 0, "generations": 1},
+            ),
+        )
+        resolve_confirmation(session, confirmation, ConfirmationResolve(status="approved", note="Approved for test."))
+        approved_request = AssistantToolExecutionRequest(
+            arguments={"experiment_id": 1, "seed": 0, "generations": 1},
+            confirmation_id=confirmation.id,
+        )
+        blocked = execute_tool(session, "run_simulation", approved_request)
+        assert blocked.executed is False
+        assert blocked.status == "adapter_not_enabled"
+        assert "side-effect execution is not enabled yet" in blocked.errors[0]
     finally:
         session.close()
         engine.dispose()
