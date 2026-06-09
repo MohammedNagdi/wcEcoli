@@ -183,6 +183,12 @@ export function AssistantPage() {
               </span>
             </div>
             <div className="flex justify-between gap-4">
+              <span className="text-gray-500">Dry-run previews</span>
+              <span className="font-medium text-gray-900">
+                {status?.assistant.tool_preview_enabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-4">
               <span className="text-gray-500">Registered tools</span>
               <span className="font-medium text-gray-900">{toolCount}</span>
             </div>
@@ -197,8 +203,8 @@ export function AssistantPage() {
 
         <Card title="Registered tools" issue="#11">
           <p className="text-sm leading-6 text-gray-600">
-            Tools are visible to the UI as typed contracts, but every registered tool is disabled until execution adapters,
-            validation, and confirmation handling are completed.
+            Tools are visible to the UI as typed contracts. Dry-run previews can validate arguments and local references, but
+            execution remains disabled until adapters and confirmation handling are completed.
           </p>
           <div className="mt-4 rounded-md border border-gray-100 px-3">
             {(status?.assistant.tool_registry ?? []).map((tool) => (

@@ -1,11 +1,12 @@
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
-from app.db.models import AssistantConfirmation
+from app.db.models import AssistantConfirmation, Condition, Experiment
 from app.services.assistant_harness import (
     AssistantContext,
     AssistantConversationCreate,
     AssistantMessageCreate,
+    AssistantToolPreviewRequest,
     ConfirmationCreate,
     ConfirmationResolve,
     create_confirmation,
@@ -13,6 +14,7 @@ from app.services.assistant_harness import (
     get_assistant_harness_status,
     get_provider_layer_status,
     message_to_out,
+    preview_tool,
     record_provenance,
     resolve_confirmation,
     store_message,
@@ -40,6 +42,7 @@ def test_assistant_status_exposes_provider_and_tool_contracts_without_execution(
 
     status = get_assistant_harness_status()
     assert status.tool_execution_enabled is False
+    assert status.tool_preview_enabled is True
     assert status.db_persistence_enabled is True
     assert "route" in status.context_contract
     tool_names = {tool.name for tool in status.tool_registry}
@@ -91,6 +94,64 @@ def test_assistant_message_round_trip_records_blocked_response_and_provenance():
         assert message_to_out(user_message).role == "user"
         assert message_to_out(assistant_message).status == "blocked_not_enabled"
         assert provenance.prompt_hash
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_tool_preview_validates_arguments_without_execution():
+    engine, session = _build_session()
+    try:
+        session.add(Condition(name="basal", nutrients="minimal"))
+        session.add(Experiment(name="dnaA knockout", variant_type="gene_knockout", variant_index=0, condition="basal"))
+        session.commit()
+
+        create_preview = preview_tool(
+            session,
+            "create_experiment",
+            AssistantToolPreviewRequest(
+                arguments={
+                    "variant_type": "gene_knockout",
+                    "variant_index": 0,
+                    "condition": "basal",
+                    "sim_params": {"generations": 1},
+                }
+            ),
+        )
+        assert create_preview.valid is True
+        assert create_preview.requires_confirmation is True
+        assert create_preview.execution_enabled is False
+        assert create_preview.normalized_arguments["condition"] == "basal"
+
+        run_preview = preview_tool(
+            session,
+            "run_simulation",
+            AssistantToolPreviewRequest(arguments={"experiment_id": 1, "seed": 0, "generations": 1}),
+        )
+        assert run_preview.valid is True
+        assert run_preview.preview["action"] == "would_queue_simulation_job"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_tool_preview_reports_structured_errors_for_bad_references():
+    engine, session = _build_session()
+    try:
+        preview = preview_tool(
+            session,
+            "create_experiment",
+            AssistantToolPreviewRequest(
+                arguments={
+                    "variant_type": "gene_knockout",
+                    "variant_index": "not-an-index",
+                    "condition": "missing_condition",
+                }
+            ),
+        )
+        assert preview.valid is False
+        assert "Argument 'variant_index' must be an integer." in preview.errors
+        assert "Condition 'missing_condition' does not exist." in preview.errors
     finally:
         session.close()
         engine.dispose()

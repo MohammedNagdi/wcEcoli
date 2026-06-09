@@ -20,6 +20,7 @@ import type {
   WildtypeDelta, ConditionCatalog,
   PlatformStatus, DistributionStatus, ProviderLayerStatus, AssistantHarnessStatus,
   AssistantToolSpec, AssistantConversation, AssistantExchange, AssistantContext, AssistantConfirmation,
+  AssistantToolPreview,
 } from '../types'
 
 const BASE = '/api'
@@ -500,6 +501,17 @@ export async function getAssistantProviders(): Promise<ProviderLayerStatus> {
 
 export async function getAssistantTools(): Promise<AssistantToolSpec[]> {
   return fetchJSON('/assistant/tools')
+}
+
+export async function previewAssistantTool(
+  toolName: string,
+  data: { arguments: Record<string, unknown>; context: AssistantContext }
+): Promise<AssistantToolPreview> {
+  return fetchJSON(`/assistant/tools/${encodeURIComponent(toolName)}/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
 }
 
 export async function getAssistantConversations(): Promise<AssistantConversation[]> {

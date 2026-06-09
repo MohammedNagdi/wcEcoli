@@ -804,6 +804,7 @@ export interface AssistantHarnessStatus {
   provider_required: boolean
   provider_configured: boolean
   tool_execution_enabled: boolean
+  tool_preview_enabled: boolean
   db_persistence_enabled: boolean
   confirmation_required_for: string[]
   context_contract: string[]
@@ -876,4 +877,16 @@ export interface AssistantConfirmation {
   note: string
   created_at: string
   resolved_at: string
+}
+
+export interface AssistantToolPreview {
+  tool_name: string
+  valid: boolean
+  requires_confirmation: boolean
+  side_effect: boolean
+  execution_enabled: boolean
+  normalized_arguments: Record<string, unknown>
+  preview: Record<string, unknown>
+  warnings: string[]
+  errors: string[]
 }

@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.config import settings
 from app.db.models import (
@@ -22,6 +22,11 @@ from app.db.models import (
     AssistantConversation,
     AssistantMessage,
     AssistantProvenance,
+    BuilderSectionDraft,
+    Condition,
+    Experiment,
+    SimulationJob,
+    Timeline,
 )
 
 
@@ -159,6 +164,7 @@ class AssistantHarnessStatus(BaseModel):
     provider_required: bool
     provider_configured: bool
     tool_execution_enabled: bool
+    tool_preview_enabled: bool
     db_persistence_enabled: bool
     confirmation_required_for: list[str]
     context_contract: list[str]
@@ -213,6 +219,23 @@ class AssistantExchangeOut(BaseModel):
     provenance_id: int
     pending_confirmations: list[int] = Field(default_factory=list)
     tool_calls: list[int] = Field(default_factory=list)
+
+
+class AssistantToolPreviewRequest(BaseModel):
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    context: AssistantContext = Field(default_factory=AssistantContext)
+
+
+class AssistantToolPreviewOut(BaseModel):
+    tool_name: str
+    valid: bool
+    requires_confirmation: bool
+    side_effect: bool
+    execution_enabled: bool
+    normalized_arguments: dict[str, Any] = Field(default_factory=dict)
+    preview: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
 
 
 class ConfirmationCreate(BaseModel):
@@ -369,6 +392,7 @@ def get_assistant_harness_status() -> AssistantHarnessStatus:
         provider_required=True,
         provider_configured=provider_configured,
         tool_execution_enabled=False,
+        tool_preview_enabled=True,
         db_persistence_enabled=True,
         confirmation_required_for=CONFIRMATION_REQUIRED_ACTIONS,
         context_contract=CONTEXT_CONTRACT,
@@ -377,8 +401,216 @@ def get_assistant_harness_status() -> AssistantHarnessStatus:
         notes=[
             "This is the durable harness foundation, not a live LLM runtime.",
             "Messages, confirmations, and provenance can be stored before tool execution is enabled.",
+            "Registered tools support dry-run validation previews without side effects.",
             "Future execution must use registered typed tools and explicit confirmation for side effects.",
         ],
+    )
+
+
+def get_tool_spec(tool_name: str) -> AssistantToolSpec:
+    for tool in get_tool_registry():
+        if tool.name == tool_name:
+            return tool
+    raise HTTPException(status_code=404, detail=f"Unknown assistant tool '{tool_name}'.")
+
+
+def _string_arg(
+    args: dict[str, Any],
+    key: str,
+    errors: list[str],
+    *,
+    required: bool = True,
+) -> str:
+    value = args.get(key)
+    if value is None or value == "":
+        if required:
+            errors.append(f"Missing required string argument '{key}'.")
+        return ""
+    if not isinstance(value, str):
+        errors.append(f"Argument '{key}' must be a string.")
+        return ""
+    return value.strip()
+
+
+def _int_arg(
+    args: dict[str, Any],
+    key: str,
+    errors: list[str],
+    *,
+    required: bool = True,
+    minimum: int | None = None,
+) -> int | None:
+    value = args.get(key)
+    if value is None or value == "":
+        if required:
+            errors.append(f"Missing required integer argument '{key}'.")
+        return None
+    if isinstance(value, bool):
+        errors.append(f"Argument '{key}' must be an integer.")
+        return None
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        errors.append(f"Argument '{key}' must be an integer.")
+        return None
+    if minimum is not None and normalized < minimum:
+        errors.append(f"Argument '{key}' must be >= {minimum}.")
+        return None
+    return normalized
+
+
+def _object_arg(args: dict[str, Any], key: str, errors: list[str]) -> dict[str, Any]:
+    value = args.get(key, {})
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        errors.append(f"Argument '{key}' must be an object.")
+        return {}
+    return value
+
+
+def _preview_create_experiment(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    variant_type = _string_arg(args, "variant_type", errors)
+    variant_index = _int_arg(args, "variant_index", errors, minimum=0)
+    condition = _string_arg(args, "condition", errors)
+    timeline = _string_arg(args, "timeline", errors, required=False)
+    sim_params = _object_arg(args, "sim_params", errors)
+
+    if condition:
+        condition_record = session.exec(
+            select(Condition).where(Condition.name == condition)
+        ).first()
+        if not condition_record:
+            errors.append(f"Condition '{condition}' does not exist.")
+    if timeline:
+        timeline_record = session.exec(
+            select(Timeline).where(Timeline.name == timeline)
+        ).first()
+        if not timeline_record:
+            errors.append(f"Timeline '{timeline}' does not exist.")
+    else:
+        warnings.append("No time-varying protocol was supplied; the experiment would use a static condition.")
+
+    normalized = {
+        "variant_type": variant_type,
+        "variant_index": variant_index,
+        "condition": condition,
+        "timeline": timeline,
+        "sim_params": sim_params,
+    }
+    preview = {
+        "action": "would_create_experiment_draft",
+        "summary": f"Create a {variant_type or 'variant'} draft under condition {condition or 'unknown'}.",
+        "side_effect_if_executed": "A new experiment row would be created.",
+    }
+    return normalized, preview, warnings, errors
+
+
+def _preview_run_simulation(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    experiment_id = _int_arg(args, "experiment_id", errors, minimum=1)
+    seed = _int_arg(args, "seed", errors, required=False, minimum=0)
+    generations = _int_arg(args, "generations", errors, required=False, minimum=1)
+    experiment = session.get(Experiment, experiment_id) if experiment_id is not None else None
+    if experiment_id is not None and not experiment:
+        errors.append(f"Experiment {experiment_id} does not exist.")
+    if experiment and experiment.status in {"running", "queued"}:
+        warnings.append(f"Experiment {experiment_id} is already {experiment.status}.")
+
+    normalized = {
+        "experiment_id": experiment_id,
+        "seed": 0 if seed is None else seed,
+        "generations": 1 if generations is None else generations,
+    }
+    preview = {
+        "action": "would_queue_simulation_job",
+        "experiment_name": experiment.name if experiment else "",
+        "condition": experiment.condition if experiment else "",
+        "side_effect_if_executed": "A simulation job would be queued for the worker.",
+    }
+    return normalized, preview, warnings, errors
+
+
+def _preview_publish_builder_artifact(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    section = _string_arg(args, "section", errors)
+    draft_id = _int_arg(args, "draft_id", errors, minimum=1)
+    valid_sections = {"media", "mediaRecipe", "condition", "tfCondition", "timeline"}
+    if section and section not in valid_sections:
+        errors.append(f"Section '{section}' is not publishable.")
+    draft = session.get(BuilderSectionDraft, draft_id) if draft_id is not None else None
+    if draft_id is not None and not draft:
+        errors.append(f"Builder draft {draft_id} does not exist.")
+    if draft and section and draft.section != section:
+        errors.append(f"Builder draft {draft_id} belongs to section '{draft.section}', not '{section}'.")
+    if draft and draft.status == "published":
+        warnings.append(f"Builder draft {draft_id} is already published.")
+
+    normalized = {"section": section, "draft_id": draft_id}
+    preview = {
+        "action": "would_publish_builder_artifact",
+        "draft_name": draft.name if draft else "",
+        "published_name": draft.published_name if draft else "",
+        "side_effect_if_executed": "Local reconstruction files and draft status could be updated.",
+    }
+    return normalized, preview, warnings, errors
+
+
+def _preview_inspect_result(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    job_id = _int_arg(args, "job_id", errors, minimum=1)
+    gene = _string_arg(args, "gene", errors, required=False)
+    job = session.get(SimulationJob, job_id) if job_id is not None else None
+    if job_id is not None and not job:
+        errors.append(f"Simulation job {job_id} does not exist.")
+    if job and job.status != "done":
+        warnings.append(f"Simulation job {job_id} is {job.status}; result data may be incomplete.")
+
+    normalized = {"job_id": job_id, "gene": gene}
+    preview = {
+        "action": "would_inspect_result",
+        "status": job.status if job else "",
+        "links": [
+            f"/results/{job_id}" if job_id else "",
+            f"/results/{job_id}?gene={gene}" if job_id and gene else "",
+        ],
+        "side_effect_if_executed": "None. This is a read-only inspection tool.",
+    }
+    return normalized, preview, warnings, errors
+
+
+def preview_tool(
+    session: Session,
+    tool_name: str,
+    request: AssistantToolPreviewRequest,
+) -> AssistantToolPreviewOut:
+    spec = get_tool_spec(tool_name)
+    if tool_name == "create_experiment":
+        normalized, preview, warnings, errors = _preview_create_experiment(session, request.arguments)
+    elif tool_name == "run_simulation":
+        normalized, preview, warnings, errors = _preview_run_simulation(session, request.arguments)
+    elif tool_name == "publish_environment_builder_artifact":
+        normalized, preview, warnings, errors = _preview_publish_builder_artifact(session, request.arguments)
+    elif tool_name == "inspect_result":
+        normalized, preview, warnings, errors = _preview_inspect_result(session, request.arguments)
+    else:
+        raise HTTPException(status_code=404, detail=f"Unknown assistant tool '{tool_name}'.")
+
+    return AssistantToolPreviewOut(
+        tool_name=tool_name,
+        valid=not errors,
+        requires_confirmation=spec.requires_confirmation,
+        side_effect=spec.side_effect,
+        execution_enabled=False,
+        normalized_arguments=normalized,
+        preview=preview,
+        warnings=warnings,
+        errors=errors,
     )
 
 

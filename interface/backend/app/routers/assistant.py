@@ -24,6 +24,8 @@ from app.services.assistant_harness import (
     AssistantHarnessStatus,
     AssistantMessageCreate,
     AssistantMessageOut,
+    AssistantToolPreviewOut,
+    AssistantToolPreviewRequest,
     AssistantToolSpec,
     ConfirmationCreate,
     ConfirmationOut,
@@ -38,6 +40,7 @@ from app.services.assistant_harness import (
     get_provider_layer_status,
     get_tool_registry,
     message_to_out,
+    preview_tool,
     provenance_to_out,
     record_provenance,
     resolve_confirmation,
@@ -61,6 +64,15 @@ def get_providers() -> ProviderLayerStatus:
 @router.get("/tools", response_model=list[AssistantToolSpec])
 def get_tools() -> list[AssistantToolSpec]:
     return get_tool_registry()
+
+
+@router.post("/tools/{tool_name}/preview", response_model=AssistantToolPreviewOut)
+def preview_assistant_tool(
+    tool_name: str,
+    data: AssistantToolPreviewRequest,
+    session: Session = Depends(get_session),
+) -> AssistantToolPreviewOut:
+    return preview_tool(session, tool_name, data)
 
 
 @router.get("/conversations", response_model=list[AssistantConversationOut])
