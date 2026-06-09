@@ -557,6 +557,30 @@ export async function createAssistantMessage(
   })
 }
 
+export async function createAssistantConfirmation(data: {
+  action: string
+  payload: Record<string, unknown>
+  conversation_id?: number | null
+  tool_call_id?: number | null
+}): Promise<AssistantConfirmation> {
+  return fetchJSON('/assistant/confirmations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function resolveAssistantConfirmation(
+  confirmationId: number,
+  data: { status: 'approved' | 'rejected' | 'cancelled'; note?: string }
+): Promise<AssistantConfirmation> {
+  return fetchJSON(`/assistant/confirmations/${confirmationId}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
 export async function getAssistantConfirmations(status?: string): Promise<AssistantConfirmation[]> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : ''
   return fetchJSON(`/assistant/confirmations${qs}`)

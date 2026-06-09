@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { getPlatformStatus } from '../../api/client'
-import type { AssistantToolSpec, PlatformStatus, ProviderStatus } from '../../types'
+import {
+  createAssistantConfirmation,
+  executeAssistantTool,
+  getPlatformStatus,
+  previewAssistantTool,
+  resolveAssistantConfirmation,
+} from '../../api/client'
+import type { AssistantToolExecution, AssistantToolPreview, AssistantToolSpec, PlatformStatus, ProviderStatus } from '../../types'
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'ready' | 'blocked' | 'planned' }) {
   const classes = {
@@ -71,6 +77,313 @@ function ToolRow({ tool }: { tool: AssistantToolSpec }) {
   )
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function numericField(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function PreviewPanel({
+  title,
+  preview,
+  execution,
+}: {
+  title: string
+  preview: AssistantToolPreview | null
+  execution: AssistantToolExecution | null
+}) {
+  if (!preview && !execution) return null
+  return (
+    <div className="rounded-md border border-gray-100 bg-gray-50 p-3 text-xs">
+      <div className="font-semibold text-gray-800">{title}</div>
+      {preview && (
+        <div className="mt-2 space-y-1 text-gray-600">
+          <div>{preview.valid ? 'Preview valid' : 'Preview blocked'}</div>
+          {preview.warnings.map((warning) => (
+            <div key={warning} className="text-amber-700">{warning}</div>
+          ))}
+          {preview.errors.map((error) => (
+            <div key={error} className="text-red-700">{error}</div>
+          ))}
+          <pre className="mt-2 max-h-36 overflow-auto rounded bg-white p-2 text-[11px] leading-5 text-gray-700">
+            {JSON.stringify(preview.preview, null, 2)}
+          </pre>
+        </div>
+      )}
+      {execution && (
+        <div className="mt-3 space-y-1 text-gray-600">
+          <div className={execution.executed ? 'text-emerald-700' : 'text-amber-700'}>
+            Execution status: {execution.status}
+          </div>
+          {execution.errors.map((error) => (
+            <div key={error} className="text-red-700">{error}</div>
+          ))}
+          <pre className="mt-2 max-h-36 overflow-auto rounded bg-white p-2 text-[11px] leading-5 text-gray-700">
+            {JSON.stringify(execution.result, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AssistantRunFlow() {
+  const [gene, setGene] = useState('dnaA')
+  const [condition, setCondition] = useState('basal')
+  const [seed, setSeed] = useState(0)
+  const [generations, setGenerations] = useState(1)
+  const [lengthSec, setLengthSec] = useState(10800)
+  const [experimentId, setExperimentId] = useState<number | null>(null)
+  const [createPreview, setCreatePreview] = useState<AssistantToolPreview | null>(null)
+  const [createExecution, setCreateExecution] = useState<AssistantToolExecution | null>(null)
+  const [runPreview, setRunPreview] = useState<AssistantToolPreview | null>(null)
+  const [runExecution, setRunExecution] = useState<AssistantToolExecution | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const context = {
+    route: '/assistant',
+    selected_gene: gene || null,
+    selected_experiment: experimentId,
+    selected_job: null,
+    selected_result: null,
+    assistant_surface: 'central',
+  }
+
+  const createArguments = {
+    name: `${gene || 'selected gene'} knockout`,
+    description: 'Assistant-guided draft experiment',
+    variant_type: 'gene_knockout',
+    variant_index: 0,
+    condition,
+    timeline: '',
+    sim_params: { seeds: 1, generations, length_sec: lengthSec },
+    gene_symbol: gene,
+    gene_symbols: [],
+    include_wildtype: false,
+  }
+
+  async function previewDraft() {
+    setBusy('preview-create')
+    setError(null)
+    try {
+      const preview = await previewAssistantTool('create_experiment', { arguments: createArguments, context })
+      setCreatePreview(preview)
+      setCreateExecution(null)
+      setRunPreview(null)
+      setRunExecution(null)
+      setExperimentId(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function confirmAndCreate() {
+    setBusy('execute-create')
+    setError(null)
+    try {
+      const preview = await previewAssistantTool('create_experiment', { arguments: createArguments, context })
+      setCreatePreview(preview)
+      if (!preview.valid) return
+      const confirmation = await createAssistantConfirmation({
+        action: 'create_experiment',
+        payload: preview.normalized_arguments,
+      })
+      const approved = await resolveAssistantConfirmation(confirmation.id, {
+        status: 'approved',
+        note: 'Approved from assistant run flow.',
+      })
+      const executed = await executeAssistantTool('create_experiment', {
+        arguments: createArguments,
+        context,
+        confirmation_id: approved.id,
+      })
+      setCreateExecution(executed)
+      const experiment = asRecord(executed.result.experiment)
+      const id = numericField(experiment.id)
+      setExperimentId(id)
+      setRunPreview(null)
+      setRunExecution(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function previewRun() {
+    if (!experimentId) {
+      setError('Create an experiment draft before previewing the run.')
+      return
+    }
+    setBusy('preview-run')
+    setError(null)
+    try {
+      const preview = await previewAssistantTool('run_simulation', {
+        arguments: { experiment_id: experimentId, seed, generations },
+        context: { ...context, selected_experiment: experimentId },
+      })
+      setRunPreview(preview)
+      setRunExecution(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function confirmAndQueueRun() {
+    if (!experimentId) {
+      setError('Create an experiment draft before queueing the run.')
+      return
+    }
+    setBusy('execute-run')
+    setError(null)
+    try {
+      const runArguments = { experiment_id: experimentId, seed, generations }
+      const preview = await previewAssistantTool('run_simulation', {
+        arguments: runArguments,
+        context: { ...context, selected_experiment: experimentId },
+      })
+      setRunPreview(preview)
+      if (!preview.valid) return
+      const confirmation = await createAssistantConfirmation({
+        action: 'run_simulation',
+        payload: preview.normalized_arguments,
+      })
+      const approved = await resolveAssistantConfirmation(confirmation.id, {
+        status: 'approved',
+        note: 'Approved from assistant run flow.',
+      })
+      const executed = await executeAssistantTool('run_simulation', {
+        arguments: runArguments,
+        context: { ...context, selected_experiment: experimentId },
+        confirmation_id: approved.id,
+      })
+      setRunExecution(executed)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Guided run flow</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+            This separates the two side effects: first create a reviewed experiment draft, then queue one simulation job from that draft.
+          </p>
+        </div>
+        <StatusPill tone="ready">confirmation bound</StatusPill>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-5">
+        <label className="text-sm">
+          <span className="font-medium text-gray-700">Gene</span>
+          <input
+            value={gene}
+            onChange={(event) => setGene(event.target.value)}
+            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
+          />
+        </label>
+        <label className="text-sm">
+          <span className="font-medium text-gray-700">Condition</span>
+          <input
+            value={condition}
+            onChange={(event) => setCondition(event.target.value)}
+            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
+          />
+        </label>
+        <label className="text-sm">
+          <span className="font-medium text-gray-700">Seed</span>
+          <input
+            type="number"
+            min={0}
+            value={seed}
+            onChange={(event) => setSeed(Number(event.target.value))}
+            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
+          />
+        </label>
+        <label className="text-sm">
+          <span className="font-medium text-gray-700">Generations</span>
+          <input
+            type="number"
+            min={1}
+            value={generations}
+            onChange={(event) => setGenerations(Number(event.target.value))}
+            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
+          />
+        </label>
+        <label className="text-sm">
+          <span className="font-medium text-gray-700">Max duration (s)</span>
+          <input
+            type="number"
+            min={1}
+            value={lengthSec}
+            onChange={(event) => setLengthSec(Number(event.target.value))}
+            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
+          />
+        </label>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={previewDraft}
+          disabled={Boolean(busy)}
+          className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          Preview draft
+        </button>
+        <button
+          type="button"
+          onClick={confirmAndCreate}
+          disabled={Boolean(busy)}
+          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          Confirm and create draft
+        </button>
+        <button
+          type="button"
+          onClick={previewRun}
+          disabled={Boolean(busy) || !experimentId}
+          className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          Preview run
+        </button>
+        <button
+          type="button"
+          onClick={confirmAndQueueRun}
+          disabled={Boolean(busy) || !experimentId}
+          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          Confirm and queue run
+        </button>
+      </div>
+
+      {error && <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {busy && <div className="mt-3 text-sm text-gray-500">Working: {busy.replace(/-/g, ' ')}</div>}
+      {experimentId && (
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          Draft experiment #{experimentId} is ready for a separately confirmed run.
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <PreviewPanel title="Experiment draft side effect" preview={createPreview} execution={createExecution} />
+        <PreviewPanel title="Simulation queue side effect" preview={runPreview} execution={runExecution} />
+      </div>
+    </section>
+  )
+}
+
 export function AssistantPage() {
   const [status, setStatus] = useState<PlatformStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -102,8 +415,8 @@ export function AssistantPage() {
         <div>
           <h1 className="text-2xl font-semibold text-gray-950">Assistant</h1>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-            Central chat and contextual copilots are scaffolded here, but tool execution is disabled until the provider layer,
-            typed tool harness, confirmations, and provenance records are implemented.
+            Central chat and contextual copilots are scaffolded here. The typed tool harness now supports previews,
+            provenance, and confirmation-bound experiment creation and simulation queueing.
           </p>
         </div>
         <StatusPill tone={assistantReady ? 'ready' : 'blocked'}>
@@ -226,6 +539,8 @@ export function AssistantPage() {
           </div>
         </Card>
 
+        <AssistantRunFlow />
+
         <Card title="Assistant UI surfaces" issue="#12">
           <p className="text-sm leading-6 text-gray-600">
             This page is the central assistant route. Contextual copilot entry points should later appear in Workspace,
@@ -236,7 +551,7 @@ export function AssistantPage() {
             <textarea
               disabled
               value=""
-              placeholder="Assistant chat will be enabled after provider configuration, typed tools, confirmations, and provenance are implemented."
+              placeholder="Provider-backed chat is still disabled. Use the guided run flow above to exercise the confirmation-bound tool path."
               className="mt-2 h-24 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-500"
             />
             <button
