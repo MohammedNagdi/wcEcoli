@@ -195,10 +195,17 @@ After restarting the frontend, do a hard refresh in the browser (`Ctrl+Shift+R`)
 7. View results on the **Results** tab — time-series charts, summary cards, molecule explorer
 
 Each job runs two Docker stages:
-- **Parca**: `python runscripts/manual/runParca.py out/<run_id>` — cached after first run
+- **Parca**: `python runscripts/manual/runParca.py -c $PARCA_CPUS <parca_cache_id>` — content-addressed and shared across jobs with identical reconstruction/model inputs
 - **Simulation**: `python runscripts/manual/runSim.py out/<run_id> --variant <type> <idx> <idx> --seed <s> --generations <g>`
 
 Output goes to `out/<run_id>/<variant_dir>/<seed>/generation_000000/000000/simOut/`.
+
+The worker defaults to `PARCA_CPUS=8` and waits up to
+`PARCA_LOCK_TIMEOUT=3600` seconds when another worker is building the same
+Parca cache entry. A cache entry is reused only after all expected KB files and
+its completion manifest exist. Changes under `reconstruction/ecoli`,
+`models/ecoli`, the configured Docker image, or Parca defaults create a new
+cache key and rerun Parca.
 
 ---
 

@@ -12,7 +12,10 @@ the job status through its lifecycle:
                                                       ↘ failed
 """
 
+import hashlib
+import json
 import logging
+import os
 import shutil
 import signal
 import subprocess
@@ -71,20 +74,59 @@ def _make_run_id(job: SimulationJob, experiment: Experiment) -> str:
     return ts + "_" + label + "_job" + str(job.id)
 
 
-def _make_batch_parca_run_id(batch_id: str) -> str:
-    """Create a stable shared ParCa directory for all jobs in a batch."""
-    safe_batch_id = "".join(ch if ch.isalnum() else "_" for ch in batch_id)
-    return "batch_" + safe_batch_id + "_parca"
+PARCA_CACHE_VERSION = 1
+PARCA_EXPECTED_FILES = (
+    "rawData.cPickle",
+    "simData.cPickle",
+    "metricsData.cPickle",
+    "rawValidationData.cPickle",
+    "validationData.cPickle",
+)
+PARCA_MANIFEST = "parca_manifest.json"
+
+
+def _hash_tree(hasher, root: Path):
+    """Add a deterministic directory tree digest to a cache-key hasher."""
+    if not root.exists():
+        hasher.update(("missing:" + str(root)).encode())
+        return
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
+            continue
+        hasher.update(str(path.relative_to(root)).encode())
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                hasher.update(chunk)
+
+
+def _parca_cache_key() -> str:
+    """Hash inputs that can affect the interface worker's default Parca output."""
+    hasher = hashlib.sha256()
+    config = {
+        "version": PARCA_CACHE_VERSION,
+        "docker_image": settings.docker_image,
+        "options": {
+            "operons": "on",
+            "new_genes": "off",
+            "protein_degradation_combo": "PDR_combo_2022",
+            "ribosome_fitting": True,
+            "rnapoly_fitting": True,
+            "variable_elongation_transcription": True,
+            "variable_elongation_translation": False,
+            "remove_rrna_operons": False,
+            "remove_rrff": False,
+            "stable_rrna": False,
+        },
+    }
+    hasher.update(json.dumps(config, sort_keys=True).encode())
+    _hash_tree(hasher, settings.reconstruction_path / "ecoli")
+    _hash_tree(hasher, settings.models_path / "ecoli")
+    return hasher.hexdigest()
 
 
 def _parca_run_id_for_experiment(run_id: str, experiment: Experiment) -> str:
-    """Return the ParCa directory to use for this experiment.
-
-    Standalone experiments keep their job run directory. Batch experiments
-    deliberately share one stable batch-level ParCa directory so each batch
-    pays the ParCa cost once while each job keeps isolated simulation output.
-    """
-    return _make_batch_parca_run_id(experiment.batch_id) if experiment.batch_id else run_id
+    """Return the content-addressed Parca cache directory used by every job."""
+    return "parca_cache_" + _parca_cache_key()[:24]
 
 
 def _run_docker(
@@ -94,7 +136,6 @@ def _run_docker(
     phase_label: str,
 ) -> subprocess.CompletedProcess:
     """Run a command inside the wcEcoli Docker container."""
-    import os
     output_volume = os.environ.get("SIM_OUTPUT_VOLUME", "interface_sim-output")
     host_reconstruction_path = os.environ.get("WCECOLI_HOST_RECONSTRUCTION", "").strip()
     host_models_path = os.environ.get("WCECOLI_HOST_MODELS", "").strip()
@@ -141,36 +182,77 @@ def _run_docker(
 
 
 def _parca_cached(sim_dir: str) -> bool:
-    """Check if Parca output already exists for this run directory."""
-    kb_path = settings.sim_output_dir / sim_dir / "kb" / "simData.cPickle"
-    return kb_path.exists()
+    """Check that a Parca cache entry was completely and successfully written."""
+    run_path = settings.sim_output_dir / sim_dir
+    kb_path = run_path / "kb"
+    manifest_path = run_path / PARCA_MANIFEST
+    if not manifest_path.exists():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        manifest.get("complete") is True
+        and manifest.get("cache_key") == _parca_cache_key()
+        and all((kb_path / filename).exists() for filename in PARCA_EXPECTED_FILES)
+    )
+
+
+def _write_parca_manifest(sim_dir: str, duration_seconds: float):
+    run_path = settings.sim_output_dir / sim_dir
+    manifest = {
+        "complete": True,
+        "cache_key": _parca_cache_key(),
+        "docker_image": settings.docker_image,
+        "cpus": settings.parca_cpus,
+        "duration_seconds": round(duration_seconds, 3),
+        "completed_at": _now(),
+    }
+    (run_path / PARCA_MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+def _acquire_parca_lock(parca_run_id: str) -> Path | None:
+    """Acquire a filesystem lock, or wait for the worker producing this cache."""
+    lock_path = settings.sim_output_dir / (parca_run_id + ".lock")
+    deadline = time.monotonic() + settings.parca_lock_timeout
+    while True:
+        try:
+            lock_path.mkdir(parents=True)
+            return lock_path
+        except FileExistsError:
+            if _parca_cached(parca_run_id):
+                return None
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Timed out waiting for shared Parca cache")
+            time.sleep(2)
 
 
 def _prepare_shared_parca_kb(job_run_id: str, parca_run_id: str, log_buffer: deque):
-    """Expose a batch-level ParCa kb/ directory inside a job output directory."""
+    """Expose a content-addressed Parca kb/ directory inside a job directory."""
     job_path = settings.sim_output_dir / job_run_id
     job_path.mkdir(parents=True, exist_ok=True)
     kb_path = job_path / "kb"
 
     if kb_path.is_symlink():
         if kb_path.exists():
-            log_buffer.append("Using shared batch ParCa kb: " + parca_run_id)
+            log_buffer.append("Using shared Parca cache: " + parca_run_id)
             return
         kb_path.unlink()
 
     if kb_path.exists():
-        if _parca_cached(job_run_id):
+        if (kb_path / "simData.cPickle").exists():
             raise RuntimeError(
-                "Job already has a private ParCa kb; restart this job to use shared batch ParCa"
+                "Job already has a private Parca kb; restart this job to use shared Parca cache"
             )
         raise RuntimeError("Job kb directory exists but does not contain simData.cPickle")
 
     relative_target = Path("..") / parca_run_id / "kb"
     try:
         kb_path.symlink_to(relative_target, target_is_directory=True)
-        log_buffer.append("Linked job kb to shared batch ParCa: " + str(relative_target))
+        log_buffer.append("Linked job kb to shared Parca cache: " + str(relative_target))
     except OSError as exc:
-        log_buffer.append("Could not link shared ParCa kb, copying instead: " + str(exc))
+        log_buffer.append("Could not link shared Parca cache, copying instead: " + str(exc))
         shutil.copytree(settings.sim_output_dir / parca_run_id / "kb", kb_path)
 
 
@@ -271,14 +353,8 @@ def execute_job(engine, job_id: int):
         parca_run_id = _parca_run_id_for_experiment(run_id, experiment)
         job.sim_dir = run_id
         job.started_at = _now()
-        if experiment.batch_id:
-            log_buffer.append("Batch ParCa mode enabled: " + parca_run_id)
-            logger.info(
-                "Job %d: batch ParCa mode enabled for batch %s (%s)",
-                job_id,
-                experiment.batch_id,
-                parca_run_id,
-            )
+        log_buffer.append("Shared Parca cache: " + parca_run_id)
+        logger.info("Job %d: shared Parca cache %s", job_id, parca_run_id)
 
         # Update experiment status to running
         experiment.status = "running"
@@ -293,22 +369,39 @@ def execute_job(engine, job_id: int):
         session.commit()
 
         if _parca_cached(parca_run_id):
-            if experiment.batch_id:
-                log_buffer.append("Batch ParCa output cached — skipping")
-                logger.info("Job %d: batch ParCa cached, skipping (%s)", job_id, parca_run_id)
-            else:
-                log_buffer.append("Parca output cached — skipping")
-                logger.info("Job %d: Parca cached, skipping", job_id)
+            log_buffer.append("Parca cache hit — skipping")
+            logger.info("Job %d: Parca cache hit (%s)", job_id, parca_run_id)
         else:
-            result = _run_docker(
-                ["python", "runscripts/manual/runParca.py", parca_run_id],
-                parca_run_id,
-                log_buffer,
-                "parca",
-            )
-            if result.returncode != 0:
-                _fail_job(session, job, log_buffer, "Parca failed")
+            try:
+                lock_path = _acquire_parca_lock(parca_run_id)
+            except TimeoutError as exc:
+                _fail_job(session, job, log_buffer, "Parca cache wait failed: " + str(exc))
                 return
+            if lock_path is None:
+                log_buffer.append("Parca cache filled by another worker — skipping")
+            else:
+                try:
+                    started = time.monotonic()
+                    log_buffer.append("Parca cache miss; using " + str(settings.parca_cpus) + " CPUs")
+                    result = _run_docker(
+                        [
+                            "python", "runscripts/manual/runParca.py",
+                            "-c", str(settings.parca_cpus),
+                            parca_run_id,
+                        ],
+                        parca_run_id,
+                        log_buffer,
+                        "parca",
+                    )
+                    if result.returncode != 0:
+                        _fail_job(session, job, log_buffer, "Parca failed")
+                        return
+                    _write_parca_manifest(parca_run_id, time.monotonic() - started)
+                    if not _parca_cached(parca_run_id):
+                        _fail_job(session, job, log_buffer, "Parca output is incomplete")
+                        return
+                finally:
+                    shutil.rmtree(lock_path, ignore_errors=True)
 
         if parca_run_id != run_id:
             try:

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     docker_image: str = "wcecoli-sim:latest"     # Docker image for simulation worker
     worker_poll_interval: int = 5                # seconds between job polls
     log_tail_lines: int = 200                    # lines of log to keep in DB
+    parca_cpus: int = 8                          # processes used by parallel Parca stages
+    parca_lock_timeout: int = 3600                # seconds to wait for another Parca worker
 
     # Local-first distribution and optional artifact bootstrap
     artifact_bootstrap_source: str = ""          # optional source label, e.g. "huggingface"
