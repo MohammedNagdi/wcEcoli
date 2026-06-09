@@ -147,6 +147,12 @@ function ToolReviewPanel({
   const jobIds = numberListField(execution?.result.job_ids)
   const isCreate = preview?.tool_name === 'create_experiment' || execution?.tool_name === 'create_experiment'
   const isRun = preview?.tool_name === 'run_simulation' || execution?.tool_name === 'run_simulation'
+  const isInspect = preview?.tool_name === 'inspect_result' || execution?.tool_name === 'inspect_result'
+  const resultLinks = Array.isArray(execution?.result.links)
+    ? execution.result.links
+        .map((item) => asRecord(item))
+        .filter((item) => typeof item.label === 'string' && typeof item.path === 'string')
+    : []
 
   return (
     <div className="rounded-md border border-gray-200 bg-white p-4 text-sm">
@@ -183,6 +189,13 @@ function ToolReviewPanel({
                 <ReviewRow label="Action" value="Queue one simulation job" />
                 <ReviewRow label="Experiment" value={stringField(previewData.experiment_name) || 'Selected draft'} />
                 <ReviewRow label="Condition" value={stringField(previewData.condition) || 'From experiment'} mono />
+              </>
+            )}
+            {isInspect && (
+              <>
+                <ReviewRow label="Action" value="Inspect result without mutating data" />
+                <ReviewRow label="Job status" value={stringField(previewData.status) || 'Selected result'} mono />
+                <ReviewRow label="Side effect" value={stringField(previewData.side_effect_if_executed) || 'None'} />
               </>
             )}
           </dl>
@@ -229,6 +242,19 @@ function ToolReviewPanel({
               >
                 Monitor queue
               </Link>
+            </div>
+          )}
+          {execution.executed && isInspect && resultLinks.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {resultLinks.map((link) => (
+                <Link
+                  key={String(link.path)}
+                  to={String(link.path)}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  {String(link.label)}
+                </Link>
+              ))}
             </div>
           )}
         </div>
@@ -385,8 +411,11 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
   const [activeConversation, setActiveConversation] = useState<AssistantConversation | null>(null)
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   const [input, setInput] = useState('')
+  const [inspectPreview, setInspectPreview] = useState<AssistantToolPreview | null>(null)
+  const [inspectExecution, setInspectExecution] = useState<AssistantToolExecution | null>(null)
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [inspecting, setInspecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const context = useMemo(() => {
@@ -488,20 +517,41 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
     }
   }
 
+  async function inspectCurrentResult() {
+    if (context.selected_job == null || inspecting) return
+    setInspecting(true)
+    setError(null)
+    try {
+      const args = { job_id: context.selected_job, gene: context.selected_gene || '' }
+      const preview = await previewAssistantTool('inspect_result', { arguments: args, context })
+      setInspectPreview(preview)
+      if (!preview.valid) {
+        setInspectExecution(null)
+        return
+      }
+      const execution = await executeAssistantTool('inspect_result', { arguments: args, context })
+      setInspectExecution(execution)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setInspecting(false)
+    }
+  }
+
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-gray-900">Assistant chat</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-            Chat receives the current page context and can answer normally. It cannot execute tools, queue simulations, or edit data.
+            Chat receives the current page context and can answer normally. It can run read-only result inspection, but cannot queue simulations or edit data.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <StatusPill tone={providerConfigured ? 'ready' : 'blocked'}>
             {providerConfigured ? 'provider configured' : 'no provider'}
           </StatusPill>
-          <StatusPill tone="planned">no tool access</StatusPill>
+          <StatusPill tone="planned">read-only result tool</StatusPill>
         </div>
       </div>
 
@@ -542,18 +592,37 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
             <div className="text-sm font-medium text-gray-900">
               {activeConversation?.title ?? 'New assistant conversation'}
             </div>
-            <div className="mt-1 text-xs text-gray-500">
-              Context: <span className="font-mono">{context.route || '/assistant'}</span>
-              {context.selected_gene && <span> · gene <span className="font-mono">{context.selected_gene}</span></span>}
-              {context.selected_job != null && <span> · job <span className="font-mono">#{context.selected_job}</span></span>}
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+              <span>
+                Context: <span className="font-mono">{context.route || '/assistant'}</span>
+                {context.selected_gene && <span> · gene <span className="font-mono">{context.selected_gene}</span></span>}
+                {context.selected_job != null && <span> · job <span className="font-mono">#{context.selected_job}</span></span>}
+              </span>
+              {context.selected_job != null && (
+                <button
+                  type="button"
+                  onClick={inspectCurrentResult}
+                  disabled={inspecting}
+                  className="rounded border border-gray-200 bg-white px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {inspecting ? 'Inspecting...' : 'Inspect current result'}
+                </button>
+              )}
             </div>
           </div>
 
           <div className="flex-1 space-y-3 overflow-auto bg-gray-50 px-4 py-4">
+            {(inspectPreview || inspectExecution) && (
+              <ToolReviewPanel
+                title="Read-only result inspection"
+                preview={inspectPreview}
+                execution={inspectExecution}
+              />
+            )}
             {messages.length === 0 && (
               <div className="rounded-md border border-dashed border-gray-200 bg-white p-4 text-sm leading-6 text-gray-500">
-                Ask about the current page, a result you are inspecting, or what the platform can safely do next. If no provider is configured,
-                the platform will store the message and return a clear no-provider response.
+                Ask about the current page, a result you are inspecting, or what the platform can safely do next. Read-only result inspection can run from here;
+                side effects still require explicit guided-flow confirmation.
               </div>
             )}
             {messages.map((message) => (
