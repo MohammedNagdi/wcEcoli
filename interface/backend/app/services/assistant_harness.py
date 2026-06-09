@@ -48,7 +48,7 @@ ProviderCategory = Literal["hosted_byok", "local_runtime"]
 ProviderHealthState = Literal["not_configured", "configured_not_checked"]
 AssistantState = Literal["scaffolded_disabled", "provider_configured_tools_disabled", "read_only_tools_enabled"]
 AssistantMessageRole = Literal["user", "assistant", "system"]
-ConfirmationStatus = Literal["pending", "approved", "rejected", "cancelled"]
+ConfirmationStatus = Literal["pending", "approved", "rejected", "cancelled", "used"]
 
 
 CONTEXT_CONTRACT = [
@@ -381,7 +381,7 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             name="run_simulation",
             label="Run simulation",
             description="Queue a saved experiment for execution through the simulation worker.",
-            status="registered_disabled",
+            status="confirmation_execution_enabled",
             requires_confirmation=True,
             side_effect=True,
             argument_schema={"experiment_id": "integer", "seed": "integer", "generations": "integer"},
@@ -418,8 +418,8 @@ def get_assistant_harness_status() -> AssistantHarnessStatus:
         provider_configured=provider_configured,
         tool_execution_enabled=True,
         tool_preview_enabled=True,
-        execution_enabled_tools=["inspect_result"],
-        side_effect_execution_enabled=False,
+        execution_enabled_tools=["inspect_result", "run_simulation"],
+        side_effect_execution_enabled=True,
         db_persistence_enabled=True,
         confirmation_required_for=CONFIRMATION_REQUIRED_ACTIONS,
         context_contract=CONTEXT_CONTRACT,
@@ -429,7 +429,8 @@ def get_assistant_harness_status() -> AssistantHarnessStatus:
             "This is the durable harness foundation, not a live LLM runtime.",
             "Messages, confirmations, and provenance can be stored before tool execution is enabled.",
             "Registered tools support dry-run validation previews without side effects.",
-            "Read-only result inspection can execute; side-effecting tools remain confirmation-gated and adapter-disabled.",
+            "Read-only result inspection can execute immediately.",
+            "run_simulation can execute only after an approved matching confirmation; other side-effecting tools remain adapter-disabled.",
             "Future execution must use registered typed tools and explicit confirmation for side effects.",
         ],
     )
@@ -752,6 +753,62 @@ def _execute_inspect_result(
     }
 
 
+def _execute_run_simulation(
+    session: Session,
+    normalized_arguments: dict[str, Any],
+) -> dict[str, Any]:
+    from app.services.job_queue import RunJobRequest, create_simulation_jobs_for_experiment
+
+    experiment_id = normalized_arguments.get("experiment_id")
+    experiment = session.get(Experiment, experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found.")
+
+    seed = normalized_arguments.get("seed", 0)
+    generations = normalized_arguments.get("generations", 1)
+    response = create_simulation_jobs_for_experiment(
+        experiment,
+        RunJobRequest(
+            condition=experiment.condition or "basal",
+            seeds=[int(seed)],
+            generations=int(generations),
+        ),
+        session,
+    )
+    session.refresh(experiment)
+    return {
+        "action": "queued_simulation_job",
+        "job_ids": response.job_ids,
+        "message": response.message,
+        "experiment": {
+            "id": experiment.id,
+            "name": experiment.name,
+            "status": experiment.status,
+            "variant_type": experiment.variant_type,
+            "variant_index": experiment.variant_index,
+            "condition": experiment.condition,
+            "timeline": experiment.timeline,
+            "gene_symbol": experiment.gene_symbol,
+        },
+    }
+
+
+def _mark_confirmation_used(
+    session: Session,
+    confirmation: AssistantConfirmation,
+    *,
+    tool_call_id: int | None,
+) -> AssistantConfirmation:
+    confirmation.status = "used"
+    note = f"Used by assistant tool call {tool_call_id}."
+    confirmation.note = f"{confirmation.note}\n{note}".strip() if confirmation.note else note
+    confirmation.resolved_at = now_iso()
+    session.add(confirmation)
+    session.commit()
+    session.refresh(confirmation)
+    return confirmation
+
+
 def execute_tool(
     session: Session,
     tool_name: str,
@@ -814,6 +871,45 @@ def execute_tool(
                 result=preview.preview,
                 warnings=preview.warnings,
                 errors=confirmation_errors,
+            )
+
+        if tool_name == "run_simulation":
+            result = _execute_run_simulation(session, preview.normalized_arguments)
+            tool_call = _record_tool_call(
+                session,
+                conversation_id=request.conversation_id,
+                tool_name=tool_name,
+                status="executed",
+                arguments=preview.normalized_arguments,
+                result=result,
+            )
+            if confirmation:
+                _mark_confirmation_used(session, confirmation, tool_call_id=tool_call.id)
+            provenance = record_provenance(
+                session,
+                conversation_id=request.conversation_id,
+                message_id=None,
+                provider_id="assistant_harness",
+                model="tool_adapter",
+                request={
+                    "tool_name": tool_name,
+                    "arguments": preview.normalized_arguments,
+                    "confirmation_id": request.confirmation_id,
+                },
+                response={"status": "executed", "result_keys": sorted(result.keys())},
+            )
+            return AssistantToolExecutionOut(
+                tool_name=tool_name,
+                executed=True,
+                status="executed",
+                requires_confirmation=True,
+                confirmation_id=request.confirmation_id,
+                tool_call_id=tool_call.id,
+                provenance_id=provenance.id,
+                normalized_arguments=preview.normalized_arguments,
+                result=result,
+                warnings=preview.warnings,
+                errors=[],
             )
 
         adapter_error = f"Tool '{tool_name}' has an approved confirmation, but side-effect execution is not enabled yet."

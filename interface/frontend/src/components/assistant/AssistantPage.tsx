@@ -216,7 +216,8 @@ export function AssistantPage() {
         <Card title="Registered tools" issue="#11">
           <p className="text-sm leading-6 text-gray-600">
             Tools are visible to the UI as typed contracts. Dry-run previews can validate arguments and local references.
-            Read-only result inspection can execute now; side-effecting adapters remain disabled behind confirmations.
+            Read-only result inspection can execute now, and simulations can be queued only after explicit confirmation.
+            Other side-effecting adapters remain disabled.
           </p>
           <div className="mt-4 rounded-md border border-gray-100 px-3">
             {(status?.assistant.tool_registry ?? []).map((tool) => (

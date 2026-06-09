@@ -1,6 +1,5 @@
 """Simulation job management API endpoints."""
 
-import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -10,12 +9,12 @@ from sqlmodel import Session, col, select
 
 from app.db.models import Experiment, SimulationJob, SimulationResult
 from app.main import get_session
-from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
+from app.services.job_queue import RunJobRequest, RunResponse, create_simulation_jobs_for_experiment
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
 
-# ── Response models ──────────────────────────────────────────────────────
+# Response models
 
 class JobOut(BaseModel):
     id: int
@@ -49,82 +48,7 @@ class JobResultOut(BaseModel):
     divided: bool = True
     created_at: str
 
-
-class RunResponse(BaseModel):
-    job_ids: list[int]
-    message: str
-
-
-# ── POST /api/experiments/{id}/run ───────────────────────────────────────
-
-class RunJobRequest(BaseModel):
-    condition: str = ""
-    seeds: Optional[int | list[int]] = None
-    generations: Optional[int] = None
-
-
-def create_simulation_jobs_for_experiment(
-    experiment: Experiment,
-    body: RunJobRequest,
-    session: Session,
-) -> RunResponse:
-    """Submit an experiment for simulation.
-
-    Creates one SimulationJob per seed specified in the experiment's
-    sim_params. Each job runs independently through Parca → Sim → Ingest.
-    """
-    if experiment.status == "running":
-        raise HTTPException(409, "Experiment already has running jobs")
-
-    # Parse sim_params for seed count and generations
-    try:
-        params = json.loads(experiment.sim_params) if experiment.sim_params else {}
-    except json.JSONDecodeError:
-        params = {}
-
-    seed_spec = body.seeds if body.seeds is not None else params.get("seeds", 1)
-    if isinstance(seed_spec, list):
-        seed_values = [int(seed) for seed in seed_spec]
-    else:
-        seed_values = list(range(int(seed_spec)))
-    generations = body.generations if body.generations is not None else params.get("generations", 1)
-    timeline = resolve_timeline_definition(session, experiment.timeline) if experiment.timeline else ""
-    condition = body.condition or experiment.condition or "basal"
-    if timeline:
-        condition = infer_condition_from_timeline(session, timeline, condition)
-    now = datetime.now(timezone.utc).isoformat()
-
-    job_ids = []
-    for seed in seed_values:
-        job = SimulationJob(
-            experiment_id=experiment.id,
-            status="pending",
-            phase="Queued",
-            created_at=now,
-            variant_type=experiment.variant_type,
-            variant_index=experiment.variant_index,
-            condition=condition,
-            seed=seed,
-            generations=generations,
-            timeline=timeline,
-        )
-        session.add(job)
-        session.flush()  # get the auto-increment ID
-        job_ids.append(job.id)
-
-    # Update experiment status
-    experiment.status = "queued"
-    experiment.updated_at = now
-    session.add(experiment)
-    session.commit()
-
-    return RunResponse(
-        job_ids=job_ids,
-        message=f"Queued {len(job_ids)} simulation job(s)",
-    )
-
-
-# ── GET /api/jobs ────────────────────────────────────────────────────────
+# GET /api/jobs
 
 @router.get("/jobs", response_model=list[JobOut])
 def list_jobs(
@@ -142,7 +66,7 @@ def list_jobs(
     return [JobOut.model_validate(j, from_attributes=True) for j in jobs]
 
 
-# ── GET /api/jobs/failed ──────────────────────────────────────────────
+# GET /api/jobs/failed
 
 class FailedJobSummary(BaseModel):
     id: int
@@ -190,7 +114,7 @@ def list_failed_jobs(session: Session = Depends(get_session)):
     return results
 
 
-# ── GET /api/jobs/{id} ───────────────────────────────────────────────────
+# GET /api/jobs/{id}
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: int, session: Session = Depends(get_session)):
@@ -201,7 +125,7 @@ def get_job(job_id: int, session: Session = Depends(get_session)):
     return JobOut.model_validate(job, from_attributes=True)
 
 
-# ── GET /api/jobs/{id}/results ───────────────────────────────────────────
+# GET /api/jobs/{id}/results
 
 @router.get("/jobs/{job_id}/results", response_model=list[JobResultOut])
 def get_job_results(job_id: int, session: Session = Depends(get_session)):
@@ -217,7 +141,7 @@ def get_job_results(job_id: int, session: Session = Depends(get_session)):
     return [JobResultOut.model_validate(r, from_attributes=True) for r in results]
 
 
-# ── DELETE /api/jobs/{id} ────────────────────────────────────────────────
+# DELETE /api/jobs/{id}
 
 @router.delete("/jobs/{job_id}", status_code=204)
 def cancel_job(job_id: int, session: Session = Depends(get_session)):
@@ -253,7 +177,7 @@ def cancel_job(job_id: int, session: Session = Depends(get_session)):
     session.commit()
 
 
-# ── POST /api/jobs/{id}/retry ─────────────────────────────────────────
+# POST /api/jobs/{id}/retry
 
 @router.post("/jobs/{job_id}/retry", response_model=JobOut)
 def retry_job(job_id: int, session: Session = Depends(get_session)):
@@ -289,7 +213,7 @@ def retry_job(job_id: int, session: Session = Depends(get_session)):
     return JobOut.model_validate(job, from_attributes=True)
 
 
-# ── DELETE /api/jobs/{id}/permanent ──────────────────────────────────
+# DELETE /api/jobs/{id}/permanent
 
 @router.delete("/jobs/{job_id}/permanent", status_code=204)
 def delete_job_permanent(job_id: int, session: Session = Depends(get_session)):
@@ -318,7 +242,7 @@ def delete_job_permanent(job_id: int, session: Session = Depends(get_session)):
     session.commit()
 
 
-# ── POST /api/jobs/{id}/reingest ──────────────────────────────────────
+# POST /api/jobs/{id}/reingest
 
 @router.post("/jobs/{job_id}/reingest", response_model=list[JobResultOut])
 def reingest_job(job_id: int, session: Session = Depends(get_session)):

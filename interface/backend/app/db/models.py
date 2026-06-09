@@ -146,7 +146,7 @@ class AssistantConfirmation(SQLModel, table=True):
     conversation_id: Optional[int] = Field(default=None, index=True)
     tool_call_id: Optional[int] = Field(default=None, index=True)
     action: str = Field(index=True)
-    status: str = "pending"                      # pending | approved | rejected | cancelled
+    status: str = "pending"                      # pending | approved | rejected | cancelled | used
     payload_json: str = "{}"                     # action payload shown to the user
     note: str = ""
     created_at: str = ""                         # ISO timestamp

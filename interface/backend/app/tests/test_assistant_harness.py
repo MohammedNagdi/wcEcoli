@@ -45,8 +45,8 @@ def test_assistant_status_exposes_provider_and_tool_contracts_without_execution(
     status = get_assistant_harness_status()
     assert status.tool_execution_enabled is True
     assert status.tool_preview_enabled is True
-    assert status.side_effect_execution_enabled is False
-    assert status.execution_enabled_tools == ["inspect_result"]
+    assert status.side_effect_execution_enabled is True
+    assert status.execution_enabled_tools == ["inspect_result", "run_simulation"]
     assert status.db_persistence_enabled is True
     assert "route" in status.context_contract
     tool_names = {tool.name for tool in status.tool_registry}
@@ -244,7 +244,7 @@ def test_read_only_inspect_result_execution_records_tool_call_and_provenance():
         engine.dispose()
 
 
-def test_side_effect_execution_requires_approved_matching_confirmation_and_remains_disabled():
+def test_run_simulation_execution_requires_approved_matching_confirmation_and_queues_job_once():
     engine, session = _build_session()
     try:
         experiment = Experiment(name="dnaA knockout", variant_type="gene_knockout", variant_index=0, condition="basal")
@@ -268,10 +268,22 @@ def test_side_effect_execution_requires_approved_matching_confirmation_and_remai
             arguments={"experiment_id": 1, "seed": 0, "generations": 1},
             confirmation_id=confirmation.id,
         )
-        blocked = execute_tool(session, "run_simulation", approved_request)
-        assert blocked.executed is False
-        assert blocked.status == "adapter_not_enabled"
-        assert "side-effect execution is not enabled yet" in blocked.errors[0]
+        executed = execute_tool(session, "run_simulation", approved_request)
+        assert executed.executed is True
+        assert executed.status == "executed"
+        assert executed.result["job_ids"] == [1]
+        assert executed.result["experiment"]["status"] == "queued"
+
+        used_confirmation = session.get(AssistantConfirmation, confirmation.id)
+        assert used_confirmation.status == "used"
+
+        replay = execute_tool(session, "run_simulation", approved_request)
+        assert replay.executed is False
+        assert replay.status == "confirmation_required"
+        assert "not approved" in replay.errors[0]
+
+        jobs = session.exec(select(SimulationJob)).all()
+        assert len(jobs) == 1
     finally:
         session.close()
         engine.dispose()
