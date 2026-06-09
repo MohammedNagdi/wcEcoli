@@ -275,6 +275,7 @@ from app.routers.condition_catalog import router as condition_catalog_router  # 
 from app.routers.builder_drafts import router as builder_drafts_router  # noqa: E402
 from app.routers.user_timelines import router as user_timelines_router  # noqa: E402
 from app.routers.platform import router as platform_router  # noqa: E402
+from app.routers.assistant import router as assistant_router  # noqa: E402
 
 app.include_router(genes_router)
 app.include_router(pathways_router)
@@ -289,3 +290,4 @@ app.include_router(condition_catalog_router)
 app.include_router(builder_drafts_router)
 app.include_router(user_timelines_router)
 app.include_router(platform_router)
+app.include_router(assistant_router)

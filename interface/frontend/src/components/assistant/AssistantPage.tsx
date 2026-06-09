@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { getPlatformStatus } from '../../api/client'
-import type { PlatformStatus, ProviderStatus } from '../../types'
+import type { AssistantToolSpec, PlatformStatus, ProviderStatus } from '../../types'
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'ready' | 'blocked' | 'planned' }) {
   const classes = {
@@ -42,11 +42,31 @@ function ProviderRow({ provider }: { provider: ProviderStatus }) {
     <div className="flex items-center justify-between gap-3 border-b border-gray-100 py-2 last:border-b-0">
       <div>
         <div className="font-medium text-gray-900">{provider.label}</div>
-        <div className="text-xs text-gray-500">{provider.configuration_hint}</div>
+        <div className="text-xs text-gray-500">
+          {provider.configuration_hint} Health: {provider.health.replace(/_/g, ' ')}.
+        </div>
       </div>
       <StatusPill tone={provider.configured ? 'ready' : 'neutral'}>
         {provider.configured ? 'Configured' : provider.category}
       </StatusPill>
+    </div>
+  )
+}
+
+function ToolRow({ tool }: { tool: AssistantToolSpec }) {
+  return (
+    <div className="border-b border-gray-100 py-3 last:border-b-0">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="font-medium text-gray-900">{tool.label}</div>
+        <div className="flex flex-wrap gap-2">
+          <StatusPill tone={tool.status.includes('disabled') ? 'blocked' : 'ready'}>
+            {tool.status.replace(/_/g, ' ')}
+          </StatusPill>
+          {tool.requires_confirmation && <StatusPill tone="planned">confirmation</StatusPill>}
+          {tool.side_effect && <StatusPill tone="blocked">side effect</StatusPill>}
+        </div>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-gray-500">{tool.description}</p>
     </div>
   )
 }
@@ -74,6 +94,7 @@ export function AssistantPage() {
 
   const configuredProviders = status?.providers.configured_provider_count ?? 0
   const assistantReady = Boolean(status?.assistant.provider_configured && status?.assistant.tool_execution_enabled)
+  const toolCount = status?.assistant.tool_registry.length ?? 0
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -148,11 +169,41 @@ export function AssistantPage() {
               <StatusPill key={item}>{item}</StatusPill>
             ))}
           </div>
+          <div className="mt-4 grid gap-2 text-sm">
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-500">Message persistence</span>
+              <span className="font-medium text-gray-900">
+                {status?.assistant.db_persistence_enabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-500">Tool execution</span>
+              <span className="font-medium text-gray-900">
+                {status?.assistant.tool_execution_enabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-500">Registered tools</span>
+              <span className="font-medium text-gray-900">{toolCount}</span>
+            </div>
+          </div>
           <div className="mt-4 text-sm text-gray-600">
             <div className="font-medium text-gray-900">Confirmation required for</div>
             <div className="mt-1">
               {(status?.assistant.confirmation_required_for ?? ['run_simulation', 'publish_condition']).join(', ')}
             </div>
+          </div>
+        </Card>
+
+        <Card title="Registered tools" issue="#11">
+          <p className="text-sm leading-6 text-gray-600">
+            Tools are visible to the UI as typed contracts, but every registered tool is disabled until execution adapters,
+            validation, and confirmation handling are completed.
+          </p>
+          <div className="mt-4 rounded-md border border-gray-100 px-3">
+            {(status?.assistant.tool_registry ?? []).map((tool) => (
+              <ToolRow key={tool.name} tool={tool} />
+            ))}
           </div>
         </Card>
 

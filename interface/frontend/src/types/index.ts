@@ -786,7 +786,10 @@ export interface ProviderStatus {
   label: string
   category: string
   configured: boolean
+  health: string
   configuration_hint: string
+  endpoint_configured: boolean
+  secret_configured: boolean
 }
 
 export interface ProviderLayerStatus {
@@ -801,9 +804,11 @@ export interface AssistantHarnessStatus {
   provider_required: boolean
   provider_configured: boolean
   tool_execution_enabled: boolean
+  db_persistence_enabled: boolean
   confirmation_required_for: string[]
   context_contract: string[]
   visible_artifacts: string[]
+  tool_registry: AssistantToolSpec[]
   notes: string[]
 }
 
@@ -811,4 +816,64 @@ export interface PlatformStatus {
   distribution: DistributionStatus
   providers: ProviderLayerStatus
   assistant: AssistantHarnessStatus
+}
+
+export interface AssistantToolSpec {
+  name: string
+  label: string
+  description: string
+  status: string
+  requires_confirmation: boolean
+  side_effect: boolean
+  argument_schema: Record<string, unknown>
+  result_schema: Record<string, unknown>
+}
+
+export interface AssistantContext {
+  route: string
+  selected_gene: string | null
+  selected_experiment: number | null
+  selected_job: number | null
+  selected_result: number | null
+  assistant_surface: string
+}
+
+export interface AssistantConversation {
+  id: number
+  title: string
+  assistant_surface: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AssistantMessage {
+  id: number
+  conversation_id: number
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  context: AssistantContext
+  status: string
+  created_at: string
+}
+
+export interface AssistantExchange {
+  conversation: AssistantConversation
+  user_message: AssistantMessage
+  assistant_message: AssistantMessage
+  provenance_id: number
+  pending_confirmations: number[]
+  tool_calls: number[]
+}
+
+export interface AssistantConfirmation {
+  id: number
+  conversation_id: number | null
+  tool_call_id: number | null
+  action: string
+  status: string
+  payload: Record<string, unknown>
+  note: string
+  created_at: string
+  resolved_at: string
 }

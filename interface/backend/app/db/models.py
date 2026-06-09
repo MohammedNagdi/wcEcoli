@@ -102,6 +102,71 @@ class BuilderSectionDraft(SQLModel, table=True):
     published_name: str = ""                     # canonical name after publish
 
 
+class AssistantConversation(SQLModel, table=True):
+    __tablename__ = "assistant_conversations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(index=True)
+    assistant_surface: str = Field(index=True)
+    status: str = "open"                         # open | archived
+    created_at: str = ""                         # ISO timestamp
+    updated_at: str = ""                         # ISO timestamp
+
+
+class AssistantMessage(SQLModel, table=True):
+    __tablename__ = "assistant_messages"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: int = Field(index=True)
+    role: str = Field(index=True)                # user | assistant | system
+    content: str = ""
+    context_json: str = "{}"                     # sanitized route/page context
+    status: str = "stored"                       # stored | blocked_not_enabled
+    created_at: str = ""                         # ISO timestamp
+
+
+class AssistantToolCall(SQLModel, table=True):
+    __tablename__ = "assistant_tool_calls"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: int = Field(index=True)
+    message_id: Optional[int] = Field(default=None, index=True)
+    tool_name: str = Field(index=True)
+    status: str = "proposed"                     # proposed | pending_confirmation | executed | rejected | failed
+    arguments_json: str = "{}"                   # typed tool arguments snapshot
+    result_json: str = "{}"                      # typed tool result/error snapshot
+    created_at: str = ""                         # ISO timestamp
+    updated_at: str = ""                         # ISO timestamp
+
+
+class AssistantConfirmation(SQLModel, table=True):
+    __tablename__ = "assistant_confirmations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: Optional[int] = Field(default=None, index=True)
+    tool_call_id: Optional[int] = Field(default=None, index=True)
+    action: str = Field(index=True)
+    status: str = "pending"                      # pending | approved | rejected | cancelled
+    payload_json: str = "{}"                     # action payload shown to the user
+    note: str = ""
+    created_at: str = ""                         # ISO timestamp
+    resolved_at: str = ""                        # ISO timestamp
+
+
+class AssistantProvenance(SQLModel, table=True):
+    __tablename__ = "assistant_provenance"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: Optional[int] = Field(default=None, index=True)
+    message_id: Optional[int] = Field(default=None, index=True)
+    provider_id: str = ""
+    model: str = ""
+    prompt_hash: str = ""
+    request_json: str = "{}"                     # sanitized prompt/context metadata
+    response_json: str = "{}"                    # sanitized response/tool metadata
+    created_at: str = ""                         # ISO timestamp
+
+
 class Variant(SQLModel, table=True):
     __tablename__ = "variants"
 

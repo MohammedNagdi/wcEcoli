@@ -19,6 +19,7 @@ import type {
   ComparisonResponse, FailedJobSummary,
   WildtypeDelta, ConditionCatalog,
   PlatformStatus, DistributionStatus, ProviderLayerStatus, AssistantHarnessStatus,
+  AssistantToolSpec, AssistantConversation, AssistantExchange, AssistantContext, AssistantConfirmation,
 } from '../types'
 
 const BASE = '/api'
@@ -487,6 +488,50 @@ export async function getLlmProviderStatus(): Promise<ProviderLayerStatus> {
 
 export async function getAssistantHarnessStatus(): Promise<AssistantHarnessStatus> {
   return fetchJSON('/platform/assistant')
+}
+
+export async function getAssistantStatus(): Promise<AssistantHarnessStatus> {
+  return fetchJSON('/assistant/status')
+}
+
+export async function getAssistantProviders(): Promise<ProviderLayerStatus> {
+  return fetchJSON('/assistant/providers')
+}
+
+export async function getAssistantTools(): Promise<AssistantToolSpec[]> {
+  return fetchJSON('/assistant/tools')
+}
+
+export async function getAssistantConversations(): Promise<AssistantConversation[]> {
+  return fetchJSON('/assistant/conversations')
+}
+
+export async function createAssistantConversation(data: {
+  title: string
+  assistant_surface: string
+  context: AssistantContext
+}): Promise<AssistantConversation> {
+  return fetchJSON('/assistant/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function createAssistantMessage(
+  conversationId: number,
+  data: { content: string; context: AssistantContext }
+): Promise<AssistantExchange> {
+  return fetchJSON(`/assistant/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getAssistantConfirmations(status?: string): Promise<AssistantConfirmation[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  return fetchJSON(`/assistant/confirmations${qs}`)
 }
 
 // --- Health ---

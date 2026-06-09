@@ -4,6 +4,12 @@ from pydantic import BaseModel
 from fastapi import APIRouter
 
 from app.config import settings
+from app.services.assistant_harness import (
+    AssistantHarnessStatus,
+    ProviderLayerStatus,
+    get_assistant_harness_status,
+    get_provider_layer_status,
+)
 
 
 router = APIRouter(prefix="/api/platform", tags=["platform"])
@@ -25,87 +31,10 @@ class DistributionStatusOut(BaseModel):
     notes: list[str]
 
 
-class ProviderStatusOut(BaseModel):
-    provider_id: str
-    label: str
-    category: str
-    configured: bool
-    configuration_hint: str
-
-
-class ProviderLayerStatusOut(BaseModel):
-    mode: str
-    configured_provider_count: int
-    providers: list[ProviderStatusOut]
-    notes: list[str]
-
-
-class AssistantHarnessStatusOut(BaseModel):
-    state: str
-    provider_required: bool
-    provider_configured: bool
-    tool_execution_enabled: bool
-    confirmation_required_for: list[str]
-    context_contract: list[str]
-    visible_artifacts: list[str]
-    notes: list[str]
-
-
 class PlatformStatusOut(BaseModel):
     distribution: DistributionStatusOut
-    providers: ProviderLayerStatusOut
-    assistant: AssistantHarnessStatusOut
-
-
-def _configured(value: str | None) -> bool:
-    return bool((value or "").strip())
-
-
-def _provider_status() -> list[ProviderStatusOut]:
-    return [
-        ProviderStatusOut(
-            provider_id="openai",
-            label="OpenAI",
-            category="hosted_byok",
-            configured=_configured(settings.openai_api_key),
-            configuration_hint="Set OPENAI_API_KEY in the local environment.",
-        ),
-        ProviderStatusOut(
-            provider_id="anthropic",
-            label="Anthropic",
-            category="hosted_byok",
-            configured=_configured(settings.anthropic_api_key),
-            configuration_hint="Set ANTHROPIC_API_KEY in the local environment.",
-        ),
-        ProviderStatusOut(
-            provider_id="openrouter",
-            label="OpenRouter",
-            category="hosted_byok",
-            configured=_configured(settings.openrouter_api_key),
-            configuration_hint="Set OPENROUTER_API_KEY in the local environment.",
-        ),
-        ProviderStatusOut(
-            provider_id="ollama",
-            label="Ollama",
-            category="local_runtime",
-            configured=_configured(settings.ollama_base_url),
-            configuration_hint="Set OLLAMA_BASE_URL for a local Ollama endpoint.",
-        ),
-        ProviderStatusOut(
-            provider_id="lm_studio",
-            label="LM Studio",
-            category="local_runtime",
-            configured=_configured(settings.lm_studio_base_url),
-            configuration_hint="Set LM_STUDIO_BASE_URL for a local LM Studio endpoint.",
-        ),
-        ProviderStatusOut(
-            provider_id="vllm",
-            label="vLLM",
-            category="local_runtime",
-            configured=_configured(settings.vllm_base_url),
-            configuration_hint="Set VLLM_BASE_URL for a local vLLM/OpenAI-compatible endpoint.",
-        ),
-    ]
+    providers: ProviderLayerStatus
+    assistant: AssistantHarnessStatus
 
 
 def _distribution_status() -> DistributionStatusOut:
@@ -134,63 +63,13 @@ def _distribution_status() -> DistributionStatusOut:
     )
 
 
-def _provider_layer_status() -> ProviderLayerStatusOut:
-    providers = _provider_status()
-    configured_count = sum(1 for provider in providers if provider.configured)
-    return ProviderLayerStatusOut(
-        mode="bring_your_own_key_or_local_endpoint",
-        configured_provider_count=configured_count,
-        providers=providers,
-        notes=[
-            "Provider status reports configuration presence only; API keys are never returned.",
-            "The scientific platform remains usable when no LLM provider is configured.",
-        ],
-    )
-
-
-def _assistant_status(provider_configured: bool) -> AssistantHarnessStatusOut:
-    return AssistantHarnessStatusOut(
-        state="scaffolded_disabled",
-        provider_required=True,
-        provider_configured=provider_configured,
-        tool_execution_enabled=False,
-        confirmation_required_for=[
-            "create_experiment",
-            "run_simulation",
-            "cancel_simulation",
-            "delete_experiment",
-            "publish_environment_builder_artifact",
-        ],
-        context_contract=[
-            "route",
-            "selected_gene",
-            "selected_experiment",
-            "selected_job",
-            "selected_result",
-            "assistant_surface",
-        ],
-        visible_artifacts=[
-            "assistant_message",
-            "tool_call_record",
-            "experiment_proposal",
-            "result_reference",
-            "pending_confirmation",
-        ],
-        notes=[
-            "This endpoint is a planning scaffold, not a live LLM harness.",
-            "Future tool execution must remain typed, validated, and provider-agnostic.",
-        ],
-    )
-
-
 @router.get("/status", response_model=PlatformStatusOut)
 def get_platform_status() -> PlatformStatusOut:
     """Return local distribution, provider-layer, and assistant scaffold status."""
-    providers = _provider_layer_status()
     return PlatformStatusOut(
         distribution=_distribution_status(),
-        providers=providers,
-        assistant=_assistant_status(providers.configured_provider_count > 0),
+        providers=get_provider_layer_status(),
+        assistant=get_assistant_harness_status(),
     )
 
 
@@ -200,14 +79,13 @@ def get_distribution_status() -> DistributionStatusOut:
     return _distribution_status()
 
 
-@router.get("/llm-providers", response_model=ProviderLayerStatusOut)
-def get_llm_provider_status() -> ProviderLayerStatusOut:
+@router.get("/llm-providers", response_model=ProviderLayerStatus)
+def get_llm_provider_status() -> ProviderLayerStatus:
     """Return non-secret BYOK/local model provider configuration status."""
-    return _provider_layer_status()
+    return get_provider_layer_status()
 
 
-@router.get("/assistant", response_model=AssistantHarnessStatusOut)
-def get_assistant_harness_status() -> AssistantHarnessStatusOut:
+@router.get("/assistant", response_model=AssistantHarnessStatus)
+def get_platform_assistant_harness_status() -> AssistantHarnessStatus:
     """Return the assistant harness scaffold state."""
-    providers = _provider_layer_status()
-    return _assistant_status(providers.configured_provider_count > 0)
+    return get_assistant_harness_status()
