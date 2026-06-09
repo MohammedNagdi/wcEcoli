@@ -1,13 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import {
   createAssistantConfirmation,
   executeAssistantTool,
+  getConditions,
   getPlatformStatus,
   previewAssistantTool,
   resolveAssistantConfirmation,
+  searchGenes,
 } from '../../api/client'
-import type { AssistantToolExecution, AssistantToolPreview, AssistantToolSpec, PlatformStatus, ProviderStatus } from '../../types'
+import type {
+  AssistantToolExecution,
+  AssistantToolPreview,
+  AssistantToolSpec,
+  Condition,
+  Gene,
+  PlatformStatus,
+  ProviderStatus,
+} from '../../types'
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'ready' | 'blocked' | 'planned' }) {
   const classes = {
@@ -85,7 +96,24 @@ function numericField(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function PreviewPanel({
+function stringField(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function numberListField(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number') : []
+}
+
+function ReviewRow({ label, value, mono = false }: { label: string; value: ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-gray-100 py-2 last:border-b-0">
+      <dt className="text-gray-500">{label}</dt>
+      <dd className={`text-right font-medium text-gray-900 ${mono ? 'font-mono' : ''}`}>{value}</dd>
+    </div>
+  )
+}
+
+function ToolReviewPanel({
   title,
   preview,
   execution,
@@ -95,53 +123,250 @@ function PreviewPanel({
   execution: AssistantToolExecution | null
 }) {
   if (!preview && !execution) return null
+  const previewData = asRecord(preview?.preview)
+  const experiment = asRecord(execution?.result.experiment)
+  const jobIds = numberListField(execution?.result.job_ids)
+  const isCreate = preview?.tool_name === 'create_experiment' || execution?.tool_name === 'create_experiment'
+  const isRun = preview?.tool_name === 'run_simulation' || execution?.tool_name === 'run_simulation'
+
   return (
-    <div className="rounded-md border border-gray-100 bg-gray-50 p-3 text-xs">
-      <div className="font-semibold text-gray-800">{title}</div>
+    <div className="rounded-md border border-gray-200 bg-white p-4 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-semibold text-gray-900">{title}</div>
+        {preview && (
+          <StatusPill tone={preview.valid ? 'ready' : 'blocked'}>
+            {preview.valid ? 'valid preview' : 'needs attention'}
+          </StatusPill>
+        )}
+      </div>
       {preview && (
-        <div className="mt-2 space-y-1 text-gray-600">
-          <div>{preview.valid ? 'Preview valid' : 'Preview blocked'}</div>
+        <div className="mt-3">
+          <p className="text-sm leading-6 text-gray-600">
+            {stringField(previewData.summary) || stringField(previewData.action)}
+          </p>
           {preview.warnings.map((warning) => (
-            <div key={warning} className="text-amber-700">{warning}</div>
+            <div key={warning} className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">{warning}</div>
           ))}
           {preview.errors.map((error) => (
-            <div key={error} className="text-red-700">{error}</div>
+            <div key={error} className="mt-2 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">{error}</div>
           ))}
-          <pre className="mt-2 max-h-36 overflow-auto rounded bg-white p-2 text-[11px] leading-5 text-gray-700">
-            {JSON.stringify(preview.preview, null, 2)}
-          </pre>
+          <dl className="mt-3 rounded-md border border-gray-100 bg-gray-50 px-3 text-xs">
+            {isCreate && (
+              <>
+                <ReviewRow label="Experiment type" value={stringField(previewData.variant_type) || 'Not selected'} />
+                <ReviewRow label="Condition" value={stringField(previewData.condition) || 'Not selected'} mono />
+                <ReviewRow label="Time-varying protocol" value={stringField(previewData.timeline) || 'No time-varying protocol'} mono />
+                <ReviewRow label="Wildtype control" value={previewData.include_wildtype ? 'Create or reuse' : 'Not requested'} />
+              </>
+            )}
+            {isRun && (
+              <>
+                <ReviewRow label="Action" value="Queue one simulation job" />
+                <ReviewRow label="Experiment" value={stringField(previewData.experiment_name) || 'Selected draft'} />
+                <ReviewRow label="Condition" value={stringField(previewData.condition) || 'From experiment'} mono />
+              </>
+            )}
+          </dl>
         </div>
       )}
       {execution && (
-        <div className="mt-3 space-y-1 text-gray-600">
-          <div className={execution.executed ? 'text-emerald-700' : 'text-amber-700'}>
-            Execution status: {execution.status}
+        <div className="mt-3 rounded-md border border-gray-100 bg-gray-50 p-3">
+          <div className={execution.executed ? 'font-medium text-emerald-700' : 'font-medium text-amber-700'}>
+            {execution.executed ? 'Completed' : 'Not executed'}: {execution.status.replace(/_/g, ' ')}
           </div>
           {execution.errors.map((error) => (
-            <div key={error} className="text-red-700">{error}</div>
+            <div key={error} className="mt-2 text-xs text-red-700">{error}</div>
           ))}
-          <pre className="mt-2 max-h-36 overflow-auto rounded bg-white p-2 text-[11px] leading-5 text-gray-700">
-            {JSON.stringify(execution.result, null, 2)}
-          </pre>
+          {execution.executed && isCreate && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                to={`/experiments?experiment=${numericField(experiment.id) ?? ''}`}
+                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Open experiment
+              </Link>
+              <Link
+                to={`/experiments/new?variant=${encodeURIComponent(stringField(experiment.variant_type) || 'gene_knockout')}`}
+                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Edit similar
+              </Link>
+            </div>
+          )}
+          {execution.executed && isRun && jobIds.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {jobIds.map((jobId) => (
+                <Link
+                  key={jobId}
+                  to={`/results/${jobId}`}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Open job #{jobId}
+                </Link>
+              ))}
+              <Link
+                to="/experiments"
+                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Monitor queue
+              </Link>
+            </div>
+          )}
         </div>
       )}
     </div>
   )
 }
 
+function GeneSearchBox({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (symbol: string) => void
+}) {
+  const [query, setQuery] = useState(value)
+  const [options, setOptions] = useState<Gene[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    setQuery(value)
+  }, [value])
+
+  useEffect(() => {
+    let active = true
+    const search = query.trim()
+    if (search.length < 1) {
+      setOptions([])
+      return
+    }
+    setLoading(true)
+    searchGenes(search, 8)
+      .then((genes) => {
+        if (active) setOptions(genes)
+      })
+      .catch(() => {
+        if (active) setOptions([])
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [query])
+
+  return (
+    <div className="text-sm">
+      <label htmlFor="assistant-gene" className="font-medium text-gray-700">Gene</label>
+      <input
+        id="assistant-gene"
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value)
+          onChange(event.target.value)
+        }}
+        className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
+        placeholder="Search by symbol, synonym, or ID"
+      />
+      <div className="mt-2 min-h-20 rounded-md border border-gray-100 bg-gray-50 p-2">
+        {loading && <div className="px-2 py-1 text-xs text-gray-500">Searching genes...</div>}
+        {!loading && options.length === 0 && (
+          <div className="px-2 py-1 text-xs text-gray-500">Type a gene symbol, synonym, or EcoCyc ID.</div>
+        )}
+        {!loading && options.map((gene) => (
+          <button
+            key={`${gene.ecoli_id}-${gene.symbol}`}
+            type="button"
+            onClick={() => {
+              onChange(gene.symbol)
+              setQuery(gene.symbol)
+            }}
+            className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs hover:bg-white ${gene.symbol === value ? 'bg-white ring-1 ring-brand-200' : ''}`}
+          >
+            <span>
+              <span className="font-mono font-semibold text-bio-gene">{gene.symbol}</span>
+              <span className="ml-2 text-gray-500">{gene.ecoli_id}</span>
+            </span>
+            <span className="text-gray-400">KO #{gene.ko_index || '-'}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ConditionSelect({
+  value,
+  onChange,
+  conditions,
+  loading,
+}: {
+  value: string
+  onChange: (condition: string) => void
+  conditions: Condition[]
+  loading: boolean
+}) {
+  return (
+    <label className="text-sm">
+      <span className="font-medium text-gray-700">Condition</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
+      >
+        {conditions.length === 0 && <option value={value}>{loading ? 'Loading conditions...' : value}</option>}
+        {conditions.map((condition) => (
+          <option key={condition.name} value={condition.name}>
+            {condition.name}{condition.nutrients ? ` - ${condition.nutrients}` : ''}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1 text-xs text-gray-500">
+        Pick the saved growth condition the model should use unless the experiment type overrides it internally.
+      </p>
+    </label>
+  )
+}
+
 function AssistantRunFlow() {
   const [gene, setGene] = useState('dnaA')
   const [condition, setCondition] = useState('basal')
+  const [conditions, setConditions] = useState<Condition[]>([])
+  const [conditionsLoading, setConditionsLoading] = useState(true)
   const [seed, setSeed] = useState(0)
   const [generations, setGenerations] = useState(1)
   const [lengthSec, setLengthSec] = useState(10800)
   const [experimentId, setExperimentId] = useState<number | null>(null)
+  const [createdDraftKey, setCreatedDraftKey] = useState('')
+  const [queuedRunKey, setQueuedRunKey] = useState('')
   const [createPreview, setCreatePreview] = useState<AssistantToolPreview | null>(null)
   const [createExecution, setCreateExecution] = useState<AssistantToolExecution | null>(null)
   const [runPreview, setRunPreview] = useState<AssistantToolPreview | null>(null)
   const [runExecution, setRunExecution] = useState<AssistantToolExecution | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    getConditions()
+      .then((items) => {
+        if (!active) return
+        setConditions(items)
+        if (!items.some((item) => item.name === condition) && items[0]) {
+          setCondition(items[0].name)
+        }
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (active) setConditionsLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const context = {
     route: '/assistant',
@@ -164,6 +389,33 @@ function AssistantRunFlow() {
     gene_symbols: [],
     include_wildtype: false,
   }
+
+  const draftKey = useMemo(
+    () => JSON.stringify(createArguments),
+    [gene, condition, generations, lengthSec]
+  )
+  const runKey = useMemo(
+    () => JSON.stringify({ experimentId, seed, generations }),
+    [experimentId, seed, generations]
+  )
+  const hasCurrentDraft = experimentId !== null && createdDraftKey === draftKey
+  const hasQueuedCurrentRun = queuedRunKey === runKey
+
+  useEffect(() => {
+    setCreatePreview(null)
+    setCreateExecution(null)
+    setExperimentId(null)
+    setCreatedDraftKey('')
+    setRunPreview(null)
+    setRunExecution(null)
+    setQueuedRunKey('')
+  }, [draftKey])
+
+  useEffect(() => {
+    setRunPreview(null)
+    setRunExecution(null)
+    setQueuedRunKey('')
+  }, [runKey])
 
   async function previewDraft() {
     setBusy('preview-create')
@@ -206,8 +458,10 @@ function AssistantRunFlow() {
       const experiment = asRecord(executed.result.experiment)
       const id = numericField(experiment.id)
       setExperimentId(id)
+      setCreatedDraftKey(draftKey)
       setRunPreview(null)
       setRunExecution(null)
+      setQueuedRunKey('')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -216,7 +470,7 @@ function AssistantRunFlow() {
   }
 
   async function previewRun() {
-    if (!experimentId) {
+    if (!experimentId || !hasCurrentDraft) {
       setError('Create an experiment draft before previewing the run.')
       return
     }
@@ -237,8 +491,12 @@ function AssistantRunFlow() {
   }
 
   async function confirmAndQueueRun() {
-    if (!experimentId) {
+    if (!experimentId || !hasCurrentDraft) {
       setError('Create an experiment draft before queueing the run.')
+      return
+    }
+    if (hasQueuedCurrentRun) {
+      setError('This exact seed/generation run has already been queued from the current draft.')
       return
     }
     setBusy('execute-run')
@@ -265,6 +523,7 @@ function AssistantRunFlow() {
         confirmation_id: approved.id,
       })
       setRunExecution(executed)
+      if (executed.executed) setQueuedRunKey(runKey)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -284,23 +543,17 @@ function AssistantRunFlow() {
         <StatusPill tone="ready">confirmation bound</StatusPill>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-5">
-        <label className="text-sm">
-          <span className="font-medium text-gray-700">Gene</span>
-          <input
-            value={gene}
-            onChange={(event) => setGene(event.target.value)}
-            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
-          />
-        </label>
-        <label className="text-sm">
-          <span className="font-medium text-gray-700">Condition</span>
-          <input
-            value={condition}
-            onChange={(event) => setCondition(event.target.value)}
-            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
-          />
-        </label>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        <GeneSearchBox value={gene} onChange={setGene} />
+        <ConditionSelect
+          value={condition}
+          onChange={setCondition}
+          conditions={conditions}
+          loading={conditionsLoading}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
         <label className="text-sm">
           <span className="font-medium text-gray-700">Seed</span>
           <input
@@ -310,6 +563,7 @@ function AssistantRunFlow() {
             onChange={(event) => setSeed(Number(event.target.value))}
             className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
           />
+          <p className="mt-1 text-xs text-gray-500">One deterministic replicate index for this guided run.</p>
         </label>
         <label className="text-sm">
           <span className="font-medium text-gray-700">Generations</span>
@@ -320,6 +574,7 @@ function AssistantRunFlow() {
             onChange={(event) => setGenerations(Number(event.target.value))}
             className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
           />
+          <p className="mt-1 text-xs text-gray-500">How many generations the worker should attempt for the queued job.</p>
         </label>
         <label className="text-sm">
           <span className="font-medium text-gray-700">Max duration (s)</span>
@@ -330,6 +585,7 @@ function AssistantRunFlow() {
             onChange={(event) => setLengthSec(Number(event.target.value))}
             className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
           />
+          <p className="mt-1 text-xs text-gray-500">Maximum simulated time allowed for each generation attempt.</p>
         </label>
       </div>
 
@@ -337,7 +593,7 @@ function AssistantRunFlow() {
         <button
           type="button"
           onClick={previewDraft}
-          disabled={Boolean(busy)}
+          disabled={Boolean(busy) || !gene.trim() || !condition.trim()}
           className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
         >
           Preview draft
@@ -345,7 +601,7 @@ function AssistantRunFlow() {
         <button
           type="button"
           onClick={confirmAndCreate}
-          disabled={Boolean(busy)}
+          disabled={Boolean(busy) || !gene.trim() || !condition.trim()}
           className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           Confirm and create draft
@@ -353,7 +609,7 @@ function AssistantRunFlow() {
         <button
           type="button"
           onClick={previewRun}
-          disabled={Boolean(busy) || !experimentId}
+          disabled={Boolean(busy) || !hasCurrentDraft}
           className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
         >
           Preview run
@@ -361,7 +617,7 @@ function AssistantRunFlow() {
         <button
           type="button"
           onClick={confirmAndQueueRun}
-          disabled={Boolean(busy) || !experimentId}
+          disabled={Boolean(busy) || !hasCurrentDraft || hasQueuedCurrentRun}
           className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           Confirm and queue run
@@ -375,10 +631,20 @@ function AssistantRunFlow() {
           Draft experiment #{experimentId} is ready for a separately confirmed run.
         </div>
       )}
+      {experimentId && !hasCurrentDraft && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          The form changed after draft creation. Create a new draft before queueing a run.
+        </div>
+      )}
+      {hasQueuedCurrentRun && (
+        <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          This seed/generation run has already been queued from the current draft.
+        </div>
+      )}
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <PreviewPanel title="Experiment draft side effect" preview={createPreview} execution={createExecution} />
-        <PreviewPanel title="Simulation queue side effect" preview={runPreview} execution={runExecution} />
+        <ToolReviewPanel title="Experiment draft side effect" preview={createPreview} execution={createExecution} />
+        <ToolReviewPanel title="Simulation queue side effect" preview={runPreview} execution={runExecution} />
       </div>
     </section>
   )

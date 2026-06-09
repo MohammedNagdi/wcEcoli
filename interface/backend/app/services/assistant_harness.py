@@ -573,7 +573,7 @@ def _preview_create_experiment(session: Session, args: dict[str, Any]) -> tuple[
         if not timeline_record:
             errors.append(f"Timeline '{timeline}' does not exist.")
     else:
-        warnings.append("No time-varying protocol was supplied; the experiment would use a static condition.")
+        warnings.append("No time-varying protocol was supplied; the experiment will use the selected condition without scheduled media shifts.")
 
     sim_params_json = to_json(sim_params)
     default_name = f"{gene_symbol} {variant_type}".strip() if gene_symbol else f"{variant_type} experiment"
