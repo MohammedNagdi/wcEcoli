@@ -200,6 +200,57 @@ def test_assistant_runtime_reports_no_provider_without_network():
         _restore_runtime_settings(snapshot)
 
 
+def test_assistant_runtime_reports_selected_provider_not_configured():
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    try:
+        settings.assistant_provider = "openai"
+        settings.assistant_model = ""
+        settings.openai_api_key = ""
+        result = generate_assistant_runtime_reply(
+            "Explain this result.",
+            {"route": "/results/2", "selected_gene": "dnaA"},
+        )
+        assert result.status == "selected_provider_not_configured"
+        assert result.provider_id == "openai"
+        assert "selected but not configured" in result.content
+
+        providers = get_provider_layer_status()
+        assert providers.selected_provider_id == "openai"
+        assert providers.active_runtime_provider_id == "openai"
+        assert providers.runtime_ready is False
+        assert "not configured" in providers.runtime_issue
+    finally:
+        _restore_runtime_settings(snapshot)
+
+
+def test_assistant_runtime_reports_unsupported_selected_provider():
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+    }
+    try:
+        settings.assistant_provider = "anthropic"
+        settings.assistant_model = "claude-test"
+        result = generate_assistant_runtime_reply(
+            "Explain this result.",
+            {"route": "/results/2", "selected_gene": "dnaA"},
+        )
+        assert result.status == "provider_not_supported"
+        assert result.provider_id == "anthropic"
+        assert "does not have a runtime adapter" in result.content
+
+        providers = get_provider_layer_status()
+        assert providers.selected_provider_id == "anthropic"
+        assert providers.runtime_ready is False
+        assert "no runtime adapter" in providers.runtime_issue
+    finally:
+        _restore_runtime_settings(snapshot)
+
+
 def test_openai_compatible_runtime_uses_configured_provider_without_tools():
     snapshot = {
         "assistant_provider": settings.assistant_provider,

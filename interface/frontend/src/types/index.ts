@@ -798,6 +798,11 @@ export interface ProviderStatus {
 export interface ProviderLayerStatus {
   mode: string
   configured_provider_count: number
+  selected_provider_id: string
+  active_runtime_provider_id: string
+  active_runtime_model: string
+  runtime_ready: boolean
+  runtime_issue: string
   providers: ProviderStatus[]
   notes: string[]
 }

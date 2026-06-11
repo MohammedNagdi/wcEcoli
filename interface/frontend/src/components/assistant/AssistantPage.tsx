@@ -62,6 +62,8 @@ function Card({
 }
 
 function ProviderRow({ provider }: { provider: ProviderStatus }) {
+  const selectedButNotConfigured = provider.selected_for_runtime && !provider.configured
+  const selectedUnsupported = provider.selected_for_runtime && !provider.runtime_supported
   return (
     <div className="flex items-center justify-between gap-3 border-b border-gray-100 py-2 last:border-b-0">
       <div>
@@ -75,11 +77,54 @@ function ProviderRow({ provider }: { provider: ProviderStatus }) {
           </StatusPill>
           {provider.default_model && <StatusPill>{provider.default_model}</StatusPill>}
           {provider.selected_for_runtime && <StatusPill tone="planned">selected</StatusPill>}
+          {selectedButNotConfigured && <StatusPill tone="blocked">needs config</StatusPill>}
+          {selectedUnsupported && <StatusPill tone="blocked">unsupported chat</StatusPill>}
         </div>
       </div>
-      <StatusPill tone={provider.configured ? 'ready' : 'neutral'}>
-        {provider.configured ? 'Configured' : provider.category}
+      <StatusPill tone={provider.configured ? 'ready' : selectedButNotConfigured || selectedUnsupported ? 'blocked' : 'neutral'}>
+        {provider.configured ? 'Configured' : selectedButNotConfigured ? 'Not configured' : provider.category}
       </StatusPill>
+    </div>
+  )
+}
+
+function ProviderRuntimeSummary({ status }: { status: PlatformStatus | null }) {
+  const providers = status?.providers
+  const assistant = status?.assistant
+  const runtimeReady = Boolean(providers?.runtime_ready)
+  const toolsReady = Boolean(assistant?.tool_execution_enabled)
+  const providerLabel = providers?.active_runtime_provider_id || providers?.selected_provider_id || ''
+  return (
+    <div className={`rounded-lg border p-4 text-sm ${
+      runtimeReady
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+        : 'border-amber-200 bg-amber-50 text-amber-900'
+    }`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold">
+            {runtimeReady ? 'Provider-backed chat ready' : 'Provider-backed chat unavailable'}
+          </div>
+          <p className="mt-1 leading-6">
+            {runtimeReady
+              ? `Using ${providerLabel}${providers?.active_runtime_model ? ` with ${providers.active_runtime_model}` : ''}. Tool execution remains separated from model text.`
+              : providers?.runtime_issue || 'Configure a provider key or local endpoint to enable model-generated answers.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <StatusPill tone={runtimeReady ? 'ready' : 'blocked'}>
+            {runtimeReady ? 'chat ready' : 'chat offline'}
+          </StatusPill>
+          <StatusPill tone={toolsReady ? 'ready' : 'blocked'}>
+            {toolsReady ? 'tools available' : 'tools unavailable'}
+          </StatusPill>
+        </div>
+      </div>
+      {!runtimeReady && toolsReady && (
+        <p className="mt-2 text-xs leading-5">
+          Deterministic inspections and proposal previews can still run; only free-form model answers need a configured provider.
+        </p>
+      )}
     </div>
   )
 }
@@ -1384,7 +1429,7 @@ export function AssistantPage() {
   }, [])
 
   const configuredProviders = status?.providers.configured_provider_count ?? 0
-  const assistantReady = Boolean(status?.assistant.provider_configured && status?.assistant.tool_execution_enabled)
+  const runtimeReady = Boolean(status?.providers.runtime_ready)
   const toolCount = status?.assistant.tool_registry.length ?? 0
 
   return (
@@ -1396,8 +1441,8 @@ export function AssistantPage() {
             Use the current page context to ask questions, inspect deterministic outputs, and review proposed next steps before anything changes.
           </p>
         </div>
-        <StatusPill tone={assistantReady ? 'ready' : 'blocked'}>
-          {assistantReady ? 'Ready' : 'Provider needed'}
+        <StatusPill tone={runtimeReady ? 'ready' : 'blocked'}>
+          {runtimeReady ? 'Provider ready' : 'Chat offline'}
         </StatusPill>
       </header>
 
@@ -1407,8 +1452,10 @@ export function AssistantPage() {
         </div>
       )}
 
+      <ProviderRuntimeSummary status={status} />
+
       <TaskCenteredAssistantPanel
-        providerConfigured={Boolean(status?.assistant.provider_configured)}
+        providerConfigured={runtimeReady}
         onConversationChange={setActiveConversationId}
       />
 
@@ -1453,6 +1500,20 @@ export function AssistantPage() {
             <p className="mt-3 text-xs text-gray-500">
               {configuredProviders} provider{configuredProviders === 1 ? '' : 's'} configured in this environment.
             </p>
+            <div className="mt-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-600">
+              <div>
+                <span className="font-semibold text-gray-800">Runtime:</span>{' '}
+                {status?.providers.runtime_ready
+                  ? `${status.providers.active_runtime_provider_id}${status.providers.active_runtime_model ? ` (${status.providers.active_runtime_model})` : ''}`
+                  : status?.providers.runtime_issue || 'No runtime provider selected.'}
+              </div>
+              {status?.providers.selected_provider_id && (
+                <div>
+                  <span className="font-semibold text-gray-800">Selected:</span>{' '}
+                  {status.providers.selected_provider_id}
+                </div>
+              )}
+            </div>
           </Card>
 
           <Card title="Typed assistant harness">

@@ -156,6 +156,11 @@ class ProviderStatus(BaseModel):
 class ProviderLayerStatus(BaseModel):
     mode: str
     configured_provider_count: int
+    selected_provider_id: str = ""
+    active_runtime_provider_id: str = ""
+    active_runtime_model: str = ""
+    runtime_ready: bool = False
+    runtime_issue: str = ""
     providers: list[ProviderStatus]
     notes: list[str]
 
@@ -378,9 +383,46 @@ def get_provider_statuses() -> list[ProviderStatus]:
 def get_provider_layer_status() -> ProviderLayerStatus:
     providers = get_provider_statuses()
     configured_count = sum(1 for provider in providers if provider.configured)
+    selected_provider = (settings.assistant_provider or "").strip()
+    runtime_provider_id = ""
+    runtime_model = ""
+    runtime_ready = False
+    runtime_issue = ""
+
+    if selected_provider:
+        selected_status = next((provider for provider in providers if provider.provider_id == selected_provider), None)
+        runtime_spec = RUNTIME_PROVIDER_SPECS.get(selected_provider)
+        if not selected_status:
+            runtime_issue = f"Selected provider '{selected_provider}' is not registered."
+        elif not runtime_spec:
+            runtime_issue = f"Selected provider '{selected_provider}' has no runtime adapter yet."
+        elif not selected_status.configured:
+            runtime_provider_id = selected_provider
+            runtime_model = settings.assistant_model or runtime_spec.default_model
+            runtime_issue = f"Selected provider '{selected_provider}' is not configured."
+        else:
+            runtime_provider_id = selected_provider
+            runtime_model = settings.assistant_model or runtime_spec.default_model
+            runtime_ready = True
+    else:
+        for provider in providers:
+            runtime_spec = RUNTIME_PROVIDER_SPECS.get(provider.provider_id)
+            if provider.configured and runtime_spec:
+                runtime_provider_id = provider.provider_id
+                runtime_model = settings.assistant_model or runtime_spec.default_model
+                runtime_ready = True
+                break
+        if not runtime_ready:
+            runtime_issue = "No provider key or local endpoint is configured."
+
     return ProviderLayerStatus(
         mode="bring_your_own_key_or_local_endpoint",
         configured_provider_count=configured_count,
+        selected_provider_id=selected_provider,
+        active_runtime_provider_id=runtime_provider_id,
+        active_runtime_model=runtime_model,
+        runtime_ready=runtime_ready,
+        runtime_issue=runtime_issue,
         providers=providers,
         notes=[
             "Provider status reports configuration presence only; API keys are never returned.",

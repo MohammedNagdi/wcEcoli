@@ -19,6 +19,7 @@ from app.config import settings
 
 RuntimeStatus = Literal[
     "no_provider_configured",
+    "selected_provider_not_configured",
     "provider_not_supported",
     "provider_call_failed",
     "completed",
@@ -156,6 +157,20 @@ def generate_assistant_runtime_reply(
     transport: Transport | None = None,
 ) -> AssistantRuntimeResult:
     """Generate a provider-backed assistant message without tool access."""
+    requested_provider = (settings.assistant_provider or "").strip()
+    if requested_provider and requested_provider not in RUNTIME_PROVIDER_SPECS:
+        return AssistantRuntimeResult(
+            status="provider_not_supported",
+            provider_id=requested_provider,
+            model=(settings.assistant_model or "").strip(),
+            content=(
+                f"Assistant provider '{requested_provider}' is selected, but this build does not have a runtime adapter for it yet. "
+                "Choose OpenAI, OpenRouter, LM Studio, vLLM, or Ollama for provider-backed chat."
+            ),
+            request={"context": context, "content_length": len(user_content)},
+            response={"reason": "selected provider has no runtime adapter"},
+        )
+
     spec = _select_provider()
     if not spec:
         return AssistantRuntimeResult(
@@ -170,7 +185,7 @@ def generate_assistant_runtime_reply(
 
     if not _provider_configured(spec):
         return AssistantRuntimeResult(
-            status="no_provider_configured",
+            status="selected_provider_not_configured",
             provider_id=spec.provider_id,
             model=_provider_model(spec),
             content=(
