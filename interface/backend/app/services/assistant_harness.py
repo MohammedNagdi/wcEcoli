@@ -1103,15 +1103,57 @@ def _mentioned_genes(
     return ordered
 
 
+def assistant_conversation_context_pack(
+    session: Session,
+    *,
+    conversation_id: int,
+    current_message_id: int | None = None,
+    limit: int = 8,
+) -> dict[str, Any]:
+    records = session.exec(
+        select(AssistantMessage)
+        .where(AssistantMessage.conversation_id == conversation_id)
+        .order_by(AssistantMessage.id.desc())
+    ).all()
+    recent = [
+        record
+        for record in records
+        if record.id != current_message_id and record.role in {"user", "assistant"}
+    ][:limit]
+    recent.reverse()
+    return {
+        "message_count": len(recent),
+        "messages": [
+            {
+                "role": record.role,
+                "content": record.content[:1600],
+                "status": record.status,
+            }
+            for record in recent
+        ],
+        "usage": (
+            "Recent conversation turns are provided so references like 'those genes' or 'the three suggestions' "
+            "can be resolved without asking the user to repeat themselves."
+        ),
+    }
+
+
 def assistant_gene_context_pack(
     session: Session,
     *,
     user_content: str,
     context: AssistantContext,
+    conversation_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    conversation_texts = []
+    if conversation_context:
+        for message in conversation_context.get("messages", []):
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                conversation_texts.append(message["content"])
     genes = _mentioned_genes(
         session,
         user_content,
+        *conversation_texts,
         selected_gene=context.selected_gene,
         limit=10,
     )
@@ -1279,12 +1321,33 @@ def record_model_gene_proposals(
     context: AssistantContext,
     user_content: str,
     assistant_content: str,
+    conversation_context: dict[str, Any] | None = None,
 ) -> list[AssistantToolCall]:
     """Record confirmation-bound experiment proposals for validated genes mentioned in model text."""
 
     text_intent = f"{user_content}\n{assistant_content}".lower()
-    if not any(keyword in text_intent for keyword in ("knockout", "knock out", "ko", "experiment", "simulate", "simulation")):
+    action_keywords = (
+        "knockout",
+        "knock out",
+        "ko",
+        "experiment",
+        "simulate",
+        "simulation",
+        "card",
+        "cards",
+        "prepare",
+        "draft",
+        "schedule",
+        "queue",
+    )
+    if not any(keyword in text_intent for keyword in action_keywords):
         return []
+
+    conversation_texts: list[str] = []
+    if conversation_context:
+        for message in conversation_context.get("messages", []):
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                conversation_texts.append(message["content"])
 
     proposals: list[AssistantToolCall] = []
     existing_keys: set[tuple[str, str]] = set()
@@ -1304,6 +1367,7 @@ def record_model_gene_proposals(
         session,
         user_content,
         assistant_content,
+        *conversation_texts,
         selected_gene=context.selected_gene,
         limit=6,
     ):

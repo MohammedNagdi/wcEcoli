@@ -23,6 +23,7 @@ from app.services.assistant_harness import (
     AssistantToolExecutionRequest,
     ConfirmationCreate,
     ConfirmationResolve,
+    assistant_conversation_context_pack,
     assistant_gene_context_pack,
     create_confirmation,
     create_conversation,
@@ -293,6 +294,95 @@ def test_model_gene_proposals_validate_mentions_and_deduplicate_contextual_draft
         engine.dispose()
 
 
+def test_model_gene_proposals_can_use_prior_assistant_suggestions():
+    engine, session = _build_session()
+    try:
+        session.add(Variant(name="gene_knockout", docstring="Set selected gene expression to zero."))
+        session.add(Condition(name="basal", nutrients="minimal glucose"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
+        session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", ko_index=84))
+        session.add(Gene(id=3, ecoli_id="EG10003", symbol="fis", ko_index=126))
+        session.commit()
+
+        context = AssistantContext(route="/assistant", selected_condition="basal", assistant_surface="central")
+        conversation = create_conversation(
+            session,
+            AssistantConversationCreate(
+                title="prior gene suggestions",
+                assistant_surface="central",
+                context=context,
+            ),
+        )
+        prior_user = store_message(
+            session,
+            conversation,
+            "user",
+            "Suggest three genes to knockout.",
+            context,
+            status="stored",
+        )
+        prior_assistant = store_message(
+            session,
+            conversation,
+            "assistant",
+            "Three reasonable candidates are dnaA, crp, and fis. Start with read-only gene checks before making KO drafts.",
+            context,
+            status="completed",
+        )
+        current_user = store_message(
+            session,
+            conversation,
+            "user",
+            "Prepare cards for the three suggestions you made.",
+            context,
+            status="stored",
+        )
+        memory = assistant_conversation_context_pack(
+            session,
+            conversation_id=conversation.id or 0,
+            current_message_id=current_user.id,
+        )
+        assert memory["message_count"] == 2
+        assert "dnaA" in memory["messages"][1]["content"]
+
+        assistant_message = store_message(
+            session,
+            conversation,
+            "assistant",
+            "I can prepare reviewable proposal cards for the previous gene suggestions.",
+            context,
+            status="completed",
+        )
+
+        proposals = record_model_gene_proposals(
+            session,
+            conversation=conversation,
+            assistant_message=assistant_message,
+            context=context,
+            user_content=current_user.content,
+            assistant_content=assistant_message.content,
+            conversation_context=memory,
+        )
+
+        create_symbols = {
+            tool_call_to_out(proposal).arguments["gene_symbol"]
+            for proposal in proposals
+            if proposal.tool_name == "create_experiment"
+        }
+        inspect_symbols = {
+            tool_call_to_out(proposal).arguments["gene"]
+            for proposal in proposals
+            if proposal.tool_name == "inspect_gene"
+        }
+        assert create_symbols == {"dnaA", "crp", "fis"}
+        assert inspect_symbols == {"dnaA", "crp", "fis"}
+        assert all(tool_call_to_out(proposal).result["requires_confirmation"] is True for proposal in proposals if proposal.tool_name == "create_experiment")
+        assert all(tool_call_to_out(proposal).result["side_effect"] is False for proposal in proposals if proposal.tool_name == "inspect_gene")
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_assistant_runtime_reports_no_provider_without_network():
     snapshot = {
         "assistant_provider": settings.assistant_provider,
@@ -458,7 +548,15 @@ def test_openai_compatible_runtime_uses_configured_provider_without_tools():
         settings.openai_api_key = "test-key"
         result = generate_assistant_runtime_reply(
             "What should I inspect next?",
-            {"route": "/results/2", "selected_gene": "dnaA"},
+            {
+                "route": "/results/2",
+                "selected_gene": "dnaA",
+                "conversation_context": {
+                    "messages": [
+                        {"role": "assistant", "content": "Earlier I suggested dnaA, crp, and fis."}
+                    ]
+                },
+            },
             transport=fake_transport,
         )
         assert result.status == "completed"
@@ -473,6 +571,9 @@ def test_openai_compatible_runtime_uses_configured_provider_without_tools():
         assert payload["model"] == "test-model"
         assert "tools" not in payload
         assert payload["messages"][0]["role"] == "system"
+        assert "Recent conversation memory" in payload["messages"][0]["content"]
+        assert "dnaA, crp, and fis" in payload["messages"][0]["content"]
+        assert "Proposal targets:" in payload["messages"][0]["content"]
         assert payload["messages"][1]["role"] == "user"
     finally:
         _restore_runtime_settings(snapshot)

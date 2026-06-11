@@ -257,16 +257,46 @@ def _platform_facts_summary(context: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _conversation_memory_summary(context: dict[str, Any]) -> str:
+    memory = context.get("conversation_context")
+    if not isinstance(memory, dict):
+        return ""
+    messages = memory.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return ""
+    lines = [
+        "Recent conversation memory:",
+        "Use this to resolve references like 'those genes' or 'the three suggestions'.",
+    ]
+    for message in messages[-8:]:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content = message.get("content")
+        if role not in {"user", "assistant"} or not isinstance(content, str) or not content.strip():
+            continue
+        compact = " ".join(content.strip().split())
+        if len(compact) > 700:
+            compact = f"{compact[:697]}..."
+        lines.append(f"- {role}: {compact}")
+    return "\n".join(lines) if len(lines) > 2 else ""
+
+
 def _system_prompt(context: dict[str, Any]) -> str:
     platform_facts = _platform_facts_summary(context)
+    conversation_memory = _conversation_memory_summary(context)
     platform_block = f"\n\n{platform_facts}" if platform_facts else ""
+    memory_block = f"\n\n{conversation_memory}" if conversation_memory else ""
     return (
         "You are the wcEcoli platform assistant. Explain model, experiment, and result context clearly. "
         "Do not claim that you executed tools, queued simulations, edited files, or changed data. "
         "When an action is needed, describe the proposed action in plain language so the platform can show a separate confirmation. "
         "If you recommend a knockout experiment, name the exact gene symbol and say that the platform should show a reviewable proposal card. "
+        "When the user asks to prepare cards for previous gene suggestions, use recent conversation memory and repeat the exact gene symbols. "
+        "For proposed gene cards, include a final plain-text line like 'Proposal targets: dnaA, crp, fis'; the platform will validate symbols before showing cards. "
         f"Current page context: {_context_summary(context)}."
         f"{platform_block}"
+        f"{memory_block}"
     )
 
 
