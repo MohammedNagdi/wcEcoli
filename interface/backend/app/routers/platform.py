@@ -1,9 +1,11 @@
 """Platform planning/status endpoints for local distribution and assistant scaffolding."""
 
 from pydantic import BaseModel
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlmodel import Session
 
 from app.config import settings
+from app.main import get_session
 from app.services.assistant_harness import (
     AssistantHarnessStatus,
     ProviderLayerStatus,
@@ -64,12 +66,12 @@ def _distribution_status() -> DistributionStatusOut:
 
 
 @router.get("/status", response_model=PlatformStatusOut)
-def get_platform_status() -> PlatformStatusOut:
+def get_platform_status(session: Session = Depends(get_session)) -> PlatformStatusOut:
     """Return local distribution, provider-layer, and assistant scaffold status."""
     return PlatformStatusOut(
         distribution=_distribution_status(),
-        providers=get_provider_layer_status(),
-        assistant=get_assistant_harness_status(),
+        providers=get_provider_layer_status(session),
+        assistant=get_assistant_harness_status(session),
     )
 
 
@@ -80,12 +82,12 @@ def get_distribution_status() -> DistributionStatusOut:
 
 
 @router.get("/llm-providers", response_model=ProviderLayerStatus)
-def get_llm_provider_status() -> ProviderLayerStatus:
+def get_llm_provider_status(session: Session = Depends(get_session)) -> ProviderLayerStatus:
     """Return non-secret BYOK/local model provider configuration status."""
-    return get_provider_layer_status()
+    return get_provider_layer_status(session)
 
 
 @router.get("/assistant", response_model=AssistantHarnessStatus)
-def get_platform_assistant_harness_status() -> AssistantHarnessStatus:
+def get_platform_assistant_harness_status(session: Session = Depends(get_session)) -> AssistantHarnessStatus:
     """Return the assistant harness scaffold state."""
-    return get_assistant_harness_status()
+    return get_assistant_harness_status(session)

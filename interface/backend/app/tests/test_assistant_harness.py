@@ -2,12 +2,23 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from app.config import settings
-from app.db.models import AssistantConfirmation, AssistantToolCall, Condition, Experiment, Gene, SimulationJob, SimulationResult, Variant
+from app.db.models import (
+    AssistantConfirmation,
+    AssistantProviderConfig,
+    AssistantToolCall,
+    Condition,
+    Experiment,
+    Gene,
+    SimulationJob,
+    SimulationResult,
+    Variant,
+)
 from app.services.assistant_runtime import generate_assistant_runtime_reply
 from app.services.assistant_harness import (
     AssistantContext,
     AssistantConversationCreate,
     AssistantMessageCreate,
+    AssistantProviderConfigUpdate,
     AssistantToolPreviewRequest,
     AssistantToolExecutionRequest,
     ConfirmationCreate,
@@ -24,6 +35,7 @@ from app.services.assistant_harness import (
     resolve_confirmation,
     store_message,
     tool_call_to_out,
+    upsert_provider_config,
 )
 
 
@@ -177,6 +189,7 @@ def test_assistant_runtime_reports_no_provider_without_network():
         "assistant_provider": settings.assistant_provider,
         "assistant_model": settings.assistant_model,
         "openai_api_key": settings.openai_api_key,
+        "anthropic_api_key": settings.anthropic_api_key,
         "openrouter_api_key": settings.openrouter_api_key,
         "lm_studio_base_url": settings.lm_studio_base_url,
         "vllm_base_url": settings.vllm_base_url,
@@ -186,6 +199,7 @@ def test_assistant_runtime_reports_no_provider_without_network():
         settings.assistant_provider = ""
         settings.assistant_model = ""
         settings.openai_api_key = ""
+        settings.anthropic_api_key = ""
         settings.openrouter_api_key = ""
         settings.lm_studio_base_url = ""
         settings.vllm_base_url = ""
@@ -227,28 +241,94 @@ def test_assistant_runtime_reports_selected_provider_not_configured():
         _restore_runtime_settings(snapshot)
 
 
-def test_assistant_runtime_reports_unsupported_selected_provider():
+def test_anthropic_runtime_uses_messages_api_without_tools():
     snapshot = {
         "assistant_provider": settings.assistant_provider,
         "assistant_model": settings.assistant_model,
+        "anthropic_api_key": settings.anthropic_api_key,
     }
+    calls: list[dict[str, object]] = []
+
+    def fake_transport(url, headers, payload, timeout):
+        calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+        return {"content": [{"type": "text", "text": "Claude response"}], "id": "msg-test"}
+
     try:
         settings.assistant_provider = "anthropic"
         settings.assistant_model = "claude-test"
+        settings.anthropic_api_key = "anthropic-key"
         result = generate_assistant_runtime_reply(
             "Explain this result.",
             {"route": "/results/2", "selected_gene": "dnaA"},
+            transport=fake_transport,
         )
-        assert result.status == "provider_not_supported"
+        assert result.status == "completed"
         assert result.provider_id == "anthropic"
-        assert "does not have a runtime adapter" in result.content
+        assert result.model == "claude-test"
+        assert result.content == "Claude response"
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["url"] == "https://api.anthropic.com/v1/messages"
+        assert call["headers"]["x-api-key"] == "anthropic-key"
+        assert call["headers"]["anthropic-version"] == "2023-06-01"
+        payload = call["payload"]
+        assert payload["model"] == "claude-test"
+        assert "tools" not in payload
+        assert payload["messages"][0]["role"] == "user"
 
         providers = get_provider_layer_status()
         assert providers.selected_provider_id == "anthropic"
-        assert providers.runtime_ready is False
-        assert "no runtime adapter" in providers.runtime_issue
+        assert providers.runtime_ready is True
     finally:
         _restore_runtime_settings(snapshot)
+
+
+def test_persisted_provider_config_overrides_environment_selection():
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_transport(url, headers, payload, timeout):
+        calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+        return {"choices": [{"message": {"content": "Stored provider response"}}]}
+
+    try:
+        settings.assistant_provider = "openai"
+        settings.assistant_model = "env-model"
+        settings.openai_api_key = ""
+        upsert_provider_config(
+            session,
+            "openai",
+            AssistantProviderConfigUpdate(
+                api_key="stored-key",
+                model="stored-model",
+                make_active=True,
+            ),
+        )
+
+        providers = get_provider_layer_status(session)
+        assert providers.selected_provider_id == "openai"
+        assert providers.runtime_ready is True
+        assert providers.active_runtime_model == "stored-model"
+        assert session.exec(select(AssistantProviderConfig)).one().secret_value == "stored-key"
+
+        result = generate_assistant_runtime_reply(
+            "Use stored provider.",
+            {"route": "/assistant"},
+            session=session,
+            transport=fake_transport,
+        )
+        assert result.status == "completed"
+        assert result.model == "stored-model"
+        assert calls[0]["headers"]["Authorization"] == "Bearer stored-key"
+    finally:
+        _restore_runtime_settings(snapshot)
+        session.close()
+        engine.dispose()
 
 
 def test_openai_compatible_runtime_uses_configured_provider_without_tools():

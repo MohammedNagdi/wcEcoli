@@ -31,6 +31,8 @@ from app.services.assistant_harness import (
     AssistantToolPreviewOut,
     AssistantToolPreviewRequest,
     AssistantToolSpec,
+    AssistantProviderConfigOut,
+    AssistantProviderConfigUpdate,
     ConfirmationCreate,
     ConfirmationOut,
     ConfirmationResolve,
@@ -40,18 +42,21 @@ from app.services.assistant_harness import (
     conversation_to_out,
     create_confirmation,
     create_conversation,
+    delete_provider_config,
     execute_tool,
     get_assistant_harness_status,
     get_provider_layer_status,
     get_tool_registry,
     message_to_out,
     preview_tool,
+    provider_configs_to_out,
     provenance_to_out,
     record_contextual_proposals,
     record_provenance,
     resolve_confirmation,
     store_message,
     tool_call_to_out,
+    upsert_provider_config,
 )
 from app.services.assistant_runtime import generate_assistant_runtime_reply
 
@@ -60,13 +65,37 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
 
 @router.get("/status", response_model=AssistantHarnessStatus)
-def get_status() -> AssistantHarnessStatus:
-    return get_assistant_harness_status()
+def get_status(session: Session = Depends(get_session)) -> AssistantHarnessStatus:
+    return get_assistant_harness_status(session)
 
 
 @router.get("/providers", response_model=ProviderLayerStatus)
-def get_providers() -> ProviderLayerStatus:
-    return get_provider_layer_status()
+def get_providers(session: Session = Depends(get_session)) -> ProviderLayerStatus:
+    return get_provider_layer_status(session)
+
+
+@router.get("/provider-configs", response_model=list[AssistantProviderConfigOut])
+def list_provider_configs(session: Session = Depends(get_session)) -> list[AssistantProviderConfigOut]:
+    return provider_configs_to_out(session)
+
+
+@router.put("/provider-configs/{provider_id}", response_model=AssistantProviderConfigOut)
+def update_provider_config(
+    provider_id: str,
+    data: AssistantProviderConfigUpdate,
+    session: Session = Depends(get_session),
+) -> AssistantProviderConfigOut:
+    upsert_provider_config(session, provider_id, data)
+    return next(config for config in provider_configs_to_out(session) if config.provider_id == provider_id)
+
+
+@router.delete("/provider-configs/{provider_id}", response_model=list[AssistantProviderConfigOut])
+def clear_provider_config(
+    provider_id: str,
+    session: Session = Depends(get_session),
+) -> list[AssistantProviderConfigOut]:
+    delete_provider_config(session, provider_id)
+    return provider_configs_to_out(session)
 
 
 @router.get("/tools", response_model=list[AssistantToolSpec])
@@ -150,7 +179,7 @@ def create_message(
         raise HTTPException(status_code=422, detail="Message content must not be empty.")
 
     user_message = store_message(session, conversation, "user", data.content, data.context)
-    runtime_result = generate_assistant_runtime_reply(data.content, data.context.model_dump())
+    runtime_result = generate_assistant_runtime_reply(data.content, data.context.model_dump(), session=session)
     assistant_status = (
         "completed"
         if runtime_result.status == "completed"

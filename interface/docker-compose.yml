@@ -17,6 +17,14 @@ services:
       - DATABASE_PATH=/app/data/wcecoli.db
       - SIM_OUTPUT_DIR=/data/out
       - WCECOLI_ROOT=/data
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - LM_STUDIO_BASE_URL=${LM_STUDIO_BASE_URL:-}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-}
+      - ASSISTANT_PROVIDER=${ASSISTANT_PROVIDER:-}
+      - ASSISTANT_MODEL=${ASSISTANT_MODEL:-}
     restart: unless-stopped
 
   worker:

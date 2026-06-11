@@ -167,6 +167,20 @@ class AssistantProvenance(SQLModel, table=True):
     created_at: str = ""                         # ISO timestamp
 
 
+class AssistantProviderConfig(SQLModel, table=True):
+    __tablename__ = "assistant_provider_configs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider_id: str = Field(index=True)          # openai | anthropic | ollama | ...
+    label: str = ""
+    secret_value: str = ""                        # local-only; never returned by API
+    endpoint_url: str = ""
+    model: str = ""
+    is_active: bool = False
+    created_at: str = ""                         # ISO timestamp
+    updated_at: str = ""                         # ISO timestamp
+
+
 class Variant(SQLModel, table=True):
     __tablename__ = "variants"
 

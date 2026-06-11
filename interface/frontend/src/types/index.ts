@@ -807,6 +807,32 @@ export interface ProviderLayerStatus {
   notes: string[]
 }
 
+export interface AssistantProviderConfig {
+  provider_id: string
+  label: string
+  category: string
+  configured: boolean
+  secret_configured: boolean
+  endpoint_configured: boolean
+  endpoint_url: string
+  model: string
+  is_active: boolean
+  runtime_supported: boolean
+  default_model: string
+  requires_secret: boolean
+  requires_endpoint: boolean
+  configuration_hint: string
+  updated_at: string
+}
+
+export interface AssistantProviderConfigUpdate {
+  api_key?: string
+  endpoint_url?: string
+  model?: string
+  label?: string
+  make_active?: boolean
+}
+
 export interface AssistantHarnessStatus {
   state: string
   provider_required: boolean

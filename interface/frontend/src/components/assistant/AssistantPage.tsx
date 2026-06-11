@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
+  clearAssistantProviderConfig,
   createAssistantConfirmation,
   createAssistantConversation,
   createAssistantMessage,
   executeAssistantTool,
+  getAssistantProviderConfigs,
   getAssistantConfirmations,
   getAssistantConversations,
   getAssistantMessages,
@@ -14,8 +16,10 @@ import {
   getPlatformStatus,
   previewAssistantTool,
   resolveAssistantConfirmation,
+  updateAssistantProviderConfig,
 } from '../../api/client'
 import type {
+  AssistantProviderConfig,
   AssistantToolExecution,
   AssistantToolPreview,
   AssistantToolSpec,
@@ -126,6 +130,234 @@ function ProviderRuntimeSummary({ status }: { status: PlatformStatus | null }) {
         </p>
       )}
     </div>
+  )
+}
+
+const FRONTIER_AND_LOCAL_PROVIDERS = [
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    description: 'Hosted frontier model with your OpenAI API key.',
+    defaultModel: 'gpt-4.1-mini',
+    endpointHint: '',
+    secretLabel: 'OpenAI API key',
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic',
+    description: 'Hosted Claude model with your Anthropic API key.',
+    defaultModel: 'claude-sonnet-4-5',
+    endpointHint: '',
+    secretLabel: 'Anthropic API key',
+  },
+  {
+    id: 'ollama',
+    label: 'Ollama',
+    description: 'Local model served by Ollama on your machine or network.',
+    defaultModel: 'llama3.1',
+    endpointHint: 'http://host.docker.internal:11434',
+    secretLabel: '',
+  },
+]
+
+function providerSetupCopy(providerId: string) {
+  if (providerId === 'ollama') {
+    return {
+      secretHelp: 'Ollama does not use an API key here. The backend container must be able to reach the endpoint.',
+      modelHelp: 'Use the name of a model already pulled in Ollama, for example llama3.1 or a domain-tuned local model.',
+      endpointHelp: 'For Ollama running on the Windows host, host.docker.internal is usually reachable from Docker.',
+    }
+  }
+  return {
+    secretHelp: 'The key is stored only in this local wcEcoli database and is never returned by the API.',
+    modelHelp: 'Use any chat model available to your provider account. The platform does not restrict this list.',
+    endpointHelp: 'Hosted provider endpoint is managed by the backend adapter.',
+  }
+}
+
+function AssistantProviderSetup({
+  configs,
+  runtimeStatus,
+  loading,
+  onRefresh,
+}: {
+  configs: AssistantProviderConfig[]
+  runtimeStatus: PlatformStatus | null
+  loading: boolean
+  onRefresh: () => Promise<void>
+}) {
+  const activeConfig = configs.find((config) => config.is_active)
+  const initialProvider = activeConfig?.provider_id || runtimeStatus?.providers.active_runtime_provider_id || 'openai'
+  const [providerId, setProviderId] = useState(initialProvider)
+  const [apiKey, setApiKey] = useState('')
+  const [endpointUrl, setEndpointUrl] = useState('')
+  const [model, setModel] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const selectedTemplate = FRONTIER_AND_LOCAL_PROVIDERS.find((provider) => provider.id === providerId) ?? FRONTIER_AND_LOCAL_PROVIDERS[0]
+  const selectedConfig = configs.find((config) => config.provider_id === providerId)
+  const selectedStatus = runtimeStatus?.providers.providers.find((provider) => provider.provider_id === providerId)
+  const copy = providerSetupCopy(providerId)
+
+  useEffect(() => {
+    setProviderId(initialProvider)
+  }, [initialProvider])
+
+  useEffect(() => {
+    const nextConfig = configs.find((config) => config.provider_id === providerId)
+    const template = FRONTIER_AND_LOCAL_PROVIDERS.find((provider) => provider.id === providerId) ?? FRONTIER_AND_LOCAL_PROVIDERS[0]
+    setEndpointUrl(nextConfig?.endpoint_url || template.endpointHint)
+    setModel(nextConfig?.model || nextConfig?.default_model || template.defaultModel)
+    setApiKey('')
+    setMessage(null)
+  }, [configs, providerId])
+
+  async function saveProvider() {
+    setSaving(true)
+    setMessage(null)
+    try {
+      await updateAssistantProviderConfig(providerId, {
+        api_key: providerId === 'ollama' ? '' : apiKey,
+        endpoint_url: providerId === 'ollama' ? endpointUrl : '',
+        model,
+        label: selectedTemplate.label,
+        make_active: true,
+      })
+      await onRefresh()
+      setApiKey('')
+      setMessage(`${selectedTemplate.label} is now the active assistant provider.`)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function clearProvider() {
+    setSaving(true)
+    setMessage(null)
+    try {
+      await clearAssistantProviderConfig(providerId)
+      await onRefresh()
+      setMessage(`${selectedTemplate.label} setup was cleared.`)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-gray-950">Assistant provider setup</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+            Choose the model backend used for assistant text. The model can answer and propose actions, but platform changes still require typed previews and explicit confirmations.
+          </p>
+        </div>
+        <StatusPill tone={runtimeStatus?.providers.runtime_ready ? 'ready' : 'blocked'}>
+          {runtimeStatus?.providers.runtime_ready ? 'active provider ready' : 'setup needed'}
+        </StatusPill>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {FRONTIER_AND_LOCAL_PROVIDERS.map((provider) => {
+          const config = configs.find((item) => item.provider_id === provider.id)
+          const isSelected = providerId === provider.id
+          const isReady = Boolean(config?.configured || runtimeStatus?.providers.providers.find((item) => item.provider_id === provider.id)?.configured)
+          return (
+            <button
+              key={provider.id}
+              type="button"
+              onClick={() => setProviderId(provider.id)}
+              className={`rounded-lg border p-4 text-left transition ${
+                isSelected ? 'border-blue-400 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-200'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-gray-950">{provider.label}</span>
+                <StatusPill tone={config?.is_active ? 'planned' : isReady ? 'ready' : 'neutral'}>
+                  {config?.is_active ? 'active' : isReady ? 'saved' : 'not set'}
+                </StatusPill>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-gray-600">{provider.description}</p>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_1fr_1.2fr]">
+        {providerId !== 'ollama' && (
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{selectedTemplate.secretLabel}</span>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={selectedConfig?.secret_configured || selectedStatus?.secret_configured ? 'Saved key present; paste a new key to replace' : 'Paste API key'}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+            />
+            <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.secretHelp}</span>
+          </label>
+        )}
+        {providerId === 'ollama' && (
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ollama endpoint</span>
+            <input
+              type="text"
+              value={endpointUrl}
+              onChange={(event) => setEndpointUrl(event.target.value)}
+              placeholder={selectedTemplate.endpointHint}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+            />
+            <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.endpointHelp}</span>
+          </label>
+        )}
+        <label className="block">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Model</span>
+          <input
+            type="text"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            placeholder={selectedTemplate.defaultModel}
+            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+          />
+          <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.modelHelp}</span>
+        </label>
+        <div className="rounded-md border border-gray-100 bg-gray-50 p-3 text-xs leading-5 text-gray-600">
+          <div className="font-semibold text-gray-800">Current runtime</div>
+          <div className="mt-1">
+            {runtimeStatus?.providers.runtime_ready
+              ? `${runtimeStatus.providers.active_runtime_provider_id} (${runtimeStatus.providers.active_runtime_model})`
+              : runtimeStatus?.providers.runtime_issue || 'No provider is active yet.'}
+          </div>
+          <div className="mt-2">
+            Saved credentials are local to this installation. They are used only for assistant chat calls and are not exposed to tools or provenance payloads.
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={saveProvider}
+          disabled={saving || loading}
+          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:bg-gray-300"
+        >
+          {saving ? 'Saving...' : `Save and use ${selectedTemplate.label}`}
+        </button>
+        <button
+          type="button"
+          onClick={clearProvider}
+          disabled={saving || loading || !selectedConfig?.configured}
+          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 disabled:cursor-not-allowed disabled:text-gray-300"
+        >
+          Clear saved setup
+        </button>
+        {message && <span className="text-sm text-gray-600">{message}</span>}
+      </div>
+    </section>
   )
 }
 
@@ -1408,20 +1640,44 @@ function AssistantAuditPanel({ activeConversationId }: { activeConversationId: n
 
 export function AssistantPage() {
   const [status, setStatus] = useState<PlatformStatus | null>(null)
+  const [providerConfigs, setProviderConfigs] = useState<AssistantProviderConfig[]>([])
+  const [statusLoading, setStatusLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null)
 
+  async function refreshAssistantStatus() {
+    setStatusLoading(true)
+    try {
+      const [platformStatus, configs] = await Promise.all([
+        getPlatformStatus(),
+        getAssistantProviderConfigs(),
+      ])
+      setStatus(platformStatus)
+      setProviderConfigs(configs)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
-    getPlatformStatus()
-      .then((data) => {
+    setStatusLoading(true)
+    Promise.all([getPlatformStatus(), getAssistantProviderConfigs()])
+      .then(([data, configs]) => {
         if (!cancelled) {
           setStatus(data)
+          setProviderConfigs(configs)
           setError(null)
         }
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setStatusLoading(false)
       })
     return () => {
       cancelled = true
@@ -1453,6 +1709,13 @@ export function AssistantPage() {
       )}
 
       <ProviderRuntimeSummary status={status} />
+
+      <AssistantProviderSetup
+        configs={providerConfigs}
+        runtimeStatus={status}
+        loading={statusLoading}
+        onRefresh={refreshAssistantStatus}
+      />
 
       <TaskCenteredAssistantPanel
         providerConfigured={runtimeReady}

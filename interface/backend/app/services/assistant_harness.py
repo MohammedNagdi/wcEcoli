@@ -21,6 +21,7 @@ from app.db.models import (
     AssistantConfirmation,
     AssistantConversation,
     AssistantMessage,
+    AssistantProviderConfig,
     AssistantProvenance,
     AssistantToolCall,
     BuilderSectionDraft,
@@ -163,6 +164,32 @@ class ProviderLayerStatus(BaseModel):
     runtime_issue: str = ""
     providers: list[ProviderStatus]
     notes: list[str]
+
+
+class AssistantProviderConfigOut(BaseModel):
+    provider_id: str
+    label: str
+    category: ProviderCategory
+    configured: bool
+    secret_configured: bool
+    endpoint_configured: bool
+    endpoint_url: str = ""
+    model: str = ""
+    is_active: bool = False
+    runtime_supported: bool = False
+    default_model: str = ""
+    requires_secret: bool = False
+    requires_endpoint: bool = False
+    configuration_hint: str = ""
+    updated_at: str = ""
+
+
+class AssistantProviderConfigUpdate(BaseModel):
+    api_key: str = ""
+    endpoint_url: str = ""
+    model: str = ""
+    label: str = ""
+    make_active: bool = True
 
 
 class AssistantToolSpec(BaseModel):
@@ -352,15 +379,80 @@ def configured(value: str | None) -> bool:
     return bool((value or "").strip())
 
 
-def get_provider_statuses() -> list[ProviderStatus]:
+def _provider_definition(provider_id: str) -> ProviderDefinition | None:
+    return next((definition for definition in PROVIDER_DEFINITIONS if definition.provider_id == provider_id), None)
+
+
+def _provider_configs_by_id(session: Session | None) -> dict[str, AssistantProviderConfig]:
+    if session is None:
+        return {}
+    records = session.exec(select(AssistantProviderConfig)).all()
+    return {record.provider_id: record for record in records}
+
+
+def _active_provider_config(session: Session | None) -> AssistantProviderConfig | None:
+    if session is None:
+        return None
+    return session.exec(
+        select(AssistantProviderConfig)
+        .where(AssistantProviderConfig.is_active == True)  # noqa: E712
+        .order_by(AssistantProviderConfig.updated_at.desc())
+    ).first()
+
+
+def _provider_secret_configured(
+    definition: ProviderDefinition,
+    config: AssistantProviderConfig | None,
+) -> bool:
+    if config and configured(config.secret_value):
+        return True
+    secret_value = getattr(settings, definition.secret_setting, "") if definition.secret_setting else ""
+    return configured(secret_value)
+
+
+def _provider_endpoint_configured(
+    definition: ProviderDefinition,
+    config: AssistantProviderConfig | None,
+) -> bool:
+    if config and configured(config.endpoint_url):
+        return True
+    endpoint_value = getattr(settings, definition.endpoint_setting, "") if definition.endpoint_setting else ""
+    return configured(endpoint_value)
+
+
+def _provider_model(definition: ProviderDefinition, config: AssistantProviderConfig | None) -> str:
+    runtime_spec = RUNTIME_PROVIDER_SPECS.get(definition.provider_id)
+    if config and config.model:
+        return config.model.strip()
+    if settings.assistant_model:
+        return settings.assistant_model.strip()
+    return (runtime_spec.default_model if runtime_spec else "").strip()
+
+
+def _provider_configured_for_status(
+    definition: ProviderDefinition,
+    config: AssistantProviderConfig | None,
+) -> bool:
+    secret_is_configured = _provider_secret_configured(definition, config)
+    endpoint_is_configured = _provider_endpoint_configured(definition, config)
+    runtime_spec = RUNTIME_PROVIDER_SPECS.get(definition.provider_id)
+    if runtime_spec and runtime_spec.secret_setting:
+        return secret_is_configured
+    if runtime_spec and runtime_spec.endpoint_setting and not runtime_spec.secret_setting:
+        return endpoint_is_configured
+    return secret_is_configured or endpoint_is_configured
+
+
+def get_provider_statuses(session: Session | None = None) -> list[ProviderStatus]:
     statuses: list[ProviderStatus] = []
-    selected_provider = (settings.assistant_provider or "").strip()
+    configs_by_id = _provider_configs_by_id(session)
+    active_config = _active_provider_config(session)
+    selected_provider = active_config.provider_id if active_config else (settings.assistant_provider or "").strip()
     for definition in PROVIDER_DEFINITIONS:
-        secret_value = getattr(settings, definition.secret_setting, "") if definition.secret_setting else ""
-        endpoint_value = getattr(settings, definition.endpoint_setting, "") if definition.endpoint_setting else ""
-        secret_is_configured = configured(secret_value)
-        endpoint_is_configured = configured(endpoint_value)
-        is_configured = secret_is_configured or endpoint_is_configured
+        config = configs_by_id.get(definition.provider_id)
+        secret_is_configured = _provider_secret_configured(definition, config)
+        endpoint_is_configured = _provider_endpoint_configured(definition, config)
+        is_configured = _provider_configured_for_status(definition, config)
         runtime_spec = RUNTIME_PROVIDER_SPECS.get(definition.provider_id)
         statuses.append(
             ProviderStatus(
@@ -373,17 +465,18 @@ def get_provider_statuses() -> list[ProviderStatus]:
                 endpoint_configured=endpoint_is_configured,
                 secret_configured=secret_is_configured,
                 runtime_supported=runtime_spec is not None,
-                default_model=runtime_spec.default_model if runtime_spec else "",
+                default_model=_provider_model(definition, config),
                 selected_for_runtime=selected_provider == definition.provider_id,
             )
         )
     return statuses
 
 
-def get_provider_layer_status() -> ProviderLayerStatus:
-    providers = get_provider_statuses()
+def get_provider_layer_status(session: Session | None = None) -> ProviderLayerStatus:
+    providers = get_provider_statuses(session)
     configured_count = sum(1 for provider in providers if provider.configured)
-    selected_provider = (settings.assistant_provider or "").strip()
+    active_config = _active_provider_config(session)
+    selected_provider = active_config.provider_id if active_config else (settings.assistant_provider or "").strip()
     runtime_provider_id = ""
     runtime_model = ""
     runtime_ready = False
@@ -398,18 +491,18 @@ def get_provider_layer_status() -> ProviderLayerStatus:
             runtime_issue = f"Selected provider '{selected_provider}' has no runtime adapter yet."
         elif not selected_status.configured:
             runtime_provider_id = selected_provider
-            runtime_model = settings.assistant_model or runtime_spec.default_model
+            runtime_model = selected_status.default_model or runtime_spec.default_model
             runtime_issue = f"Selected provider '{selected_provider}' is not configured."
         else:
             runtime_provider_id = selected_provider
-            runtime_model = settings.assistant_model or runtime_spec.default_model
+            runtime_model = selected_status.default_model or runtime_spec.default_model
             runtime_ready = True
     else:
         for provider in providers:
             runtime_spec = RUNTIME_PROVIDER_SPECS.get(provider.provider_id)
             if provider.configured and runtime_spec:
                 runtime_provider_id = provider.provider_id
-                runtime_model = settings.assistant_model or runtime_spec.default_model
+                runtime_model = provider.default_model or runtime_spec.default_model
                 runtime_ready = True
                 break
         if not runtime_ready:
@@ -427,10 +520,87 @@ def get_provider_layer_status() -> ProviderLayerStatus:
         notes=[
             "Provider status reports configuration presence only; API keys are never returned.",
             "Runtime support indicates whether the assistant can call that provider without exposing tools.",
+            "Browser-saved provider setup is local to this installation and takes precedence over environment variables.",
             "Status checks are intentionally non-networked; provider calls happen only when a user sends an assistant message.",
             "The scientific platform remains usable when no LLM provider is configured.",
         ],
     )
+
+
+def provider_configs_to_out(session: Session) -> list[AssistantProviderConfigOut]:
+    configs_by_id = _provider_configs_by_id(session)
+    outputs: list[AssistantProviderConfigOut] = []
+    for definition in PROVIDER_DEFINITIONS:
+        config = configs_by_id.get(definition.provider_id)
+        runtime_spec = RUNTIME_PROVIDER_SPECS.get(definition.provider_id)
+        outputs.append(
+            AssistantProviderConfigOut(
+                provider_id=definition.provider_id,
+                label=definition.label,
+                category=definition.category,
+                configured=_provider_configured_for_status(definition, config),
+                secret_configured=_provider_secret_configured(definition, config),
+                endpoint_configured=_provider_endpoint_configured(definition, config),
+                endpoint_url=config.endpoint_url if config else (
+                    getattr(settings, definition.endpoint_setting, "") if definition.endpoint_setting else ""
+                ),
+                model=_provider_model(definition, config),
+                is_active=bool(config and config.is_active),
+                runtime_supported=runtime_spec is not None,
+                default_model=runtime_spec.default_model if runtime_spec else "",
+                requires_secret=bool(runtime_spec and runtime_spec.secret_setting),
+                requires_endpoint=bool(runtime_spec and runtime_spec.endpoint_setting and not runtime_spec.secret_setting),
+                configuration_hint=definition.configuration_hint,
+                updated_at=config.updated_at if config else "",
+            )
+        )
+    return outputs
+
+
+def upsert_provider_config(
+    session: Session,
+    provider_id: str,
+    data: AssistantProviderConfigUpdate,
+) -> AssistantProviderConfig:
+    definition = _provider_definition(provider_id)
+    if not definition:
+        raise HTTPException(status_code=404, detail=f"Unknown assistant provider '{provider_id}'.")
+    if provider_id not in RUNTIME_PROVIDER_SPECS:
+        raise HTTPException(status_code=422, detail=f"Provider '{provider_id}' does not have a runtime adapter.")
+
+    timestamp = now_iso()
+    record = session.exec(select(AssistantProviderConfig).where(AssistantProviderConfig.provider_id == provider_id)).first()
+    if not record:
+        record = AssistantProviderConfig(
+            provider_id=provider_id,
+            label=data.label.strip() or definition.label,
+            created_at=timestamp,
+        )
+    record.label = data.label.strip() or definition.label
+    if data.api_key.strip():
+        record.secret_value = data.api_key.strip()
+    record.endpoint_url = data.endpoint_url.strip()
+    record.model = data.model.strip()
+    record.updated_at = timestamp
+
+    if data.make_active:
+        for config in session.exec(select(AssistantProviderConfig)).all():
+            config.is_active = False
+            session.add(config)
+        record.is_active = True
+
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def delete_provider_config(session: Session, provider_id: str) -> None:
+    record = session.exec(select(AssistantProviderConfig).where(AssistantProviderConfig.provider_id == provider_id)).first()
+    if not record:
+        return
+    session.delete(record)
+    session.commit()
 
 
 def get_tool_registry() -> list[AssistantToolSpec]:
@@ -489,8 +659,8 @@ def get_tool_registry() -> list[AssistantToolSpec]:
     ]
 
 
-def get_assistant_harness_status() -> AssistantHarnessStatus:
-    provider_configured = get_provider_layer_status().configured_provider_count > 0
+def get_assistant_harness_status(session: Session | None = None) -> AssistantHarnessStatus:
+    provider_configured = get_provider_layer_status(session).configured_provider_count > 0
     return AssistantHarnessStatus(
         state="read_only_tools_enabled",
         provider_required=True,
@@ -506,6 +676,7 @@ def get_assistant_harness_status() -> AssistantHarnessStatus:
         tool_registry=get_tool_registry(),
         notes=[
             "This is the durable harness foundation, not a live LLM runtime.",
+            "Provider setup can be saved from the Assistant page; stored keys are local to this installation and never returned by API.",
             "Messages, confirmations, and provenance can be stored before tool execution is enabled.",
             "Registered tools support dry-run validation previews without side effects.",
             "Read-only result inspection can execute immediately.",

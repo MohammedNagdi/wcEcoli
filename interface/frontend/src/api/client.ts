@@ -21,6 +21,7 @@ import type {
   PlatformStatus, DistributionStatus, ProviderLayerStatus, AssistantHarnessStatus,
   AssistantToolSpec, AssistantConversation, AssistantExchange, AssistantContext, AssistantMessage, AssistantConfirmation,
   AssistantToolPreview, AssistantToolExecution, AssistantToolCall, AssistantProvenance,
+  AssistantProviderConfig, AssistantProviderConfigUpdate,
 } from '../types'
 
 const BASE = '/api'
@@ -497,6 +498,25 @@ export async function getAssistantStatus(): Promise<AssistantHarnessStatus> {
 
 export async function getAssistantProviders(): Promise<ProviderLayerStatus> {
   return fetchJSON('/assistant/providers')
+}
+
+export async function getAssistantProviderConfigs(): Promise<AssistantProviderConfig[]> {
+  return fetchJSON('/assistant/provider-configs')
+}
+
+export async function updateAssistantProviderConfig(
+  providerId: string,
+  data: AssistantProviderConfigUpdate
+): Promise<AssistantProviderConfig> {
+  return fetchJSON(`/assistant/provider-configs/${encodeURIComponent(providerId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function clearAssistantProviderConfig(providerId: string): Promise<AssistantProviderConfig[]> {
+  return fetchJSON(`/assistant/provider-configs/${encodeURIComponent(providerId)}`, { method: 'DELETE' })
 }
 
 export async function getAssistantTools(): Promise<AssistantToolSpec[]> {
