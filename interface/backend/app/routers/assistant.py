@@ -47,6 +47,7 @@ from app.services.assistant_harness import (
     message_to_out,
     preview_tool,
     provenance_to_out,
+    record_contextual_proposals,
     record_provenance,
     resolve_confirmation,
     store_message,
@@ -182,11 +183,19 @@ def create_message(
             "error": runtime_result.error,
         },
     )
+    proposals = record_contextual_proposals(
+        session,
+        conversation=conversation,
+        assistant_message=assistant_message,
+        context=data.context,
+    )
     return AssistantExchangeOut(
         conversation=conversation_to_out(conversation),
         user_message=message_to_out(user_message),
         assistant_message=message_to_out(assistant_message),
         provenance_id=provenance.id or 0,
+        tool_calls=[record.id or 0 for record in proposals],
+        proposals=[tool_call_to_out(record) for record in proposals],
     )
 
 

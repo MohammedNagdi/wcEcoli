@@ -873,6 +873,7 @@ export interface AssistantExchange {
   provenance_id: number
   pending_confirmations: number[]
   tool_calls: number[]
+  proposals: AssistantToolCall[]
 }
 
 export interface AssistantConfirmation {

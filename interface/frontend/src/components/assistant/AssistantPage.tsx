@@ -445,6 +445,79 @@ function FactBadge({ label, value }: { label: string; value: string }) {
   )
 }
 
+function proposalText(proposal: AssistantToolCall, key: string, fallback: string): string {
+  const value = proposal.result[key]
+  return typeof value === 'string' && value.trim() ? value : fallback
+}
+
+function proposalKind(proposal: AssistantToolCall): 'ready' | 'planned' {
+  return proposal.result.side_effect ? 'planned' : 'ready'
+}
+
+function AssistantProposalCard({
+  proposal,
+  busy,
+  onRunReadOnly,
+}: {
+  proposal: AssistantToolCall
+  busy: boolean
+  onRunReadOnly: (proposal: AssistantToolCall) => void
+}) {
+  const title = proposalText(proposal, 'title', proposal.tool_name.replace(/_/g, ' '))
+  const description = proposalText(proposal, 'description', 'Review this proposed assistant action.')
+  const gene = typeof proposal.arguments.gene_symbol === 'string'
+    ? proposal.arguments.gene_symbol
+    : typeof proposal.arguments.gene === 'string'
+      ? proposal.arguments.gene
+      : ''
+  const experimentId = typeof proposal.arguments.experiment_id === 'number' ? proposal.arguments.experiment_id : null
+  const isReadOnly = proposal.tool_name === 'inspect_result' && !proposal.result.side_effect
+  const isCreateExperiment = proposal.tool_name === 'create_experiment'
+  const isRunSimulation = proposal.tool_name === 'run_simulation'
+
+  return (
+    <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-gray-900">{title}</div>
+          <div className="mt-1 text-xs leading-5 text-gray-500">{description}</div>
+        </div>
+        <StatusPill tone={proposalKind(proposal)}>
+          {proposal.result.side_effect ? 'needs confirmation' : 'read-only'}
+        </StatusPill>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {isReadOnly && (
+          <button
+            type="button"
+            onClick={() => onRunReadOnly(proposal)}
+            disabled={busy}
+            className="rounded-md border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50"
+          >
+            {busy ? 'Inspecting...' : 'Run read-only inspection'}
+          </button>
+        )}
+        {isCreateExperiment && (
+          <Link
+            to={`/experiments/new${gene ? `?gene=${encodeURIComponent(gene)}` : ''}`}
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Open Experiment Designer
+          </Link>
+        )}
+        {isRunSimulation && experimentId != null && (
+          <Link
+            to={`/experiments?experiment=${experimentId}`}
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Review experiment
+          </Link>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function AdvancedDisclosure({ title, children }: { title: string; children: ReactNode }) {
   return (
     <details className="rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -470,6 +543,7 @@ function TaskCenteredAssistantPanel({
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
   const [activeConversation, setActiveConversation] = useState<AssistantConversation | null>(null)
   const [messages, setMessages] = useState<AssistantMessage[]>([])
+  const [proposals, setProposals] = useState<AssistantToolCall[]>([])
   const [input, setInput] = useState('')
   const [inspectPreview, setInspectPreview] = useState<AssistantToolPreview | null>(null)
   const [inspectExecution, setInspectExecution] = useState<AssistantToolExecution | null>(null)
@@ -505,8 +579,12 @@ function TaskCenteredAssistantPanel({
     setActiveConversation(conversation)
     onConversationChange(conversation.id)
     try {
-      const rows = await getAssistantMessages(conversation.id)
+      const [rows, proposalRows] = await Promise.all([
+        getAssistantMessages(conversation.id),
+        getAssistantToolCalls({ conversation_id: conversation.id, status: 'proposed' }),
+      ])
       setMessages(rows)
+      setProposals(proposalRows)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -524,6 +602,7 @@ function TaskCenteredAssistantPanel({
         setActiveConversation(null)
         onConversationChange(null)
         setMessages([])
+        setProposals([])
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -547,6 +626,7 @@ function TaskCenteredAssistantPanel({
     setActiveConversation(null)
     onConversationChange(null)
     setMessages([])
+    setProposals([])
     setInput('')
   }
 
@@ -574,6 +654,7 @@ function TaskCenteredAssistantPanel({
       setInput('')
       const exchange = await createAssistantMessage(conversation.id, { content, context })
       setMessages((current) => [...current, exchange.user_message, exchange.assistant_message])
+      setProposals(exchange.proposals ?? [])
       setActiveConversation(exchange.conversation)
       onConversationChange(exchange.conversation.id)
       setConversations((current) => [
@@ -600,6 +681,30 @@ function TaskCenteredAssistantPanel({
         return
       }
       const execution = await executeAssistantTool('inspect_result', { arguments: args, context })
+      setInspectExecution(execution)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setInspecting(false)
+    }
+  }
+
+  async function runReadOnlyProposal(proposal: AssistantToolCall) {
+    if (proposal.tool_name !== 'inspect_result' || inspecting) return
+    setInspecting(true)
+    setError(null)
+    try {
+      const preview = await previewAssistantTool(proposal.tool_name, { arguments: proposal.arguments, context })
+      setInspectPreview(preview)
+      if (!preview.valid) {
+        setInspectExecution(null)
+        return
+      }
+      const execution = await executeAssistantTool(proposal.tool_name, {
+        arguments: proposal.arguments,
+        context,
+        conversation_id: activeConversation?.id ?? null,
+      })
       setInspectExecution(execution)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -791,6 +896,25 @@ function TaskCenteredAssistantPanel({
               ))}
             </div>
           </div>
+
+          {proposals.length > 0 && (
+            <div className="rounded-md border border-blue-100 bg-white p-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Assistant proposals</div>
+              <p className="mt-1 text-xs leading-5 text-gray-500">
+                These are typed proposal records from the latest exchange. They are not executed by assistant text.
+              </p>
+              <div className="mt-3 space-y-2">
+                {proposals.map((proposal) => (
+                  <AssistantProposalCard
+                    key={proposal.id}
+                    proposal={proposal}
+                    busy={inspecting}
+                    onRunReadOnly={runReadOnlyProposal}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="rounded-md border border-gray-100 bg-white p-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Trust boundary</div>

@@ -19,6 +19,7 @@ from app.services.assistant_harness import (
     get_provider_layer_status,
     message_to_out,
     preview_tool,
+    record_contextual_proposals,
     record_provenance,
     resolve_confirmation,
     store_message,
@@ -106,6 +107,66 @@ def test_assistant_message_round_trip_records_blocked_response_and_provenance():
         assert message_to_out(user_message).role == "user"
         assert message_to_out(assistant_message).status == "blocked_not_enabled"
         assert provenance.prompt_hash
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_contextual_proposals_record_non_executing_tool_calls():
+    engine, session = _build_session()
+    try:
+        session.add(Variant(name="gene_knockout", docstring="Set selected gene expression to zero."))
+        session.add(Condition(name="basal", nutrients="minimal glucose"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
+        session.commit()
+
+        context = AssistantContext(
+            route="/results/2",
+            selected_gene="dnaA",
+            selected_experiment=7,
+            selected_job=2,
+            selected_condition="basal",
+            assistant_surface="results",
+        )
+        conversation = create_conversation(
+            session,
+            AssistantConversationCreate(
+                title="dnaA follow-up",
+                assistant_surface="results",
+                context=context,
+            ),
+        )
+        assistant_message = store_message(
+            session,
+            conversation,
+            "assistant",
+            "Inspect the result and consider a reviewed follow-up.",
+            context,
+            status="completed",
+        )
+
+        proposals = record_contextual_proposals(
+            session,
+            conversation=conversation,
+            assistant_message=assistant_message,
+            context=context,
+        )
+
+        assert len(proposals) == 3
+        assert {proposal.tool_name for proposal in proposals} == {
+            "inspect_result",
+            "create_experiment",
+            "run_simulation",
+        }
+        assert all(proposal.status == "proposed" for proposal in proposals)
+        assert all(proposal.message_id == assistant_message.id for proposal in proposals)
+        create_proposal = next(proposal for proposal in proposals if proposal.tool_name == "create_experiment")
+        create_out = tool_call_to_out(create_proposal)
+        assert create_out.arguments["gene_symbol"] == "dnaA"
+        assert create_out.result["requires_confirmation"] is True
+        inspect_out = tool_call_to_out(next(proposal for proposal in proposals if proposal.tool_name == "inspect_result"))
+        assert inspect_out.result["proposal_kind"] == "read_only"
+        assert inspect_out.result["side_effect"] is False
     finally:
         session.close()
         engine.dispose()

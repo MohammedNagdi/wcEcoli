@@ -26,6 +26,7 @@ from app.db.models import (
     BuilderSectionDraft,
     Condition,
     Experiment,
+    Gene,
     SimulationJob,
     SimulationResult,
     Timeline,
@@ -228,6 +229,18 @@ class AssistantMessageOut(BaseModel):
     created_at: str
 
 
+class AssistantToolCallOut(BaseModel):
+    id: int
+    conversation_id: int | None
+    message_id: int | None
+    tool_name: str
+    status: str
+    arguments: dict[str, Any]
+    result: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
 class AssistantExchangeOut(BaseModel):
     conversation: AssistantConversationOut
     user_message: AssistantMessageOut
@@ -235,6 +248,7 @@ class AssistantExchangeOut(BaseModel):
     provenance_id: int
     pending_confirmations: list[int] = Field(default_factory=list)
     tool_calls: list[int] = Field(default_factory=list)
+    proposals: list[AssistantToolCallOut] = Field(default_factory=list)
 
 
 class AssistantToolPreviewRequest(BaseModel):
@@ -273,18 +287,6 @@ class AssistantToolExecutionOut(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
-
-
-class AssistantToolCallOut(BaseModel):
-    id: int
-    conversation_id: int | None
-    message_id: int | None
-    tool_name: str
-    status: str
-    arguments: dict[str, Any]
-    result: dict[str, Any]
-    created_at: str
-    updated_at: str
 
 
 class ConfirmationCreate(BaseModel):
@@ -740,6 +742,7 @@ def _record_tool_call(
     session: Session,
     *,
     conversation_id: int | None,
+    message_id: int | None = None,
     tool_name: str,
     status: str,
     arguments: dict[str, Any],
@@ -748,7 +751,7 @@ def _record_tool_call(
     timestamp = now_iso()
     record = AssistantToolCall(
         conversation_id=conversation_id or 0,
-        message_id=None,
+        message_id=message_id,
         tool_name=tool_name,
         status=status,
         arguments_json=to_json(arguments),
@@ -760,6 +763,90 @@ def _record_tool_call(
     session.commit()
     session.refresh(record)
     return record
+
+
+def record_contextual_proposals(
+    session: Session,
+    *,
+    conversation: AssistantConversation,
+    assistant_message: AssistantMessage,
+    context: AssistantContext,
+) -> list[AssistantToolCall]:
+    """Record non-executing proposal cards derived from validated page context."""
+
+    proposals: list[AssistantToolCall] = []
+
+    def add_proposal(
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+        title: str,
+        description: str,
+        proposal_kind: str,
+    ) -> None:
+        spec = get_tool_spec(tool_name)
+        proposals.append(
+            _record_tool_call(
+                session,
+                conversation_id=conversation.id,
+                message_id=assistant_message.id,
+                tool_name=tool_name,
+                status="proposed",
+                arguments=arguments,
+                result={
+                    "title": title,
+                    "description": description,
+                    "proposal_kind": proposal_kind,
+                    "source": "contextual_assistant",
+                    "requires_confirmation": spec.requires_confirmation,
+                    "side_effect": spec.side_effect,
+                    "execution_state": "not_executed",
+                },
+            )
+        )
+
+    if context.selected_job is not None:
+        add_proposal(
+            tool_name="inspect_result",
+            arguments={"job_id": context.selected_job, "gene": context.selected_gene or ""},
+            title="Inspect current result",
+            description="Run a read-only inspection of the selected simulation job and summarize deterministic result links.",
+            proposal_kind="read_only",
+        )
+
+    if context.selected_gene:
+        gene = session.exec(select(Gene).where(Gene.symbol == context.selected_gene)).first()
+        if gene and gene.ko_index > 0:
+            condition = context.selected_condition or "basal"
+            add_proposal(
+                tool_name="create_experiment",
+                arguments={
+                    "name": f"{gene.symbol} knockout follow-up",
+                    "description": "Assistant-proposed draft. Review the experiment before queueing any simulation.",
+                    "variant_type": "gene_knockout",
+                    "variant_index": gene.ko_index,
+                    "condition": condition,
+                    "timeline": "",
+                    "sim_params": {},
+                    "gene_symbol": gene.symbol,
+                    "gene_symbols": [],
+                    "include_wildtype": True,
+                },
+                title="Draft follow-up knockout",
+                description=f"Prepare a reviewed gene-knockout draft for {gene.symbol} under {condition}.",
+                proposal_kind="side_effect_preview",
+            )
+
+    if context.selected_experiment is not None:
+        add_proposal(
+            tool_name="run_simulation",
+            arguments={"experiment_id": context.selected_experiment, "seed": 0, "generations": 1},
+            title="Preview one simulation run",
+            description="Preview queueing one seed/generation run from the selected experiment. Queueing still requires confirmation.",
+            proposal_kind="side_effect_preview",
+        )
+
+    return proposals
 
 
 def _confirmation_allows_execution(
