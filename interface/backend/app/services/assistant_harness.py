@@ -898,6 +898,8 @@ def _preview_create_experiment(session: Session, args: dict[str, Any]) -> tuple[
         "action": "would_create_experiment_draft",
         "summary": f"Create '{normalized['name']}' as a {variant_type or 'variant'} draft under condition {condition or 'unknown'}.",
         "variant_type": variant_type,
+        "gene_symbol": gene_symbol,
+        "gene_symbols": gene_symbols,
         "condition": condition,
         "timeline": timeline or "No time-varying protocol",
         "include_wildtype": include_wildtype,

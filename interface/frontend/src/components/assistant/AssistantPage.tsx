@@ -532,6 +532,7 @@ function ToolReviewPanel({
           <dl className="mt-3 rounded-md border border-gray-100 bg-gray-50 px-3 text-xs">
             {isCreate && (
               <>
+                <ReviewRow label="Gene" value={stringField(previewData.gene_symbol) || 'Not selected'} mono />
                 <ReviewRow label="Experiment type" value={stringField(previewData.variant_type) || 'Not selected'} />
                 <ReviewRow label="Condition" value={stringField(previewData.condition) || 'Not selected'} mono />
                 <ReviewRow label="Time-varying protocol" value={stringField(previewData.timeline) || 'No time-varying protocol'} mono />
@@ -897,6 +898,45 @@ function proposalKind(proposal: AssistantToolCall): 'ready' | 'planned' {
   return proposal.result.side_effect ? 'planned' : 'ready'
 }
 
+function proposalSourceLabel(proposal: AssistantToolCall): string {
+  const source = stringField(proposal.result.source)
+  if (source === 'model_gene_mention') return 'model suggestion, gene validated'
+  if (source === 'contextual_assistant') return 'current page context'
+  return source ? source.replace(/_/g, ' ') : 'assistant proposal'
+}
+
+function proposalFactRows(proposal: AssistantToolCall): Array<{ label: string; value: string; mono?: boolean }> {
+  if (proposal.tool_name === 'create_experiment') {
+    const gene = stringField(proposal.arguments.gene_symbol)
+    const condition = stringField(proposal.arguments.condition) || 'basal'
+    const variant = stringField(proposal.arguments.variant_type).replace(/_/g, ' ') || 'experiment'
+    const timeline = stringField(proposal.arguments.timeline) || 'No time-varying protocol'
+    const includeWildtype = proposal.arguments.include_wildtype === true
+    return [
+      { label: 'Validated gene', value: gene || 'Not selected', mono: Boolean(gene) },
+      { label: 'Draft type', value: variant },
+      { label: 'Condition', value: condition, mono: true },
+      { label: 'Protocol', value: timeline, mono: timeline !== 'No time-varying protocol' },
+      { label: 'Wildtype control', value: includeWildtype ? 'Create or reuse if available' : 'Not requested' },
+    ]
+  }
+  if (proposal.tool_name === 'run_simulation') {
+    return [
+      { label: 'Experiment', value: String(proposal.arguments.experiment_id ?? 'Not selected'), mono: true },
+      { label: 'Seed', value: String(proposal.arguments.seed ?? 0), mono: true },
+      { label: 'Generations', value: String(proposal.arguments.generations ?? 1), mono: true },
+    ]
+  }
+  if (proposal.tool_name === 'inspect_result') {
+    return [
+      { label: 'Job', value: String(proposal.arguments.job_id ?? 'Current result'), mono: true },
+      { label: 'Gene', value: stringField(proposal.arguments.gene) || 'Current context', mono: Boolean(proposal.arguments.gene) },
+      { label: 'Side effect', value: 'None' },
+    ]
+  }
+  return []
+}
+
 function AssistantProposalCard({
   proposal,
   context,
@@ -928,6 +968,7 @@ function AssistantProposalCard({
   const isRunSimulation = proposal.tool_name === 'run_simulation'
   const isSideEffect = Boolean(proposal.result.side_effect)
   const canConfirm = isSideEffect && preview?.valid && !execution?.executed && confirmation?.status !== 'rejected'
+  const facts = proposalFactRows(proposal)
 
   async function previewProposal() {
     setCardBusy('preview')
@@ -1019,7 +1060,18 @@ function AssistantProposalCard({
           {proposal.result.side_effect ? 'needs confirmation' : 'read-only'}
         </StatusPill>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
+      {facts.length > 0 && (
+        <dl className="mt-3 grid gap-2 rounded-md border border-gray-100 bg-white p-3 text-xs sm:grid-cols-2">
+          {facts.map((fact) => (
+            <div key={`${proposal.id}-${fact.label}`} className="min-w-0">
+              <dt className="font-semibold uppercase tracking-wide text-gray-400">{fact.label}</dt>
+              <dd className={`mt-1 truncate text-gray-800 ${fact.mono ? 'font-mono' : ''}`}>{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <StatusPill tone="neutral">{proposalSourceLabel(proposal)}</StatusPill>
         {isReadOnly && (
           <button
             type="button"
@@ -1037,7 +1089,7 @@ function AssistantProposalCard({
             disabled={Boolean(cardBusy)}
             className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
-            {cardBusy === 'preview' ? 'Previewing...' : preview ? 'Refresh preview' : 'Preview'}
+            {cardBusy === 'preview' ? 'Previewing...' : preview ? 'Refresh preview' : isCreateExperiment ? 'Preview draft' : 'Preview'}
           </button>
         )}
         {isCreateExperiment && (
@@ -1070,7 +1122,7 @@ function AssistantProposalCard({
             disabled={!canConfirm || Boolean(cardBusy)}
             className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
-            {cardBusy === 'execute' ? 'Executing...' : proposal.tool_name === 'run_simulation' ? 'Confirm and queue' : 'Confirm and create'}
+            {cardBusy === 'execute' ? 'Executing...' : proposal.tool_name === 'run_simulation' ? 'Confirm and queue' : 'Create draft experiment'}
           </button>
           <button
             type="button"
@@ -1538,14 +1590,14 @@ function TaskCenteredAssistantPanel({
           </details>
 
           {proposals.length > 0 && (
-            <details className="rounded-md border border-blue-100 bg-white">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-blue-700">
+            <section className="rounded-md border border-blue-100 bg-white">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-blue-700">
                 <span>Assistant proposals</span>
                 <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">{proposals.length}</span>
-              </summary>
+              </div>
               <div className="space-y-2 border-t border-blue-50 p-3">
                 <p className="text-xs leading-5 text-gray-500">
-                  Typed records from the latest exchange. They are not executed by assistant text.
+                  Reviewable platform actions from the latest reply. Assistant text cannot create experiments or queue simulations until you preview and confirm here.
                 </p>
                 {proposals.map((proposal) => (
                   <AssistantProposalCard
@@ -1558,7 +1610,7 @@ function TaskCenteredAssistantPanel({
                   />
                 ))}
               </div>
-            </details>
+            </section>
           )}
 
           <details className="rounded-md border border-gray-100 bg-white">
