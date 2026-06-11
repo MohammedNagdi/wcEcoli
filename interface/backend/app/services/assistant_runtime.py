@@ -282,11 +282,71 @@ def _conversation_memory_summary(context: dict[str, Any]) -> str:
     return "\n".join(lines) if len(lines) > 2 else ""
 
 
+def _working_memory_summary(context: dict[str, Any]) -> str:
+    memory = context.get("working_memory")
+    if not isinstance(memory, dict):
+        return ""
+    lines = [
+        "Structured working memory:",
+        "Treat this as session state only. Deterministic platform facts must be re-fetched by adapters when needed.",
+    ]
+    selected = memory.get("selected_objects")
+    if isinstance(selected, dict):
+        compact_selected = {
+            key: value
+            for key, value in selected.items()
+            if value not in (None, "")
+        }
+        if compact_selected:
+            lines.append(f"- current selection: {json.dumps(compact_selected, sort_keys=True)}")
+    remembered_genes = memory.get("remembered_genes")
+    if isinstance(remembered_genes, list) and remembered_genes:
+        lines.append(f"- remembered genes: {', '.join(str(gene) for gene in remembered_genes[:10])}")
+    proposed_actions = memory.get("proposed_actions")
+    if isinstance(proposed_actions, list) and proposed_actions:
+        lines.append("- proposed actions already shown:")
+        for action in proposed_actions[-6:]:
+            if not isinstance(action, dict):
+                continue
+            title = action.get("title") or action.get("tool_name") or "proposal"
+            gene = action.get("gene") or ""
+            status = action.get("status") or ""
+            requires_confirmation = action.get("requires_confirmation")
+            lines.append(
+                f"  - {title}"
+                f"{f' for {gene}' if gene else ''}"
+                f"{f' ({status})' if status else ''}"
+                f"{' requires confirmation' if requires_confirmation else ''}"
+            )
+    pending_confirmations = memory.get("pending_confirmations")
+    if isinstance(pending_confirmations, list) and pending_confirmations:
+        lines.append(
+            "- pending confirmations: "
+            + ", ".join(
+                f"{item.get('action')} #{item.get('id')}"
+                for item in pending_confirmations
+                if isinstance(item, dict)
+            )
+        )
+    questions = memory.get("recent_unresolved_questions")
+    if isinstance(questions, list) and questions:
+        lines.append("- recent user questions:")
+        for question in questions[-4:]:
+            if isinstance(question, str) and question.strip():
+                lines.append(f"  - {question.strip()}")
+    policy = memory.get("summary_policy")
+    if isinstance(policy, dict) and policy.get("currently_recommends_summary"):
+        lines.append("- context note: this session is approaching a semantic/context boundary; answer tersely and prefer updating structured memory.")
+    return "\n".join(lines) if len(lines) > 2 else ""
+
+
 def _system_prompt(context: dict[str, Any]) -> str:
     platform_facts = _platform_facts_summary(context)
     conversation_memory = _conversation_memory_summary(context)
+    working_memory = _working_memory_summary(context)
     platform_block = f"\n\n{platform_facts}" if platform_facts else ""
     memory_block = f"\n\n{conversation_memory}" if conversation_memory else ""
+    working_memory_block = f"\n\n{working_memory}" if working_memory else ""
     return (
         "You are the wcEcoli platform assistant. Explain model, experiment, and result context clearly. "
         "Do not claim that you executed tools, queued simulations, edited files, or changed data. "
@@ -300,6 +360,7 @@ def _system_prompt(context: dict[str, Any]) -> str:
         f"Current page context: {_context_summary(context)}."
         f"{platform_block}"
         f"{memory_block}"
+        f"{working_memory_block}"
     )
 
 

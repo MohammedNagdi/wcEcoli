@@ -25,6 +25,7 @@ from app.services.assistant_harness import (
     ConfirmationResolve,
     assistant_conversation_context_pack,
     assistant_gene_context_pack,
+    assistant_working_memory_pack,
     create_confirmation,
     create_conversation,
     execute_tool,
@@ -467,6 +468,84 @@ def test_model_gene_proposals_parse_json_inspect_only_directive_without_drafts()
         engine.dispose()
 
 
+def test_assistant_working_memory_pack_tracks_selected_objects_and_proposals():
+    engine, session = _build_session()
+    try:
+        context = AssistantContext(
+            route="/results/2",
+            selected_gene="dnaA",
+            selected_job=2,
+            selected_condition="basal",
+            assistant_surface="results",
+        )
+        conversation = create_conversation(
+            session,
+            AssistantConversationCreate(title="memory test", assistant_surface="results", context=context),
+        )
+        user_message = store_message(
+            session,
+            conversation,
+            "user",
+            "Can you prepare cards for dnaA?",
+            context,
+            status="stored",
+        )
+        assistant_message = store_message(
+            session,
+            conversation,
+            "assistant",
+            "I can prepare reviewed cards.",
+            context,
+            status="completed",
+        )
+        session.add(
+            AssistantToolCall(
+                conversation_id=conversation.id or 0,
+                message_id=assistant_message.id,
+                tool_name="create_experiment",
+                status="proposed",
+                arguments_json='{"gene_symbol":"dnaA","condition":"basal"}',
+                result_json='{"title":"Draft dnaA knockout","source":"test","requires_confirmation":true}',
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        session.add(
+            AssistantConfirmation(
+                conversation_id=conversation.id,
+                action="create_experiment",
+                status="pending",
+                payload_json='{"gene_symbol":"dnaA"}',
+                created_at="2026-01-01T00:00:00+00:00",
+                resolved_at="",
+            )
+        )
+        session.commit()
+
+        conversation_context = assistant_conversation_context_pack(
+            session,
+            conversation_id=conversation.id or 0,
+            current_message_id=user_message.id,
+        )
+        memory = assistant_working_memory_pack(
+            session,
+            conversation_id=conversation.id or 0,
+            context=context,
+            current_message_id=user_message.id,
+            conversation_context=conversation_context,
+        )
+
+        assert memory["selected_objects"]["gene"] == "dnaA"
+        assert memory["remembered_genes"] == ["dnaA"]
+        assert memory["proposed_actions"][0]["tool_name"] == "create_experiment"
+        assert memory["proposed_actions"][0]["requires_confirmation"] is True
+        assert memory["pending_confirmations"][0]["action"] == "create_experiment"
+        assert "Re-fetch deterministic platform facts" in memory["summary_policy"]["source_of_truth"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_assistant_runtime_reports_no_provider_without_network():
     snapshot = {
         "assistant_provider": settings.assistant_provider,
@@ -640,6 +719,22 @@ def test_openai_compatible_runtime_uses_configured_provider_without_tools():
                         {"role": "assistant", "content": "Earlier I suggested dnaA, crp, and fis."}
                     ]
                 },
+                "working_memory": {
+                    "selected_objects": {"route": "/results/2", "gene": "dnaA", "surface": "results"},
+                    "remembered_genes": ["dnaA", "crp", "fis"],
+                    "proposed_actions": [
+                        {
+                            "tool_name": "create_experiment",
+                            "status": "proposed",
+                            "gene": "crp",
+                            "title": "Draft crp knockout",
+                            "requires_confirmation": True,
+                        }
+                    ],
+                    "pending_confirmations": [],
+                    "recent_unresolved_questions": ["What should I inspect next?"],
+                    "summary_policy": {"currently_recommends_summary": False},
+                },
             },
             transport=fake_transport,
         )
@@ -657,6 +752,8 @@ def test_openai_compatible_runtime_uses_configured_provider_without_tools():
         assert payload["messages"][0]["role"] == "system"
         assert "Recent conversation memory" in payload["messages"][0]["content"]
         assert "dnaA, crp, and fis" in payload["messages"][0]["content"]
+        assert "Structured working memory" in payload["messages"][0]["content"]
+        assert "Draft crp knockout" in payload["messages"][0]["content"]
         assert "Proposal targets:" in payload["messages"][0]["content"]
         assert payload["messages"][1]["role"] == "user"
     finally:

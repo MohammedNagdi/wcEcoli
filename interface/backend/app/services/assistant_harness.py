@@ -1264,6 +1264,118 @@ def assistant_conversation_context_pack(
     }
 
 
+def assistant_working_memory_pack(
+    session: Session,
+    *,
+    conversation_id: int,
+    context: AssistantContext,
+    current_message_id: int | None = None,
+    conversation_context: dict[str, Any] | None = None,
+    limit: int = 12,
+) -> dict[str, Any]:
+    """Build structured session memory without turning platform facts into stale prose."""
+
+    tool_records = session.exec(
+        select(AssistantToolCall)
+        .where(AssistantToolCall.conversation_id == conversation_id)
+        .order_by(AssistantToolCall.id.desc())
+    ).all()[:limit]
+    confirmations = session.exec(
+        select(AssistantConfirmation)
+        .where(AssistantConfirmation.conversation_id == conversation_id)
+        .order_by(AssistantConfirmation.id.desc())
+    ).all()[:limit]
+    user_records = session.exec(
+        select(AssistantMessage)
+        .where(AssistantMessage.conversation_id == conversation_id)
+        .where(AssistantMessage.role == "user")
+        .order_by(AssistantMessage.id.desc())
+    ).all()[:limit]
+
+    selected_objects = {
+        "gene": context.selected_gene or "",
+        "condition": context.selected_condition or "",
+        "experiment_id": context.selected_experiment,
+        "job_id": context.selected_job,
+        "result_id": context.selected_result,
+        "surface": context.assistant_surface,
+        "route": context.route,
+    }
+
+    proposed_actions: list[dict[str, Any]] = []
+    remembered_genes: list[str] = []
+    seen_genes: set[str] = set()
+    for record in reversed(tool_records):
+        arguments = from_json(record.arguments_json, {})
+        result = from_json(record.result_json, {})
+        if not isinstance(arguments, dict) or not isinstance(result, dict):
+            continue
+        gene_symbol = str(arguments.get("gene_symbol") or arguments.get("gene") or "").strip()
+        if gene_symbol and gene_symbol.lower() not in seen_genes:
+            seen_genes.add(gene_symbol.lower())
+            remembered_genes.append(gene_symbol)
+        if record.status in {"proposed", "pending_confirmation"}:
+            proposed_actions.append(
+                {
+                    "tool_name": record.tool_name,
+                    "status": record.status,
+                    "gene": gene_symbol,
+                    "experiment_id": arguments.get("experiment_id"),
+                    "job_id": arguments.get("job_id"),
+                    "title": result.get("title", ""),
+                    "source": result.get("source", ""),
+                    "requires_confirmation": result.get("requires_confirmation", False),
+                }
+            )
+
+    if context.selected_gene and context.selected_gene.lower() not in seen_genes:
+        remembered_genes.insert(0, context.selected_gene)
+
+    pending_confirmations = [
+        {
+            "id": confirmation.id,
+            "action": confirmation.action,
+            "status": confirmation.status,
+        }
+        for confirmation in confirmations
+        if confirmation.status == "pending"
+    ]
+    recent_questions = [
+        record.content.strip()[:500]
+        for record in reversed(user_records)
+        if record.id != current_message_id and "?" in record.content
+    ][-4:]
+
+    recent_chars = 0
+    if conversation_context and isinstance(conversation_context.get("messages"), list):
+        recent_chars = sum(
+            len(message.get("content", ""))
+            for message in conversation_context["messages"]
+            if isinstance(message, dict) and isinstance(message.get("content"), str)
+        )
+
+    should_summarize = recent_chars > 12000 or len(proposed_actions) > 10 or len(recent_questions) > 3
+    return {
+        "selected_objects": selected_objects,
+        "remembered_genes": remembered_genes[:10],
+        "proposed_actions": proposed_actions[-10:],
+        "pending_confirmations": pending_confirmations[:10],
+        "recent_unresolved_questions": recent_questions,
+        "summary_policy": {
+            "source_of_truth": "Re-fetch deterministic platform facts through adapters; do not rely on summaries for genes, jobs, results, media, conditions, or molecule values.",
+            "keep_verbatim": "Preserve recent turns for pronoun/reference resolution.",
+            "summarize_when": [
+                "semantic task boundary",
+                "context budget pressure",
+                "large tool-result accumulation",
+                "user asks to continue later",
+            ],
+            "currently_recommends_summary": should_summarize,
+            "estimated_recent_context_chars": recent_chars,
+        },
+    }
+
+
 def assistant_gene_context_pack(
     session: Session,
     *,

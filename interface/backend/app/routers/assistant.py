@@ -41,6 +41,7 @@ from app.services.assistant_harness import (
     ProvenanceOut,
     assistant_conversation_context_pack,
     assistant_gene_context_pack,
+    assistant_working_memory_pack,
     confirmation_to_out,
     conversation_to_out,
     create_confirmation,
@@ -208,6 +209,13 @@ def create_message(
         conversation_id=persisted_conversation_id,
         current_message_id=user_message.id,
     )
+    working_memory = assistant_working_memory_pack(
+        session,
+        conversation_id=persisted_conversation_id,
+        context=data.context,
+        current_message_id=user_message.id,
+        conversation_context=conversation_context,
+    )
     runtime_context = data.context.model_dump()
     runtime_context["platform_facts"] = {
         "gene_context": assistant_gene_context_pack(
@@ -218,6 +226,7 @@ def create_message(
         )
     }
     runtime_context["conversation_context"] = conversation_context
+    runtime_context["working_memory"] = working_memory
     runtime_result = generate_assistant_runtime_reply(data.content, runtime_context, session=session)
     conversation = session.get(AssistantConversation, persisted_conversation_id)
     if not conversation:
@@ -249,6 +258,7 @@ def create_message(
             "context": data.context.model_dump(),
             "platform_facts": runtime_context.get("platform_facts", {}),
             "conversation_context": conversation_context,
+            "working_memory": working_memory,
             "tool_execution_enabled": False,
             "tool_access": "none",
             "runtime_request": runtime_result.request,
