@@ -502,6 +502,9 @@ function ToolReviewPanel({
   const isCreate = preview?.tool_name === 'create_experiment' || execution?.tool_name === 'create_experiment'
   const isRun = preview?.tool_name === 'run_simulation' || execution?.tool_name === 'run_simulation'
   const isInspect = preview?.tool_name === 'inspect_result' || execution?.tool_name === 'inspect_result'
+  const isInspectGene = preview?.tool_name === 'inspect_gene' || execution?.tool_name === 'inspect_gene'
+  const previewGene = asRecord(previewData.gene)
+  const executionGene = asRecord(execution?.result.gene)
   const resultLinks = Array.isArray(execution?.result.links)
     ? execution.result.links
         .map((item) => asRecord(item))
@@ -553,6 +556,16 @@ function ToolReviewPanel({
                 <ReviewRow label="Side effect" value={stringField(previewData.side_effect_if_executed) || 'None'} />
               </>
             )}
+            {isInspectGene && (
+              <>
+                <ReviewRow label="Action" value="Read Genes Table metadata" />
+                <ReviewRow label="Gene" value={stringField(previewGene.symbol) || stringField(executionGene.symbol) || 'Selected gene'} mono />
+                <ReviewRow label="Category" value={stringField(previewGene.category) || stringField(executionGene.category) || 'Not cataloged'} />
+                <ReviewRow label="KO index" value={String(previewGene.ko_index ?? executionGene.ko_index ?? 'n/a')} mono />
+                <ReviewRow label="Protein" value={stringField(previewGene.monomer_id) || stringField(executionGene.monomer_id) || 'No linked protein'} mono />
+                <ReviewRow label="Side effect" value={stringField(previewData.side_effect_if_executed) || 'None'} />
+              </>
+            )}
           </dl>
         </div>
       )}
@@ -599,7 +612,7 @@ function ToolReviewPanel({
               </Link>
             </div>
           )}
-          {execution.executed && isInspect && resultLinks.length > 0 && (
+          {execution.executed && (isInspect || isInspectGene) && resultLinks.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               {resultLinks.map((link) => (
                 <Link
@@ -934,6 +947,13 @@ function proposalFactRows(proposal: AssistantToolCall): Array<{ label: string; v
       { label: 'Side effect', value: 'None' },
     ]
   }
+  if (proposal.tool_name === 'inspect_gene') {
+    return [
+      { label: 'Gene', value: stringField(proposal.arguments.gene) || 'Current context', mono: Boolean(proposal.arguments.gene) },
+      { label: 'Data source', value: 'Genes Table' },
+      { label: 'Side effect', value: 'None' },
+    ]
+  }
   return []
 }
 
@@ -963,7 +983,7 @@ function AssistantProposalCard({
       ? proposal.arguments.gene
       : ''
   const experimentId = typeof proposal.arguments.experiment_id === 'number' ? proposal.arguments.experiment_id : null
-  const isReadOnly = proposal.tool_name === 'inspect_result' && !proposal.result.side_effect
+  const isReadOnly = (proposal.tool_name === 'inspect_result' || proposal.tool_name === 'inspect_gene') && !proposal.result.side_effect
   const isCreateExperiment = proposal.tool_name === 'create_experiment'
   const isRunSimulation = proposal.tool_name === 'run_simulation'
   const isSideEffect = Boolean(proposal.result.side_effect)
@@ -1360,7 +1380,7 @@ function TaskCenteredAssistantPanel({
   }
 
   async function runReadOnlyProposal(proposal: AssistantToolCall) {
-    if (proposal.tool_name !== 'inspect_result' || inspecting) return
+    if (proposal.result.side_effect || inspecting) return
     setInspecting(true)
     setError(null)
     try {

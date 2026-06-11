@@ -69,7 +69,7 @@ def test_assistant_status_exposes_provider_and_tool_contracts_without_execution(
     assert status.tool_execution_enabled is True
     assert status.tool_preview_enabled is True
     assert status.side_effect_execution_enabled is True
-    assert status.execution_enabled_tools == ["inspect_result", "create_experiment", "run_simulation"]
+    assert status.execution_enabled_tools == ["inspect_result", "inspect_gene", "create_experiment", "run_simulation"]
     assert status.db_persistence_enabled is True
     assert "route" in status.context_contract
     tool_names = {tool.name for tool in status.tool_registry}
@@ -166,9 +166,10 @@ def test_contextual_proposals_record_non_executing_tool_calls():
             context=context,
         )
 
-        assert len(proposals) == 3
+        assert len(proposals) == 4
         assert {proposal.tool_name for proposal in proposals} == {
             "inspect_result",
+            "inspect_gene",
             "create_experiment",
             "run_simulation",
         }
@@ -181,6 +182,9 @@ def test_contextual_proposals_record_non_executing_tool_calls():
         inspect_out = tool_call_to_out(next(proposal for proposal in proposals if proposal.tool_name == "inspect_result"))
         assert inspect_out.result["proposal_kind"] == "read_only"
         assert inspect_out.result["side_effect"] is False
+        gene_out = tool_call_to_out(next(proposal for proposal in proposals if proposal.tool_name == "inspect_gene"))
+        assert gene_out.arguments["gene"] == "dnaA"
+        assert gene_out.result["proposal_kind"] == "read_only"
     finally:
         session.close()
         engine.dispose()
@@ -275,13 +279,15 @@ def test_model_gene_proposals_validate_mentions_and_deduplicate_contextual_draft
         )
 
         assert len([proposal for proposal in contextual if proposal.tool_name == "create_experiment"]) == 1
-        assert len(model_proposals) == 1
-        proposal_out = tool_call_to_out(model_proposals[0])
-        assert proposal_out.tool_name == "create_experiment"
-        assert proposal_out.arguments["gene_symbol"] == "crp"
-        assert proposal_out.arguments["variant_index"] == 84
-        assert proposal_out.result["source"] == "model_gene_mention"
-        assert proposal_out.result["requires_confirmation"] is True
+        assert len(model_proposals) == 2
+        inspect_out = tool_call_to_out(next(proposal for proposal in model_proposals if proposal.tool_name == "inspect_gene"))
+        assert inspect_out.arguments["gene"] == "crp"
+        assert inspect_out.result["source"] == "model_gene_mention"
+        create_out = tool_call_to_out(next(proposal for proposal in model_proposals if proposal.tool_name == "create_experiment"))
+        assert create_out.arguments["gene_symbol"] == "crp"
+        assert create_out.arguments["variant_index"] == 84
+        assert create_out.result["source"] == "model_gene_mention"
+        assert create_out.result["requires_confirmation"] is True
     finally:
         session.close()
         engine.dispose()
@@ -683,6 +689,54 @@ def test_read_only_inspect_result_execution_records_tool_call_and_provenance():
         assert tool_call_out.tool_name == "inspect_result"
         assert tool_call_out.arguments["job_id"] == job.id
         assert tool_call_out.result["summary"]["result_count"] == 1
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_read_only_inspect_gene_execution_returns_genes_table_facts():
+    engine, session = _build_session()
+    try:
+        session.add(
+            Gene(
+                ecoli_id="EG10001",
+                symbol="dnaA",
+                category="Replication",
+                ko_index=42,
+                is_mechanistic=True,
+                monomer_id="PDNA-TF",
+                monomer_name="chromosomal replication initiator protein DnaA",
+                left_end_pos=388,
+                right_end_pos=1799,
+                direction="+",
+            )
+        )
+        session.commit()
+
+        preview = preview_tool(
+            session,
+            "inspect_gene",
+            AssistantToolPreviewRequest(arguments={"gene": "dnaa"}),
+        )
+        assert preview.valid is True
+        assert preview.normalized_arguments["gene"] == "dnaA"
+        assert preview.preview["gene"]["rna_id"] == "EG10001_RNA"
+
+        executed = execute_tool(
+            session,
+            "inspect_gene",
+            AssistantToolExecutionRequest(arguments={"gene": "dnaA"}),
+        )
+        assert executed.executed is True
+        assert executed.requires_confirmation is False
+        assert executed.result["gene"]["symbol"] == "dnaA"
+        assert executed.result["summary"]["model_state_ids"]["protein"] == "PDNA-TF"
+        assert executed.result["summary"]["knockout_available"] is True
+        assert any(link["path"] == "/?gene=dnaA" for link in executed.result["links"])
+
+        tool_calls = session.exec(select(AssistantToolCall)).all()
+        assert len(tool_calls) == 1
+        assert tool_calls[0].tool_name == "inspect_gene"
     finally:
         session.close()
         engine.dispose()

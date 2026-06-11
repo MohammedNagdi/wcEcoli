@@ -717,6 +717,16 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             argument_schema={"job_id": "integer", "gene": "string"},
             result_schema={"summary": "object", "links": "array"},
         ),
+        AssistantToolSpec(
+            name="inspect_gene",
+            label="Inspect gene",
+            description="Read validated Genes Table metadata for a gene and return model-state links plus safe follow-up targets.",
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"gene": "string"},
+            result_schema={"gene": "object", "links": "array"},
+        ),
     ]
 
 
@@ -728,7 +738,7 @@ def get_assistant_harness_status(session: Session | None = None) -> AssistantHar
         provider_configured=provider_configured,
         tool_execution_enabled=True,
         tool_preview_enabled=True,
-        execution_enabled_tools=["inspect_result", "create_experiment", "run_simulation"],
+        execution_enabled_tools=["inspect_result", "inspect_gene", "create_experiment", "run_simulation"],
         side_effect_execution_enabled=True,
         db_persistence_enabled=True,
         confirmation_required_for=CONFIRMATION_REQUIRED_ACTIONS,
@@ -984,6 +994,49 @@ def _preview_inspect_result(session: Session, args: dict[str, Any]) -> tuple[dic
     return normalized, preview, warnings, errors
 
 
+def _gene_summary(gene: Gene) -> dict[str, Any]:
+    return {
+        "symbol": gene.symbol,
+        "ecoli_id": gene.ecoli_id,
+        "category": gene.category,
+        "ko_index": gene.ko_index,
+        "mechanistic": gene.is_mechanistic,
+        "monomer_id": gene.monomer_id or "",
+        "monomer_name": gene.monomer_name or "",
+        "rna_id": f"{gene.ecoli_id}_RNA" if gene.ecoli_id else "",
+        "position": [gene.left_end_pos, gene.right_end_pos],
+        "strand": gene.direction or "",
+    }
+
+
+def _lookup_gene_by_symbol(session: Session, symbol: str) -> Gene | None:
+    cleaned = symbol.strip()
+    if not cleaned:
+        return None
+    for gene in session.exec(select(Gene)).all():
+        if gene.symbol and gene.symbol.lower() == cleaned.lower():
+            return gene
+    return None
+
+
+def _preview_inspect_gene(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    gene_symbol = _string_arg(args, "gene", errors)
+    gene = _lookup_gene_by_symbol(session, gene_symbol) if gene_symbol else None
+    if gene_symbol and not gene:
+        errors.append(f"Gene '{gene_symbol}' was not found in the local Genes table.")
+
+    normalized = {"gene": gene.symbol if gene else gene_symbol}
+    preview = {
+        "action": "would_inspect_gene",
+        "summary": f"Read Genes Table metadata for {gene.symbol}." if gene else "Read Genes Table metadata.",
+        "gene": _gene_summary(gene) if gene else {},
+        "side_effect_if_executed": "None. This is a read-only Genes Table inspection tool.",
+    }
+    return normalized, preview, warnings, errors
+
+
 def preview_tool(
     session: Session,
     tool_name: str,
@@ -998,6 +1051,8 @@ def preview_tool(
         normalized, preview, warnings, errors = _preview_publish_builder_artifact(session, request.arguments)
     elif tool_name == "inspect_result":
         normalized, preview, warnings, errors = _preview_inspect_result(session, request.arguments)
+    elif tool_name == "inspect_gene":
+        normalized, preview, warnings, errors = _preview_inspect_gene(session, request.arguments)
     else:
         raise HTTPException(status_code=404, detail=f"Unknown assistant tool '{tool_name}'.")
 
@@ -1006,7 +1061,7 @@ def preview_tool(
         valid=not errors,
         requires_confirmation=spec.requires_confirmation,
         side_effect=spec.side_effect,
-        execution_enabled=tool_name in {"inspect_result", "create_experiment", "run_simulation"},
+        execution_enabled=tool_name in {"inspect_result", "inspect_gene", "create_experiment", "run_simulation"},
         normalized_arguments=normalized,
         preview=preview,
         warnings=warnings,
@@ -1174,7 +1229,15 @@ def record_contextual_proposals(
         )
 
     if context.selected_gene:
-        gene = session.exec(select(Gene).where(Gene.symbol == context.selected_gene)).first()
+        gene = _lookup_gene_by_symbol(session, context.selected_gene)
+        if gene:
+            add_proposal(
+                tool_name="inspect_gene",
+                arguments={"gene": gene.symbol},
+                title=f"Inspect {gene.symbol} gene facts",
+                description="Read validated Genes Table metadata, model-state IDs, and page links for the selected gene.",
+                proposal_kind="read_only",
+            )
         if gene and gene.ko_index > 0:
             condition = context.selected_condition or "basal"
             add_proposal(
@@ -1229,13 +1292,13 @@ def record_model_gene_proposals(
         select(AssistantToolCall).where(AssistantToolCall.message_id == assistant_message.id)
     ).all()
     for record in existing_records:
-        if record.tool_name != "create_experiment":
+        if record.tool_name not in {"create_experiment", "inspect_gene"}:
             continue
         arguments = from_json(record.arguments_json, {})
         if isinstance(arguments, dict):
-            gene_symbol = str(arguments.get("gene_symbol") or "").strip()
+            gene_symbol = str(arguments.get("gene_symbol") or arguments.get("gene") or "").strip()
             if gene_symbol:
-                existing_keys.add(("create_experiment", gene_symbol))
+                existing_keys.add((record.tool_name, gene_symbol))
 
     for gene in _mentioned_genes(
         session,
@@ -1244,6 +1307,22 @@ def record_model_gene_proposals(
         selected_gene=context.selected_gene,
         limit=6,
     ):
+        inspect_key = ("inspect_gene", gene.symbol)
+        if inspect_key not in existing_keys:
+            existing_keys.add(inspect_key)
+            proposals.append(
+                _record_assistant_proposal(
+                    session,
+                    conversation=conversation,
+                    assistant_message=assistant_message,
+                    tool_name="inspect_gene",
+                    arguments={"gene": gene.symbol},
+                    title=f"Inspect {gene.symbol} gene facts",
+                    description="Read validated Genes Table metadata before deciding whether to create a follow-up experiment.",
+                    proposal_kind="read_only",
+                    source="model_gene_mention",
+                )
+            )
         if gene.ko_index <= 0:
             continue
         key = ("create_experiment", gene.symbol)
@@ -1360,6 +1439,34 @@ def _execute_inspect_result(
             "result_count": len(summary_rows),
             "completed": job.status == "done",
             "rows": summary_rows,
+        },
+        "links": links,
+    }
+
+
+def _execute_inspect_gene(
+    session: Session,
+    normalized_arguments: dict[str, Any],
+) -> dict[str, Any]:
+    gene_symbol = str(normalized_arguments.get("gene") or "")
+    gene = _lookup_gene_by_symbol(session, gene_symbol)
+    if not gene:
+        raise HTTPException(status_code=404, detail=f"Gene '{gene_symbol}' not found.")
+    links = [
+        {"label": "Workspace gene detail", "path": f"/?gene={gene.symbol}"},
+        {"label": "Genome map", "path": f"/genome?gene={gene.symbol}"},
+        {"label": "Network context", "path": f"/network?gene={gene.symbol}"},
+        {"label": "Design knockout draft", "path": f"/experiments/new?gene={gene.symbol}"},
+    ]
+    return {
+        "gene": _gene_summary(gene),
+        "summary": {
+            "mechanistic": gene.is_mechanistic,
+            "knockout_available": gene.ko_index > 0,
+            "model_state_ids": {
+                "mrna": f"{gene.ecoli_id}_RNA" if gene.ecoli_id else "",
+                "protein": gene.monomer_id or "",
+            },
         },
         "links": links,
     }
@@ -1595,10 +1702,14 @@ def execute_tool(
             errors=[adapter_error],
         )
 
-    if tool_name != "inspect_result":
+    if tool_name not in {"inspect_result", "inspect_gene"}:
         raise HTTPException(status_code=404, detail=f"No execution adapter registered for '{tool_name}'.")
 
-    result = _execute_inspect_result(session, preview.normalized_arguments)
+    result = (
+        _execute_inspect_result(session, preview.normalized_arguments)
+        if tool_name == "inspect_result"
+        else _execute_inspect_gene(session, preview.normalized_arguments)
+    )
     tool_call = _record_tool_call(
         session,
         conversation_id=request.conversation_id,
