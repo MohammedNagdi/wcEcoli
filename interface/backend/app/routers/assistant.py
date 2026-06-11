@@ -39,6 +39,7 @@ from app.services.assistant_harness import (
     OllamaModelListOut,
     ProviderLayerStatus,
     ProvenanceOut,
+    assistant_gene_context_pack,
     confirmation_to_out,
     conversation_to_out,
     create_confirmation,
@@ -55,6 +56,7 @@ from app.services.assistant_harness import (
     provider_configs_to_out,
     provenance_to_out,
     record_contextual_proposals,
+    record_model_gene_proposals,
     record_provenance,
     resolve_confirmation,
     store_message,
@@ -200,7 +202,15 @@ def create_message(
 
     persisted_conversation_id = conversation.id or conversation_id
     user_message = store_message(session, conversation, "user", data.content, data.context)
-    runtime_result = generate_assistant_runtime_reply(data.content, data.context.model_dump(), session=session)
+    runtime_context = data.context.model_dump()
+    runtime_context["platform_facts"] = {
+        "gene_context": assistant_gene_context_pack(
+            session,
+            user_content=data.content,
+            context=data.context,
+        )
+    }
+    runtime_result = generate_assistant_runtime_reply(data.content, runtime_context, session=session)
     conversation = session.get(AssistantConversation, persisted_conversation_id)
     if not conversation:
         raise HTTPException(
@@ -229,6 +239,7 @@ def create_message(
         request={
             "content_length": len(data.content),
             "context": data.context.model_dump(),
+            "platform_facts": runtime_context.get("platform_facts", {}),
             "tool_execution_enabled": False,
             "tool_access": "none",
             "runtime_request": runtime_result.request,
@@ -244,6 +255,16 @@ def create_message(
         conversation=conversation,
         assistant_message=assistant_message,
         context=data.context,
+    )
+    proposals.extend(
+        record_model_gene_proposals(
+            session,
+            conversation=conversation,
+            assistant_message=assistant_message,
+            context=data.context,
+            user_content=data.content,
+            assistant_content=runtime_result.content,
+        )
     )
     return AssistantExchangeOut(
         conversation=conversation_to_out(conversation),

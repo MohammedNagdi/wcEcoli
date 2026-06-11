@@ -231,12 +231,42 @@ def _context_summary(context: dict[str, Any]) -> str:
     return ", ".join(parts) or "no page context"
 
 
+def _platform_facts_summary(context: dict[str, Any]) -> str:
+    facts = context.get("platform_facts")
+    if not isinstance(facts, dict):
+        return ""
+    gene_pack = facts.get("gene_context")
+    if not isinstance(gene_pack, dict):
+        return ""
+    genes = gene_pack.get("genes")
+    if not isinstance(genes, list) or not genes:
+        return ""
+    lines = ["Validated local Genes table matches:"]
+    for gene in genes[:10]:
+        if not isinstance(gene, dict):
+            continue
+        symbol = gene.get("symbol") or ""
+        category = gene.get("category") or ""
+        ko_index = gene.get("ko_index")
+        mechanistic = "mechanistic" if gene.get("mechanistic") else "expression-only"
+        monomer = gene.get("monomer_id") or ""
+        lines.append(f"- {symbol}: category={category}, ko_index={ko_index}, {mechanistic}, protein={monomer or 'none'}")
+    usage = gene_pack.get("usage")
+    if isinstance(usage, str) and usage:
+        lines.append(usage)
+    return "\n".join(lines)
+
+
 def _system_prompt(context: dict[str, Any]) -> str:
+    platform_facts = _platform_facts_summary(context)
+    platform_block = f"\n\n{platform_facts}" if platform_facts else ""
     return (
         "You are the wcEcoli platform assistant. Explain model, experiment, and result context clearly. "
         "Do not claim that you executed tools, queued simulations, edited files, or changed data. "
         "When an action is needed, describe the proposed action in plain language so the platform can show a separate confirmation. "
+        "If you recommend a knockout experiment, name the exact gene symbol and say that the platform should show a reviewable proposal card. "
         f"Current page context: {_context_summary(context)}."
+        f"{platform_block}"
     )
 
 

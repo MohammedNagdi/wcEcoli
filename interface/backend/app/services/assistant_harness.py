@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -1011,6 +1012,75 @@ def preview_tool(
     )
 
 
+def _gene_symbol_map(session: Session) -> dict[str, Gene]:
+    genes = session.exec(select(Gene)).all()
+    return {gene.symbol.lower(): gene for gene in genes if gene.symbol}
+
+
+def _mentioned_genes(
+    session: Session,
+    *texts: str,
+    selected_gene: str | None = None,
+    limit: int = 8,
+) -> list[Gene]:
+    symbol_map = _gene_symbol_map(session)
+    ordered: list[Gene] = []
+    seen: set[str] = set()
+
+    def add_symbol(symbol: str | None) -> None:
+        key = (symbol or "").strip().lower()
+        if not key or key in seen:
+            return
+        gene = symbol_map.get(key)
+        if not gene:
+            return
+        seen.add(key)
+        ordered.append(gene)
+
+    add_symbol(selected_gene)
+    for text in texts:
+        for token in re.findall(r"\b[A-Za-z][A-Za-z0-9]{1,9}\b", text or ""):
+            add_symbol(token)
+            if len(ordered) >= limit:
+                return ordered
+    return ordered
+
+
+def assistant_gene_context_pack(
+    session: Session,
+    *,
+    user_content: str,
+    context: AssistantContext,
+) -> dict[str, Any]:
+    genes = _mentioned_genes(
+        session,
+        user_content,
+        selected_gene=context.selected_gene,
+        limit=10,
+    )
+    return {
+        "matched_gene_count": len(genes),
+        "genes": [
+            {
+                "symbol": gene.symbol,
+                "ecoli_id": gene.ecoli_id,
+                "category": gene.category,
+                "ko_index": gene.ko_index,
+                "mechanistic": gene.is_mechanistic,
+                "monomer_id": gene.monomer_id or "",
+                "monomer_name": gene.monomer_name or "",
+                "position": [gene.left_end_pos, gene.right_end_pos],
+                "strand": gene.direction or "",
+            }
+            for gene in genes
+        ],
+        "usage": (
+            "These are validated genes from the local Genes table that match the user's message or page context. "
+            "If you recommend knockout follow-ups, name exact gene symbols from this list so the platform can show confirmation-bound proposal cards."
+        ),
+    }
+
+
 def _record_tool_call(
     session: Session,
     *,
@@ -1038,6 +1108,38 @@ def _record_tool_call(
     return record
 
 
+def _record_assistant_proposal(
+    session: Session,
+    *,
+    conversation: AssistantConversation,
+    assistant_message: AssistantMessage,
+    tool_name: str,
+    arguments: dict[str, Any],
+    title: str,
+    description: str,
+    proposal_kind: str,
+    source: str,
+) -> AssistantToolCall:
+    spec = get_tool_spec(tool_name)
+    return _record_tool_call(
+        session,
+        conversation_id=conversation.id,
+        message_id=assistant_message.id,
+        tool_name=tool_name,
+        status="proposed",
+        arguments=arguments,
+        result={
+            "title": title,
+            "description": description,
+            "proposal_kind": proposal_kind,
+            "source": source,
+            "requires_confirmation": spec.requires_confirmation,
+            "side_effect": spec.side_effect,
+            "execution_state": "not_executed",
+        },
+    )
+
+
 def record_contextual_proposals(
     session: Session,
     *,
@@ -1049,32 +1151,14 @@ def record_contextual_proposals(
 
     proposals: list[AssistantToolCall] = []
 
-    def add_proposal(
-        *,
-        tool_name: str,
-        arguments: dict[str, Any],
-        title: str,
-        description: str,
-        proposal_kind: str,
-    ) -> None:
-        spec = get_tool_spec(tool_name)
+    def add_proposal(**kwargs: Any) -> None:
         proposals.append(
-            _record_tool_call(
+            _record_assistant_proposal(
                 session,
-                conversation_id=conversation.id,
-                message_id=assistant_message.id,
-                tool_name=tool_name,
-                status="proposed",
-                arguments=arguments,
-                result={
-                    "title": title,
-                    "description": description,
-                    "proposal_kind": proposal_kind,
-                    "source": "contextual_assistant",
-                    "requires_confirmation": spec.requires_confirmation,
-                    "side_effect": spec.side_effect,
-                    "execution_state": "not_executed",
-                },
+                conversation=conversation,
+                assistant_message=assistant_message,
+                source="contextual_assistant",
+                **kwargs,
             )
         )
 
@@ -1119,6 +1203,79 @@ def record_contextual_proposals(
             proposal_kind="side_effect_preview",
         )
 
+    return proposals
+
+
+def record_model_gene_proposals(
+    session: Session,
+    *,
+    conversation: AssistantConversation,
+    assistant_message: AssistantMessage,
+    context: AssistantContext,
+    user_content: str,
+    assistant_content: str,
+) -> list[AssistantToolCall]:
+    """Record confirmation-bound experiment proposals for validated genes mentioned in model text."""
+
+    text_intent = f"{user_content}\n{assistant_content}".lower()
+    if not any(keyword in text_intent for keyword in ("knockout", "knock out", "ko", "experiment", "simulate", "simulation")):
+        return []
+
+    proposals: list[AssistantToolCall] = []
+    existing_keys: set[tuple[str, str]] = set()
+    existing_records = session.exec(
+        select(AssistantToolCall).where(AssistantToolCall.message_id == assistant_message.id)
+    ).all()
+    for record in existing_records:
+        if record.tool_name != "create_experiment":
+            continue
+        arguments = from_json(record.arguments_json, {})
+        if isinstance(arguments, dict):
+            gene_symbol = str(arguments.get("gene_symbol") or "").strip()
+            if gene_symbol:
+                existing_keys.add(("create_experiment", gene_symbol))
+
+    for gene in _mentioned_genes(
+        session,
+        user_content,
+        assistant_content,
+        selected_gene=context.selected_gene,
+        limit=6,
+    ):
+        if gene.ko_index <= 0:
+            continue
+        key = ("create_experiment", gene.symbol)
+        if key in existing_keys:
+            continue
+        existing_keys.add(key)
+        condition = context.selected_condition or "basal"
+        proposals.append(
+            _record_assistant_proposal(
+                session,
+                conversation=conversation,
+                assistant_message=assistant_message,
+                tool_name="create_experiment",
+                arguments={
+                    "name": f"{gene.symbol} knockout follow-up",
+                    "description": "Model-suggested draft. Review the experiment before queueing any simulation.",
+                    "variant_type": "gene_knockout",
+                    "variant_index": gene.ko_index,
+                    "condition": condition,
+                    "timeline": "",
+                    "sim_params": {},
+                    "gene_symbol": gene.symbol,
+                    "gene_symbols": [],
+                    "include_wildtype": True,
+                },
+                title=f"Draft {gene.symbol} knockout",
+                description=(
+                    f"The assistant mentioned {gene.symbol}. Prepare a reviewed gene-knockout draft under {condition}; "
+                    "creating and running it still require confirmation."
+                ),
+                proposal_kind="side_effect_preview",
+                source="model_gene_mention",
+            )
+        )
     return proposals
 
 

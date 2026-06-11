@@ -23,6 +23,7 @@ from app.services.assistant_harness import (
     AssistantToolExecutionRequest,
     ConfirmationCreate,
     ConfirmationResolve,
+    assistant_gene_context_pack,
     create_confirmation,
     create_conversation,
     execute_tool,
@@ -31,6 +32,7 @@ from app.services.assistant_harness import (
     message_to_out,
     preview_tool,
     record_contextual_proposals,
+    record_model_gene_proposals,
     record_provenance,
     resolve_confirmation,
     store_message,
@@ -179,6 +181,107 @@ def test_contextual_proposals_record_non_executing_tool_calls():
         inspect_out = tool_call_to_out(next(proposal for proposal in proposals if proposal.tool_name == "inspect_result"))
         assert inspect_out.result["proposal_kind"] == "read_only"
         assert inspect_out.result["side_effect"] is False
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_assistant_gene_context_pack_exposes_validated_gene_facts_only():
+    engine, session = _build_session()
+    try:
+        session.add(
+            Gene(
+                id=1,
+                ecoli_id="EG10001",
+                symbol="dnaA",
+                category="Replication",
+                ko_index=42,
+                is_mechanistic=True,
+                monomer_id="PDNA-TF",
+                monomer_name="chromosomal replication initiator protein DnaA",
+                left_end_pos=388,
+                right_end_pos=1799,
+                direction="+",
+            )
+        )
+        session.add(Gene(id=2, ecoli_id="EG99999", symbol="fakeA", ko_index=0))
+        session.commit()
+
+        context = AssistantContext(route="/assistant", selected_gene=None, assistant_surface="central")
+        pack = assistant_gene_context_pack(
+            session,
+            user_content="Could we simulate a dnaA knockout and maybe some made_up_gene follow-up?",
+            context=context,
+        )
+
+        assert pack["matched_gene_count"] == 1
+        assert pack["genes"][0]["symbol"] == "dnaA"
+        assert pack["genes"][0]["ko_index"] == 42
+        assert pack["genes"][0]["mechanistic"] is True
+        assert pack["genes"][0]["monomer_id"] == "PDNA-TF"
+        assert "made_up_gene" not in {gene["symbol"] for gene in pack["genes"]}
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_model_gene_proposals_validate_mentions_and_deduplicate_contextual_drafts():
+    engine, session = _build_session()
+    try:
+        session.add(Variant(name="gene_knockout", docstring="Set selected gene expression to zero."))
+        session.add(Condition(name="basal", nutrients="minimal glucose"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
+        session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", ko_index=84))
+        session.commit()
+
+        context = AssistantContext(
+            route="/results/2",
+            selected_gene="dnaA",
+            selected_experiment=None,
+            selected_job=None,
+            selected_condition="basal",
+            assistant_surface="results",
+        )
+        conversation = create_conversation(
+            session,
+            AssistantConversationCreate(
+                title="gene follow-ups",
+                assistant_surface="results",
+                context=context,
+            ),
+        )
+        assistant_message = store_message(
+            session,
+            conversation,
+            "assistant",
+            "A dnaA knockout is already the current page context. A crp knockout is also worth reviewing.",
+            context,
+            status="completed",
+        )
+
+        contextual = record_contextual_proposals(
+            session,
+            conversation=conversation,
+            assistant_message=assistant_message,
+            context=context,
+        )
+        model_proposals = record_model_gene_proposals(
+            session,
+            conversation=conversation,
+            assistant_message=assistant_message,
+            context=context,
+            user_content="Suggest knockout follow-up experiments.",
+            assistant_content="Review crp knockout as a second hypothesis after dnaA.",
+        )
+
+        assert len([proposal for proposal in contextual if proposal.tool_name == "create_experiment"]) == 1
+        assert len(model_proposals) == 1
+        proposal_out = tool_call_to_out(model_proposals[0])
+        assert proposal_out.tool_name == "create_experiment"
+        assert proposal_out.arguments["gene_symbol"] == "crp"
+        assert proposal_out.arguments["variant_index"] == 84
+        assert proposal_out.result["source"] == "model_gene_mention"
+        assert proposal_out.result["requires_confirmation"] is True
     finally:
         session.close()
         engine.dispose()
