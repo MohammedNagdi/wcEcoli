@@ -383,6 +383,90 @@ def test_model_gene_proposals_can_use_prior_assistant_suggestions():
         engine.dispose()
 
 
+def test_model_gene_proposals_parse_explicit_proposal_targets_directive():
+    engine, session = _build_session()
+    try:
+        session.add(Variant(name="gene_knockout", docstring="Set selected gene expression to zero."))
+        session.add(Condition(name="basal", nutrients="minimal glucose"))
+        session.add(Condition(name="acetate", nutrients="minimal acetate"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
+        session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", ko_index=84))
+        session.commit()
+
+        context = AssistantContext(route="/assistant", selected_condition="basal", assistant_surface="central")
+        conversation = create_conversation(
+            session,
+            AssistantConversationCreate(title="structured proposals", assistant_surface="central", context=context),
+        )
+        assistant_message = store_message(
+            session,
+            conversation,
+            "assistant",
+            "These are good candidates.\nProposal action: create_experiment\nProposal condition: acetate\nProposal targets: dnaA, crp, not_a_gene",
+            context,
+            status="completed",
+        )
+
+        proposals = record_model_gene_proposals(
+            session,
+            conversation=conversation,
+            assistant_message=assistant_message,
+            context=context,
+            user_content="Prepare the proposal cards.",
+            assistant_content=assistant_message.content,
+        )
+
+        create_calls = [tool_call_to_out(proposal) for proposal in proposals if proposal.tool_name == "create_experiment"]
+        inspect_calls = [tool_call_to_out(proposal) for proposal in proposals if proposal.tool_name == "inspect_gene"]
+        assert {call.arguments["gene_symbol"] for call in create_calls} == {"dnaA", "crp"}
+        assert {call.arguments["gene"] for call in inspect_calls} == {"dnaA", "crp"}
+        assert all(call.arguments["condition"] == "acetate" for call in create_calls)
+        assert all(call.result["source"] == "model_structured_proposal" for call in create_calls + inspect_calls)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_model_gene_proposals_parse_json_inspect_only_directive_without_drafts():
+    engine, session = _build_session()
+    try:
+        session.add(Variant(name="gene_knockout", docstring="Set selected gene expression to zero."))
+        session.add(Condition(name="basal", nutrients="minimal glucose"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
+        session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", ko_index=84))
+        session.commit()
+
+        context = AssistantContext(route="/assistant", selected_condition="basal", assistant_surface="central")
+        conversation = create_conversation(
+            session,
+            AssistantConversationCreate(title="inspect-only proposals", assistant_surface="central", context=context),
+        )
+        assistant_message = store_message(
+            session,
+            conversation,
+            "assistant",
+            '```json\n{"action":"inspect_gene","proposal_targets":["dnaA","crp"]}\n```',
+            context,
+            status="completed",
+        )
+
+        proposals = record_model_gene_proposals(
+            session,
+            conversation=conversation,
+            assistant_message=assistant_message,
+            context=context,
+            user_content="Show me what you can inspect.",
+            assistant_content=assistant_message.content,
+        )
+
+        assert {proposal.tool_name for proposal in proposals} == {"inspect_gene"}
+        assert {tool_call_to_out(proposal).arguments["gene"] for proposal in proposals} == {"dnaA", "crp"}
+        assert all(tool_call_to_out(proposal).result["source"] == "model_structured_proposal" for proposal in proposals)
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_assistant_runtime_reports_no_provider_without_network():
     snapshot = {
         "assistant_provider": settings.assistant_provider,

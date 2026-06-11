@@ -1103,6 +1103,132 @@ def _mentioned_genes(
     return ordered
 
 
+def _genes_from_symbols(session: Session, symbols: list[str], *, limit: int = 8) -> list[Gene]:
+    symbol_map = _gene_symbol_map(session)
+    genes: list[Gene] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        key = (symbol or "").strip().lower()
+        if not key or key in seen:
+            continue
+        gene = symbol_map.get(key)
+        if not gene:
+            continue
+        seen.add(key)
+        genes.append(gene)
+        if len(genes) >= limit:
+            break
+    return genes
+
+
+def _split_proposal_targets(raw: str) -> list[str]:
+    cleaned = raw.strip().strip("[]")
+    if not cleaned:
+        return []
+    targets: list[str] = []
+    for part in re.split(r"[,;\n]+|\band\b", cleaned):
+        symbol = part.strip().strip("\"'` .")
+        if symbol:
+            targets.append(symbol)
+    return targets
+
+
+def _json_proposal_candidates(text: str) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for match in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", text or "", re.DOTALL | re.IGNORECASE):
+        try:
+            parsed = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            candidates.append(parsed)
+    for match in re.finditer(r"Assistant proposals?\s*:\s*(\{.*?\})(?:\n|$)", text or "", re.DOTALL | re.IGNORECASE):
+        try:
+            parsed = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            candidates.append(parsed)
+    return candidates
+
+
+def _structured_proposal_directive(assistant_content: str) -> dict[str, Any]:
+    """Parse explicit model proposal directives without treating prose as commands."""
+
+    targets: list[str] = []
+    action = ""
+    condition = ""
+
+    for line in (assistant_content or "").splitlines():
+        target_match = re.match(r"\s*Proposal targets?\s*:\s*(.+?)\s*$", line, re.IGNORECASE)
+        if target_match:
+            targets.extend(_split_proposal_targets(target_match.group(1)))
+        action_match = re.match(r"\s*Proposal action\s*:\s*(.+?)\s*$", line, re.IGNORECASE)
+        if action_match:
+            action = action_match.group(1).strip().lower()
+        condition_match = re.match(r"\s*Proposal condition\s*:\s*(.+?)\s*$", line, re.IGNORECASE)
+        if condition_match:
+            condition = condition_match.group(1).strip()
+
+    for candidate in _json_proposal_candidates(assistant_content):
+        raw_targets = (
+            candidate.get("proposal_targets")
+            or candidate.get("target_genes")
+            or candidate.get("genes")
+            or candidate.get("targets")
+        )
+        if isinstance(raw_targets, str):
+            targets.extend(_split_proposal_targets(raw_targets))
+        elif isinstance(raw_targets, list):
+            targets.extend(str(value) for value in raw_targets if isinstance(value, (str, int, float)))
+
+        raw_action = candidate.get("proposal_action") or candidate.get("action") or candidate.get("tool")
+        if isinstance(raw_action, str) and raw_action.strip():
+            action = raw_action.strip().lower()
+        raw_condition = candidate.get("condition")
+        if isinstance(raw_condition, str) and raw_condition.strip():
+            condition = raw_condition.strip()
+
+        proposals = candidate.get("proposals")
+        if isinstance(proposals, list):
+            for proposal in proposals:
+                if not isinstance(proposal, dict):
+                    continue
+                gene = proposal.get("gene_symbol") or proposal.get("gene") or proposal.get("target")
+                if isinstance(gene, str):
+                    targets.append(gene)
+                proposal_action = proposal.get("tool") or proposal.get("action")
+                if isinstance(proposal_action, str) and proposal_action.strip():
+                    action = proposal_action.strip().lower()
+                proposal_condition = proposal.get("condition")
+                if isinstance(proposal_condition, str) and proposal_condition.strip():
+                    condition = proposal_condition.strip()
+
+    normalized_action = action.replace("-", "_").replace(" ", "_")
+    if normalized_action in {"gene_knockout", "knockout", "ko", "draft_knockout", "simulate_knockout"}:
+        normalized_action = "create_experiment"
+    if normalized_action in {"inspect", "inspect_gene", "gene_inspection", "read_gene"}:
+        normalized_action = "inspect_gene"
+    if normalized_action and normalized_action not in {"create_experiment", "inspect_gene"}:
+        normalized_action = ""
+
+    deduped_targets: list[str] = []
+    seen: set[str] = set()
+    for target in targets:
+        key = target.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped_targets.append(target.strip())
+
+    return {
+        "explicit": bool(deduped_targets),
+        "targets": deduped_targets,
+        "action": normalized_action or "create_experiment",
+        "condition": condition,
+    }
+
+
 def assistant_conversation_context_pack(
     session: Session,
     *,
@@ -1323,7 +1449,7 @@ def record_model_gene_proposals(
     assistant_content: str,
     conversation_context: dict[str, Any] | None = None,
 ) -> list[AssistantToolCall]:
-    """Record confirmation-bound experiment proposals for validated genes mentioned in model text."""
+    """Record validated, non-executing gene proposals from explicit model intent."""
 
     text_intent = f"{user_content}\n{assistant_content}".lower()
     action_keywords = (
@@ -1340,7 +1466,9 @@ def record_model_gene_proposals(
         "schedule",
         "queue",
     )
-    if not any(keyword in text_intent for keyword in action_keywords):
+    structured_directive = _structured_proposal_directive(assistant_content)
+    has_action_intent = any(keyword in text_intent for keyword in action_keywords)
+    if not structured_directive["explicit"] and not has_action_intent:
         return []
 
     conversation_texts: list[str] = []
@@ -1363,14 +1491,24 @@ def record_model_gene_proposals(
             if gene_symbol:
                 existing_keys.add((record.tool_name, gene_symbol))
 
-    for gene in _mentioned_genes(
-        session,
-        user_content,
-        assistant_content,
-        *conversation_texts,
-        selected_gene=context.selected_gene,
-        limit=6,
-    ):
+    if structured_directive["explicit"]:
+        genes = _genes_from_symbols(session, structured_directive["targets"], limit=6)
+        source = "model_structured_proposal"
+    else:
+        genes = _mentioned_genes(
+            session,
+            user_content,
+            assistant_content,
+            *conversation_texts,
+            selected_gene=context.selected_gene,
+            limit=6,
+        )
+        source = "model_gene_mention"
+
+    proposal_action = structured_directive["action"]
+    condition = structured_directive["condition"] or context.selected_condition or "basal"
+
+    for gene in genes:
         inspect_key = ("inspect_gene", gene.symbol)
         if inspect_key not in existing_keys:
             existing_keys.add(inspect_key)
@@ -1384,16 +1522,17 @@ def record_model_gene_proposals(
                     title=f"Inspect {gene.symbol} gene facts",
                     description="Read validated Genes Table metadata before deciding whether to create a follow-up experiment.",
                     proposal_kind="read_only",
-                    source="model_gene_mention",
+                    source=source,
                 )
             )
+        if proposal_action == "inspect_gene":
+            continue
         if gene.ko_index <= 0:
             continue
         key = ("create_experiment", gene.symbol)
         if key in existing_keys:
             continue
         existing_keys.add(key)
-        condition = context.selected_condition or "basal"
         proposals.append(
             _record_assistant_proposal(
                 session,
@@ -1418,7 +1557,7 @@ def record_model_gene_proposals(
                     "creating and running it still require confirmation."
                 ),
                 proposal_kind="side_effect_preview",
-                source="model_gene_mention",
+                source=source,
             )
         )
     return proposals
