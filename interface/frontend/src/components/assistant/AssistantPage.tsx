@@ -1110,9 +1110,11 @@ function AdvancedDisclosure({ title, children }: { title: string; children: Reac
 
 function TaskCenteredAssistantPanel({
   providerConfigured,
+  runtimeLabel,
   onConversationChange,
 }: {
   providerConfigured: boolean
+  runtimeLabel: string
   onConversationChange: (conversationId: number | null) => void
 }) {
   const location = useLocation()
@@ -1225,6 +1227,10 @@ function TaskCenteredAssistantPanel({
   }
 
   async function removeConversation(conversationId: number) {
+    if (sending) {
+      setError('Wait for the current assistant response before deleting this chat.')
+      return
+    }
     setError(null)
     try {
       await deleteAssistantConversation(conversationId)
@@ -1381,7 +1387,8 @@ function TaskCenteredAssistantPanel({
                 <button
                   type="button"
                   onClick={() => removeConversation(conversation.id)}
-                  className="rounded px-1.5 py-0.5 text-gray-400 opacity-70 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                  disabled={sending}
+                  className="rounded px-1.5 py-0.5 text-gray-400 opacity-70 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 group-hover:opacity-100"
                   title="Delete chat"
                   aria-label={`Delete ${conversation.title}`}
                 >
@@ -1392,7 +1399,7 @@ function TaskCenteredAssistantPanel({
           </div>
         </aside>
 
-        <div className="flex h-[calc(100vh-280px)] min-h-[520px] flex-col rounded-md border border-gray-100">
+        <div className="flex h-[640px] min-h-[520px] flex-col rounded-md border border-gray-100">
           <div className="border-b border-gray-100 px-4 py-3">
             <div className="text-sm font-medium text-gray-900">
               {activeConversation?.title ?? 'New assistant conversation'}
@@ -1437,6 +1444,11 @@ function TaskCenteredAssistantPanel({
 
           <div className="sticky bottom-0 border-t border-gray-100 bg-white p-3 shadow-[0_-8px_18px_rgba(15,23,42,0.04)]">
             {error && <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</div>}
+            {sending && (
+              <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm leading-5 text-amber-800">
+                Waiting for {runtimeLabel || 'the selected provider'}. Local Ollama models can take more than a minute on the first response or with larger models.
+              </div>
+            )}
             <label htmlFor="assistant-chat-input" className="sr-only">Assistant message</label>
             <textarea
               id="assistant-chat-input"
@@ -1459,7 +1471,7 @@ function TaskCenteredAssistantPanel({
                 disabled={sending || !input.trim()}
                 className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {sending ? 'Sending...' : 'Send'}
+                {sending ? 'Waiting...' : 'Send'}
               </button>
             </div>
           </div>
@@ -1476,9 +1488,10 @@ function TaskCenteredAssistantPanel({
             </div>
           </div>
 
-          <details className="rounded-md border border-gray-100 bg-white" open>
-            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Suggested next steps
+          <details className="rounded-md border border-gray-100 bg-white">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <span>Suggested next steps</span>
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">{actionCards.length}</span>
             </summary>
             <div className="space-y-2 border-t border-gray-100 p-3">
               {actionCards.map((action) => (
@@ -1525,9 +1538,10 @@ function TaskCenteredAssistantPanel({
           </details>
 
           {proposals.length > 0 && (
-            <details className="rounded-md border border-blue-100 bg-white" open>
-              <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold uppercase tracking-wide text-blue-700">
-                Assistant proposals
+            <details className="rounded-md border border-blue-100 bg-white">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                <span>Assistant proposals</span>
+                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">{proposals.length}</span>
               </summary>
               <div className="space-y-2 border-t border-blue-50 p-3">
                 <p className="text-xs leading-5 text-gray-500">
@@ -1827,18 +1841,42 @@ export function AssistantPage() {
         </div>
       )}
 
-      <ProviderRuntimeSummary status={status} />
+      {!runtimeReady && (
+        <details
+          className="rounded-lg border border-gray-200 bg-white shadow-sm"
+          open
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold text-gray-900">
+            <span>Provider setup</span>
+            <span className="text-xs font-normal text-gray-500">configure OpenAI, Anthropic, or Ollama</span>
+          </summary>
+          <div className="border-t border-gray-100 p-4">
+            <AssistantProviderSetup
+              configs={providerConfigs}
+              runtimeStatus={status}
+              loading={statusLoading}
+              onRefresh={refreshAssistantStatus}
+            />
+          </div>
+        </details>
+      )}
 
-      <details
-        className="rounded-lg border border-gray-200 bg-white shadow-sm"
-        open={!runtimeReady}
-      >
+      <TaskCenteredAssistantPanel
+        providerConfigured={runtimeReady}
+        runtimeLabel={
+          status?.providers.active_runtime_provider_id
+            ? `${status.providers.active_runtime_provider_id}${status.providers.active_runtime_model ? ` (${status.providers.active_runtime_model})` : ''}`
+            : ''
+        }
+        onConversationChange={setActiveConversationId}
+      />
+
+      {runtimeReady && (
+        <details className="rounded-lg border border-gray-200 bg-white shadow-sm">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold text-gray-900">
           <span>Provider setup</span>
           <span className="text-xs font-normal text-gray-500">
-            {runtimeReady
-              ? `${status?.providers.active_runtime_provider_id} (${status?.providers.active_runtime_model})`
-              : 'configure OpenAI, Anthropic, or Ollama'}
+            {status?.providers.active_runtime_provider_id} ({status?.providers.active_runtime_model})
           </span>
         </summary>
         <div className="border-t border-gray-100 p-4">
@@ -1850,11 +1888,7 @@ export function AssistantPage() {
           />
         </div>
       </details>
-
-      <TaskCenteredAssistantPanel
-        providerConfigured={runtimeReady}
-        onConversationChange={setActiveConversationId}
-      />
+      )}
 
       <AdvancedDisclosure title="Provider, runtime, and tool settings">
         <div className="grid gap-4 lg:grid-cols-2">

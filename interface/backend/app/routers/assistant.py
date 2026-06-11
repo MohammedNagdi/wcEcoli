@@ -198,8 +198,15 @@ def create_message(
     if not data.content.strip():
         raise HTTPException(status_code=422, detail="Message content must not be empty.")
 
+    persisted_conversation_id = conversation.id or conversation_id
     user_message = store_message(session, conversation, "user", data.content, data.context)
     runtime_result = generate_assistant_runtime_reply(data.content, data.context.model_dump(), session=session)
+    conversation = session.get(AssistantConversation, persisted_conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=409,
+            detail="Assistant conversation was deleted before the provider response was stored.",
+        )
     assistant_status = (
         "completed"
         if runtime_result.status == "completed"
@@ -215,7 +222,7 @@ def create_message(
     )
     provenance = record_provenance(
         session,
-        conversation_id=conversation.id,
+        conversation_id=persisted_conversation_id,
         message_id=assistant_message.id,
         provider_id=runtime_result.provider_id,
         model=runtime_result.model,
