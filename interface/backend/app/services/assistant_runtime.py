@@ -291,6 +291,8 @@ def generate_assistant_runtime_reply(
     spec = provider.spec
     model = _provider_model(provider)
     timeout = max(1, int(settings.assistant_request_timeout_sec or 30))
+    if spec.kind == "ollama":
+        timeout = max(timeout, 120)
     active_transport = transport or _default_transport
 
     try:
@@ -363,11 +365,17 @@ def generate_assistant_runtime_reply(
                 response={"reason": "unsupported provider runtime"},
             )
     except (urllib.error.URLError, TimeoutError, OSError, KeyError, IndexError, TypeError, ValueError) as exc:
+        failure_hint = "Assistant provider call failed. No tools or side effects were attempted."
+        if spec.kind == "ollama":
+            failure_hint = (
+                "Ollama call failed. Check that the endpoint is reachable from Docker, the selected model is pulled, "
+                "and the local model has enough time to answer. No tools or side effects were attempted."
+            )
         return AssistantRuntimeResult(
             status="provider_call_failed",
             provider_id=provider.provider_id,
             model=model,
-            content="Assistant provider call failed. No tools or side effects were attempted.",
+            content=failure_hint,
             request={"context": context, "content_length": len(user_content)},
             response={"error_type": type(exc).__name__},
             error=str(exc),

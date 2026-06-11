@@ -6,11 +6,13 @@ import {
   createAssistantConfirmation,
   createAssistantConversation,
   createAssistantMessage,
+  deleteAssistantConversation,
   executeAssistantTool,
   getAssistantProviderConfigs,
   getAssistantConfirmations,
   getAssistantConversations,
   getAssistantMessages,
+  getOllamaModels,
   getAssistantProvenance,
   getAssistantToolCalls,
   getPlatformStatus,
@@ -29,6 +31,7 @@ import type {
   AssistantConfirmation,
   AssistantProvenance,
   AssistantToolCall,
+  OllamaModelList,
   PlatformStatus,
   ProviderStatus,
 } from '../../types'
@@ -192,6 +195,8 @@ function AssistantProviderSetup({
   const [apiKey, setApiKey] = useState('')
   const [endpointUrl, setEndpointUrl] = useState('')
   const [model, setModel] = useState('')
+  const [ollamaModels, setOllamaModels] = useState<OllamaModelList | null>(null)
+  const [loadingModels, setLoadingModels] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const selectedTemplate = FRONTIER_AND_LOCAL_PROVIDERS.find((provider) => provider.id === providerId) ?? FRONTIER_AND_LOCAL_PROVIDERS[0]
@@ -208,9 +213,36 @@ function AssistantProviderSetup({
     const template = FRONTIER_AND_LOCAL_PROVIDERS.find((provider) => provider.id === providerId) ?? FRONTIER_AND_LOCAL_PROVIDERS[0]
     setEndpointUrl(nextConfig?.endpoint_url || template.endpointHint)
     setModel(nextConfig?.model || nextConfig?.default_model || template.defaultModel)
+    setOllamaModels(null)
     setApiKey('')
     setMessage(null)
   }, [configs, providerId])
+
+  async function loadOllamaModels(endpoint = endpointUrl) {
+    if (providerId !== 'ollama') return
+    setLoadingModels(true)
+    setMessage(null)
+    try {
+      const result = await getOllamaModels(endpoint)
+      setOllamaModels(result)
+      if (result.reachable && result.models.length > 0 && !result.models.some((item) => item.name === model)) {
+        setModel(result.models[0].name)
+      }
+      if (!result.reachable) {
+        setMessage(`Could not reach Ollama: ${result.error}`)
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  useEffect(() => {
+    if (providerId === 'ollama' && endpointUrl) {
+      loadOllamaModels(endpointUrl)
+    }
+  }, [providerId, endpointUrl])
 
   async function saveProvider() {
     setSaving(true)
@@ -248,7 +280,7 @@ function AssistantProviderSetup({
   }
 
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+    <section className="p-1">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-gray-950">Assistant provider setup</h2>
@@ -314,17 +346,67 @@ function AssistantProviderSetup({
             <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.endpointHelp}</span>
           </label>
         )}
-        <label className="block">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Model</span>
-          <input
-            type="text"
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            placeholder={selectedTemplate.defaultModel}
-            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
-          />
-          <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.modelHelp}</span>
-        </label>
+        {providerId === 'ollama' ? (
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Installed model</span>
+            <div className="mt-1 flex gap-2">
+              <select
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+              >
+                {model && !ollamaModels?.models.some((item) => item.name === model) && (
+                  <option value={model}>{model}</option>
+                )}
+                {(ollamaModels?.models ?? []).map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {item.name}{item.parameter_size ? ` · ${item.parameter_size}` : ''}
+                  </option>
+                ))}
+                {(!ollamaModels || ollamaModels.models.length === 0) && (
+                  <option value={model || selectedTemplate.defaultModel}>
+                    {model || selectedTemplate.defaultModel}
+                  </option>
+                )}
+              </select>
+              <button
+                type="button"
+                onClick={() => loadOllamaModels()}
+                disabled={loadingModels}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 disabled:text-gray-300"
+              >
+                {loadingModels ? 'Checking...' : 'Refresh'}
+              </button>
+            </div>
+            {ollamaModels?.reachable && ollamaModels.models.length > 0 && (
+              <span className="mt-1 block text-xs leading-5 text-gray-500">
+                Found {ollamaModels.models.length} installed model{ollamaModels.models.length === 1 ? '' : 's'} at {ollamaModels.endpoint_url}.
+              </span>
+            )}
+            {!ollamaModels?.reachable && (
+              <input
+                type="text"
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder={selectedTemplate.defaultModel}
+                className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+              />
+            )}
+            <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.modelHelp}</span>
+          </label>
+        ) : (
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Model</span>
+            <input
+              type="text"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder={selectedTemplate.defaultModel}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+            />
+            <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.modelHelp}</span>
+          </label>
+        )}
         <div className="rounded-md border border-gray-100 bg-gray-50 p-3 text-xs leading-5 text-gray-600">
           <div className="font-semibold text-gray-800">Current runtime</div>
           <div className="mt-1">
@@ -1142,6 +1224,24 @@ function TaskCenteredAssistantPanel({
     setInput('')
   }
 
+  async function removeConversation(conversationId: number) {
+    setError(null)
+    try {
+      await deleteAssistantConversation(conversationId)
+      setConversations((current) => current.filter((conversation) => conversation.id !== conversationId))
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation(null)
+        onConversationChange(null)
+        setMessages([])
+        setProposals([])
+        setInspectPreview(null)
+        setInspectExecution(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function ensureConversation(content: string): Promise<AssistantConversation> {
     if (activeConversation) return activeConversation
     const title = content.trim().slice(0, 64) || 'Assistant chat'
@@ -1230,11 +1330,11 @@ function TaskCenteredAssistantPanel({
   }
 
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+    <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-4">
         <div>
           <h2 className="text-base font-semibold text-gray-900">Assistant workspace</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+          <p className="mt-1 max-w-3xl text-sm leading-5 text-gray-600">
             Ask questions, inspect deterministic platform facts, and review proposed next steps. Side-effecting actions still require explicit preview and confirmation.
           </p>
         </div>
@@ -1262,24 +1362,37 @@ function TaskCenteredAssistantPanel({
               <div className="text-xs leading-5 text-gray-500">No saved conversations yet.</div>
             )}
             {conversations.map((conversation) => (
-              <button
+              <div
                 key={conversation.id}
-                type="button"
-                onClick={() => loadConversationMessages(conversation)}
-                className={`w-full rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                className={`group flex items-start gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
                   activeConversation?.id === conversation.id
                     ? 'border-brand-200 bg-white text-gray-900'
                     : 'border-gray-100 bg-white/70 text-gray-600 hover:bg-white'
                 }`}
               >
-                <div className="truncate font-medium">{conversation.title}</div>
-                <div className="mt-1 text-gray-400">{conversation.status.replace(/_/g, ' ')}</div>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => loadConversationMessages(conversation)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <div className="truncate font-medium">{conversation.title}</div>
+                  <div className="mt-1 text-gray-400">{conversation.status.replace(/_/g, ' ')}</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeConversation(conversation.id)}
+                  className="rounded px-1.5 py-0.5 text-gray-400 opacity-70 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                  title="Delete chat"
+                  aria-label={`Delete ${conversation.title}`}
+                >
+                  x
+                </button>
+              </div>
             ))}
           </div>
         </aside>
 
-        <div className="flex min-h-[620px] flex-col rounded-md border border-gray-100">
+        <div className="flex h-[calc(100vh-280px)] min-h-[520px] flex-col rounded-md border border-gray-100">
           <div className="border-b border-gray-100 px-4 py-3">
             <div className="text-sm font-medium text-gray-900">
               {activeConversation?.title ?? 'New assistant conversation'}
@@ -1322,7 +1435,7 @@ function TaskCenteredAssistantPanel({
             ))}
           </div>
 
-          <div className="border-t border-gray-100 bg-white p-3">
+          <div className="sticky bottom-0 border-t border-gray-100 bg-white p-3 shadow-[0_-8px_18px_rgba(15,23,42,0.04)]">
             {error && <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</div>}
             <label htmlFor="assistant-chat-input" className="sr-only">Assistant message</label>
             <textarea
@@ -1352,7 +1465,7 @@ function TaskCenteredAssistantPanel({
           </div>
         </div>
 
-        <aside className="space-y-4 rounded-md border border-gray-100 bg-gray-50 p-3">
+        <aside className="space-y-3 rounded-md border border-gray-100 bg-gray-50 p-3">
           <div className="rounded-md border border-brand-100 bg-white p-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Current context</div>
             <div className="mt-2 text-sm font-medium leading-6 text-gray-900">{contextSummary(context)}</div>
@@ -1363,9 +1476,11 @@ function TaskCenteredAssistantPanel({
             </div>
           </div>
 
-          <div className="rounded-md border border-gray-100 bg-white p-4">
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Suggested next steps</div>
-            <div className="mt-3 space-y-2">
+          <details className="rounded-md border border-gray-100 bg-white" open>
+            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Suggested next steps
+            </summary>
+            <div className="space-y-2 border-t border-gray-100 p-3">
               {actionCards.map((action) => (
                 <div key={action.title} className="rounded-md border border-gray-100 bg-gray-50 p-3">
                   <div className="flex items-start justify-between gap-3">
@@ -1407,15 +1522,17 @@ function TaskCenteredAssistantPanel({
                 </div>
               ))}
             </div>
-          </div>
+          </details>
 
           {proposals.length > 0 && (
-            <div className="rounded-md border border-blue-100 bg-white p-4">
-              <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Assistant proposals</div>
-              <p className="mt-1 text-xs leading-5 text-gray-500">
-                These are typed proposal records from the latest exchange. They are not executed by assistant text.
-              </p>
-              <div className="mt-3 space-y-2">
+            <details className="rounded-md border border-blue-100 bg-white" open>
+              <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                Assistant proposals
+              </summary>
+              <div className="space-y-2 border-t border-blue-50 p-3">
+                <p className="text-xs leading-5 text-gray-500">
+                  Typed records from the latest exchange. They are not executed by assistant text.
+                </p>
                 {proposals.map((proposal) => (
                   <AssistantProposalCard
                     key={proposal.id}
@@ -1427,17 +1544,19 @@ function TaskCenteredAssistantPanel({
                   />
                 ))}
               </div>
-            </div>
+            </details>
           )}
 
-          <div className="rounded-md border border-gray-100 bg-white p-4">
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Trust boundary</div>
-            <div className="mt-2 space-y-2 text-xs leading-5 text-gray-600">
+          <details className="rounded-md border border-gray-100 bg-white">
+            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Trust boundary
+            </summary>
+            <div className="space-y-2 border-t border-gray-100 p-3 text-xs leading-5 text-gray-600">
               <div><span className="font-semibold text-gray-900">Platform fact:</span> fetched from deterministic app data or a read-only adapter.</div>
               <div><span className="font-semibold text-gray-900">Assistant interpretation:</span> model-generated explanation that should cite platform facts.</div>
               <div><span className="font-semibold text-gray-900">Proposed action:</span> never executed from text alone.</div>
             </div>
-          </div>
+          </details>
         </aside>
       </div>
     </section>
@@ -1710,12 +1829,27 @@ export function AssistantPage() {
 
       <ProviderRuntimeSummary status={status} />
 
-      <AssistantProviderSetup
-        configs={providerConfigs}
-        runtimeStatus={status}
-        loading={statusLoading}
-        onRefresh={refreshAssistantStatus}
-      />
+      <details
+        className="rounded-lg border border-gray-200 bg-white shadow-sm"
+        open={!runtimeReady}
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold text-gray-900">
+          <span>Provider setup</span>
+          <span className="text-xs font-normal text-gray-500">
+            {runtimeReady
+              ? `${status?.providers.active_runtime_provider_id} (${status?.providers.active_runtime_model})`
+              : 'configure OpenAI, Anthropic, or Ollama'}
+          </span>
+        </summary>
+        <div className="border-t border-gray-100 p-4">
+          <AssistantProviderSetup
+            configs={providerConfigs}
+            runtimeStatus={status}
+            loading={statusLoading}
+            onRefresh={refreshAssistantStatus}
+          />
+        </div>
+      </details>
 
       <TaskCenteredAssistantPanel
         providerConfigured={runtimeReady}

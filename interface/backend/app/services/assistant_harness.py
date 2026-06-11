@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -190,6 +192,23 @@ class AssistantProviderConfigUpdate(BaseModel):
     model: str = ""
     label: str = ""
     make_active: bool = True
+
+
+class OllamaModelOut(BaseModel):
+    name: str
+    model: str = ""
+    family: str = ""
+    parameter_size: str = ""
+    quantization_level: str = ""
+    size: int | None = None
+    modified_at: str = ""
+
+
+class OllamaModelListOut(BaseModel):
+    endpoint_url: str
+    reachable: bool
+    models: list[OllamaModelOut] = Field(default_factory=list)
+    error: str = ""
 
 
 class AssistantToolSpec(BaseModel):
@@ -601,6 +620,47 @@ def delete_provider_config(session: Session, provider_id: str) -> None:
         return
     session.delete(record)
     session.commit()
+
+
+def get_ollama_models(
+    session: Session,
+    endpoint_url: str = "",
+) -> OllamaModelListOut:
+    config = session.exec(select(AssistantProviderConfig).where(AssistantProviderConfig.provider_id == "ollama")).first()
+    resolved_endpoint = (
+        endpoint_url.strip()
+        or (config.endpoint_url.strip() if config else "")
+        or settings.ollama_base_url.strip()
+        or "http://host.docker.internal:11434"
+    ).rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{resolved_endpoint}/api/tags", timeout=5) as response:
+            raw = response.read().decode("utf-8")
+        payload = json.loads(raw or "{}")
+        models: list[OllamaModelOut] = []
+        for item in payload.get("models", []):
+            if not isinstance(item, dict):
+                continue
+            details = item.get("details", {}) if isinstance(item.get("details"), dict) else {}
+            models.append(
+                OllamaModelOut(
+                    name=str(item.get("name") or item.get("model") or ""),
+                    model=str(item.get("model") or item.get("name") or ""),
+                    family=str(details.get("family") or ""),
+                    parameter_size=str(details.get("parameter_size") or ""),
+                    quantization_level=str(details.get("quantization_level") or ""),
+                    size=item.get("size") if isinstance(item.get("size"), int) else None,
+                    modified_at=str(item.get("modified_at") or ""),
+                )
+            )
+        return OllamaModelListOut(endpoint_url=resolved_endpoint, reachable=True, models=models)
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        return OllamaModelListOut(
+            endpoint_url=resolved_endpoint,
+            reachable=False,
+            models=[],
+            error=f"{type(exc).__name__}: {exc}",
+        )
 
 
 def get_tool_registry() -> list[AssistantToolSpec]:
@@ -1491,6 +1551,18 @@ def create_conversation(session: Session, data: AssistantConversationCreate) -> 
     session.commit()
     session.refresh(conversation)
     return conversation
+
+
+def delete_conversation(session: Session, conversation_id: int) -> None:
+    conversation = session.get(AssistantConversation, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Assistant conversation not found.")
+    for model in (AssistantProvenance, AssistantConfirmation, AssistantToolCall, AssistantMessage):
+        records = session.exec(select(model).where(model.conversation_id == conversation_id)).all()
+        for record in records:
+            session.delete(record)
+    session.delete(conversation)
+    session.commit()
 
 
 def store_message(

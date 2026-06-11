@@ -833,6 +833,23 @@ export interface AssistantProviderConfigUpdate {
   make_active?: boolean
 }
 
+export interface OllamaModel {
+  name: string
+  model: string
+  family: string
+  parameter_size: string
+  quantization_level: string
+  size: number | null
+  modified_at: string
+}
+
+export interface OllamaModelList {
+  endpoint_url: string
+  reachable: boolean
+  models: OllamaModel[]
+  error: string
+}
+
 export interface AssistantHarnessStatus {
   state: string
   provider_required: boolean

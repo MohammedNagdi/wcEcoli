@@ -36,15 +36,18 @@ from app.services.assistant_harness import (
     ConfirmationCreate,
     ConfirmationOut,
     ConfirmationResolve,
+    OllamaModelListOut,
     ProviderLayerStatus,
     ProvenanceOut,
     confirmation_to_out,
     conversation_to_out,
     create_confirmation,
     create_conversation,
+    delete_conversation,
     delete_provider_config,
     execute_tool,
     get_assistant_harness_status,
+    get_ollama_models,
     get_provider_layer_status,
     get_tool_registry,
     message_to_out,
@@ -98,6 +101,14 @@ def clear_provider_config(
     return provider_configs_to_out(session)
 
 
+@router.get("/provider-configs/ollama/models", response_model=OllamaModelListOut)
+def list_ollama_models(
+    endpoint_url: str = Query(""),
+    session: Session = Depends(get_session),
+) -> OllamaModelListOut:
+    return get_ollama_models(session, endpoint_url)
+
+
 @router.get("/tools", response_model=list[AssistantToolSpec])
 def get_tools() -> list[AssistantToolSpec]:
     return get_tool_registry()
@@ -148,6 +159,15 @@ def get_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="Assistant conversation not found.")
     return conversation_to_out(conversation)
+
+
+@router.delete("/conversations/{conversation_id}", response_model=dict[str, bool])
+def delete_assistant_conversation(
+    conversation_id: int,
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    delete_conversation(session, conversation_id)
+    return {"deleted": True}
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[AssistantMessageOut])

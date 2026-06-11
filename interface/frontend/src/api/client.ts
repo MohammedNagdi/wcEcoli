@@ -22,6 +22,7 @@ import type {
   AssistantToolSpec, AssistantConversation, AssistantExchange, AssistantContext, AssistantMessage, AssistantConfirmation,
   AssistantToolPreview, AssistantToolExecution, AssistantToolCall, AssistantProvenance,
   AssistantProviderConfig, AssistantProviderConfigUpdate,
+  OllamaModelList,
 } from '../types'
 
 const BASE = '/api'
@@ -519,6 +520,12 @@ export async function clearAssistantProviderConfig(providerId: string): Promise<
   return fetchJSON(`/assistant/provider-configs/${encodeURIComponent(providerId)}`, { method: 'DELETE' })
 }
 
+export async function getOllamaModels(endpointUrl?: string): Promise<OllamaModelList> {
+  const qs = new URLSearchParams()
+  if (endpointUrl) qs.set('endpoint_url', endpointUrl)
+  return fetchJSON(`/assistant/provider-configs/ollama/models${qs.toString() ? `?${qs.toString()}` : ''}`)
+}
+
 export async function getAssistantTools(): Promise<AssistantToolSpec[]> {
   return fetchJSON('/assistant/tools')
 }
@@ -568,6 +575,10 @@ export async function createAssistantConversation(data: {
 
 export async function getAssistantMessages(conversationId: number): Promise<AssistantMessage[]> {
   return fetchJSON(`/assistant/conversations/${conversationId}/messages`)
+}
+
+export async function deleteAssistantConversation(conversationId: number): Promise<{ deleted: boolean }> {
+  return fetchJSON(`/assistant/conversations/${conversationId}`, { method: 'DELETE' })
 }
 
 export async function createAssistantMessage(
