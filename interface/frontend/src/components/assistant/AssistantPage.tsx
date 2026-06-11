@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
+  createAssistantConfirmation,
   createAssistantConversation,
   createAssistantMessage,
   executeAssistantTool,
@@ -12,6 +13,7 @@ import {
   getAssistantToolCalls,
   getPlatformStatus,
   previewAssistantTool,
+  resolveAssistantConfirmation,
 } from '../../api/client'
 import type {
   AssistantToolExecution,
@@ -456,13 +458,22 @@ function proposalKind(proposal: AssistantToolCall): 'ready' | 'planned' {
 
 function AssistantProposalCard({
   proposal,
+  context,
+  conversationId,
   busy,
   onRunReadOnly,
 }: {
   proposal: AssistantToolCall
+  context: AssistantContext
+  conversationId: number | null
   busy: boolean
   onRunReadOnly: (proposal: AssistantToolCall) => void
 }) {
+  const [preview, setPreview] = useState<AssistantToolPreview | null>(null)
+  const [execution, setExecution] = useState<AssistantToolExecution | null>(null)
+  const [confirmation, setConfirmation] = useState<AssistantConfirmation | null>(null)
+  const [cardBusy, setCardBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const title = proposalText(proposal, 'title', proposal.tool_name.replace(/_/g, ' '))
   const description = proposalText(proposal, 'description', 'Review this proposed assistant action.')
   const gene = typeof proposal.arguments.gene_symbol === 'string'
@@ -474,6 +485,87 @@ function AssistantProposalCard({
   const isReadOnly = proposal.tool_name === 'inspect_result' && !proposal.result.side_effect
   const isCreateExperiment = proposal.tool_name === 'create_experiment'
   const isRunSimulation = proposal.tool_name === 'run_simulation'
+  const isSideEffect = Boolean(proposal.result.side_effect)
+  const canConfirm = isSideEffect && preview?.valid && !execution?.executed && confirmation?.status !== 'rejected'
+
+  async function previewProposal() {
+    setCardBusy('preview')
+    setError(null)
+    try {
+      const nextPreview = await previewAssistantTool(proposal.tool_name, { arguments: proposal.arguments, context })
+      setPreview(nextPreview)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCardBusy(null)
+    }
+  }
+
+  async function rejectProposal() {
+    if (!preview?.valid || !isSideEffect) {
+      setConfirmation({
+        id: 0,
+        conversation_id: conversationId,
+        tool_call_id: proposal.id,
+        action: proposal.tool_name,
+        status: 'rejected',
+        payload: {},
+        note: 'Rejected locally before a valid preview was available.',
+        created_at: '',
+        resolved_at: '',
+      })
+      return
+    }
+    setCardBusy('reject')
+    setError(null)
+    try {
+      const pending = await createAssistantConfirmation({
+        action: proposal.tool_name,
+        payload: preview.normalized_arguments,
+        conversation_id: conversationId,
+        tool_call_id: proposal.id,
+      })
+      const rejected = await resolveAssistantConfirmation(pending.id, {
+        status: 'rejected',
+        note: 'Rejected from assistant proposal card.',
+      })
+      setConfirmation(rejected)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCardBusy(null)
+    }
+  }
+
+  async function confirmAndExecuteProposal() {
+    if (!preview?.valid || !isSideEffect || cardBusy) return
+    setCardBusy('execute')
+    setError(null)
+    try {
+      const pending = await createAssistantConfirmation({
+        action: proposal.tool_name,
+        payload: preview.normalized_arguments,
+        conversation_id: conversationId,
+        tool_call_id: proposal.id,
+      })
+      const approved = await resolveAssistantConfirmation(pending.id, {
+        status: 'approved',
+        note: 'Approved from assistant proposal card.',
+      })
+      setConfirmation(approved)
+      const result = await executeAssistantTool(proposal.tool_name, {
+        arguments: proposal.arguments,
+        context,
+        conversation_id: conversationId,
+        confirmation_id: approved.id,
+      })
+      setExecution(result)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCardBusy(null)
+    }
+  }
 
   return (
     <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
@@ -497,6 +589,16 @@ function AssistantProposalCard({
             {busy ? 'Inspecting...' : 'Run read-only inspection'}
           </button>
         )}
+        {isSideEffect && (
+          <button
+            type="button"
+            onClick={previewProposal}
+            disabled={Boolean(cardBusy)}
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {cardBusy === 'preview' ? 'Previewing...' : preview ? 'Refresh preview' : 'Preview'}
+          </button>
+        )}
         {isCreateExperiment && (
           <Link
             to={`/experiments/new${gene ? `?gene=${encodeURIComponent(gene)}` : ''}`}
@@ -514,6 +616,39 @@ function AssistantProposalCard({
           </Link>
         )}
       </div>
+      {preview && (
+        <div className="mt-3">
+          <ToolReviewPanel title="Proposal preview" preview={preview} execution={execution} />
+        </div>
+      )}
+      {isSideEffect && preview && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={confirmAndExecuteProposal}
+            disabled={!canConfirm || Boolean(cardBusy)}
+            className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+          >
+            {cardBusy === 'execute' ? 'Executing...' : proposal.tool_name === 'run_simulation' ? 'Confirm and queue' : 'Confirm and create'}
+          </button>
+          <button
+            type="button"
+            onClick={rejectProposal}
+            disabled={Boolean(cardBusy) || confirmation?.status === 'rejected' || Boolean(execution?.executed)}
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {cardBusy === 'reject' ? 'Rejecting...' : 'Reject'}
+          </button>
+          {confirmation && (
+            <StatusPill tone={confirmation.status === 'approved' || confirmation.status === 'used' ? 'ready' : confirmation.status === 'rejected' ? 'blocked' : 'planned'}>
+              {confirmation.status}
+            </StatusPill>
+          )}
+        </div>
+      )}
+      {error && (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">{error}</div>
+      )}
     </div>
   )
 }
@@ -620,6 +755,24 @@ function TaskCenteredAssistantPanel({
       setInput(suggestedPrompt)
     }
   }, [suggestedPrompt, input, messages.length])
+
+  useEffect(() => {
+    if (!activeConversation) {
+      setProposals([])
+      return
+    }
+    let cancelled = false
+    getAssistantToolCalls({ conversation_id: activeConversation.id, status: 'proposed' })
+      .then((proposalRows) => {
+        if (!cancelled) setProposals(proposalRows)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeConversation?.id, messages.length])
 
   async function startNewChat() {
     setError(null)
@@ -908,6 +1061,8 @@ function TaskCenteredAssistantPanel({
                   <AssistantProposalCard
                     key={proposal.id}
                     proposal={proposal}
+                    context={context}
+                    conversationId={activeConversation?.id ?? null}
                     busy={inspecting}
                     onRunReadOnly={runReadOnlyProposal}
                   />
