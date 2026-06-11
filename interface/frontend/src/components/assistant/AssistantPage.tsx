@@ -405,7 +405,13 @@ function parseOptionalNumber(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolean }) {
+function AssistantChatPanel({
+  providerConfigured,
+  onConversationChange,
+}: {
+  providerConfigured: boolean
+  onConversationChange: (conversationId: number | null) => void
+}) {
   const location = useLocation()
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
   const [activeConversation, setActiveConversation] = useState<AssistantConversation | null>(null)
@@ -438,6 +444,7 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
   async function loadConversationMessages(conversation: AssistantConversation) {
     setError(null)
     setActiveConversation(conversation)
+    onConversationChange(conversation.id)
     try {
       const rows = await getAssistantMessages(conversation.id)
       setMessages(rows)
@@ -456,6 +463,7 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
         await loadConversationMessages(rows[0])
       } else {
         setActiveConversation(null)
+        onConversationChange(null)
         setMessages([])
       }
     } catch (err) {
@@ -478,6 +486,7 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
   async function startNewChat() {
     setError(null)
     setActiveConversation(null)
+    onConversationChange(null)
     setMessages([])
     setInput('')
   }
@@ -491,6 +500,7 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
       context,
     })
     setActiveConversation(conversation)
+    onConversationChange(conversation.id)
     setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)])
     return conversation
   }
@@ -506,6 +516,7 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
       const exchange = await createAssistantMessage(conversation.id, { content, context })
       setMessages((current) => [...current, exchange.user_message, exchange.assistant_message])
       setActiveConversation(exchange.conversation)
+      onConversationChange(exchange.conversation.id)
       setConversations((current) => [
         exchange.conversation,
         ...current.filter((item) => item.id !== exchange.conversation.id),
@@ -681,10 +692,11 @@ function AssistantChatPanel({ providerConfigured }: { providerConfigured: boolea
   )
 }
 
-function AssistantAuditPanel() {
+function AssistantAuditPanel({ activeConversationId }: { activeConversationId: number | null }) {
   const [confirmations, setConfirmations] = useState<AssistantConfirmation[]>([])
   const [toolCalls, setToolCalls] = useState<AssistantToolCall[]>([])
   const [provenance, setProvenance] = useState<AssistantProvenance[]>([])
+  const [scope, setScope] = useState<'all' | 'conversation'>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -692,10 +704,13 @@ function AssistantAuditPanel() {
     setLoading(true)
     setError(null)
     try {
+      const filters = scope === 'conversation' && activeConversationId != null
+        ? { conversation_id: activeConversationId }
+        : {}
       const [confirmationRows, toolCallRows, provenanceRows] = await Promise.all([
-        getAssistantConfirmations(),
-        getAssistantToolCalls(),
-        getAssistantProvenance(),
+        getAssistantConfirmations(filters),
+        getAssistantToolCalls(filters),
+        getAssistantProvenance(filters),
       ])
       setConfirmations(confirmationRows)
       setToolCalls(toolCallRows)
@@ -709,7 +724,13 @@ function AssistantAuditPanel() {
 
   useEffect(() => {
     loadAuditTrail()
-  }, [])
+  }, [scope, activeConversationId])
+
+  useEffect(() => {
+    if (activeConversationId == null && scope === 'conversation') {
+      setScope('all')
+    }
+  }, [activeConversationId, scope])
 
   const pendingConfirmations = confirmations.filter((item) => item.status === 'pending')
   const recentConfirmations = confirmations.slice(0, 5)
@@ -727,6 +748,29 @@ function AssistantAuditPanel() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setScope('all')}
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+              scope === 'all'
+                ? 'border-gray-900 bg-gray-900 text-white'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            All records
+          </button>
+          <button
+            type="button"
+            onClick={() => setScope('conversation')}
+            disabled={activeConversationId == null}
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+              scope === 'conversation'
+                ? 'border-brand-600 bg-brand-600 text-white'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            Current chat
+          </button>
           <StatusPill tone={pendingConfirmations.length > 0 ? 'planned' : 'ready'}>
             {`${pendingConfirmations.length} pending`}
           </StatusPill>
@@ -743,6 +787,11 @@ function AssistantAuditPanel() {
 
       {error && <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
       {loading && <div className="mt-3 text-sm text-gray-500">Loading assistant audit trail...</div>}
+      {scope === 'conversation' && activeConversationId != null && (
+        <div className="mt-3 rounded-md border border-brand-100 bg-brand-50 p-3 text-xs text-brand-700">
+          Showing records attached to assistant conversation #{activeConversationId}.
+        </div>
+      )}
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
@@ -1161,6 +1210,7 @@ function AssistantRunFlow() {
 export function AssistantPage() {
   const [status, setStatus] = useState<PlatformStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [activeConversationId, setActiveConversationId] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -1313,11 +1363,14 @@ export function AssistantPage() {
           </div>
         </Card>
 
-        <AssistantChatPanel providerConfigured={Boolean(status?.assistant.provider_configured)} />
+        <AssistantChatPanel
+          providerConfigured={Boolean(status?.assistant.provider_configured)}
+          onConversationChange={setActiveConversationId}
+        />
 
         <AssistantRunFlow />
 
-        <AssistantAuditPanel />
+        <AssistantAuditPanel activeConversationId={activeConversationId} />
 
         <Card title="Assistant UI surfaces" issue="#12">
           <p className="text-sm leading-6 text-gray-600">

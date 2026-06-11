@@ -585,9 +585,15 @@ export async function resolveAssistantConfirmation(
   })
 }
 
-export async function getAssistantConfirmations(status?: string): Promise<AssistantConfirmation[]> {
-  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
-  return fetchJSON(`/assistant/confirmations${qs}`)
+export async function getAssistantConfirmations(filters: {
+  status?: string
+  conversation_id?: number
+} = {}): Promise<AssistantConfirmation[]> {
+  const params = new URLSearchParams()
+  if (filters.status) params.set('status', filters.status)
+  if (filters.conversation_id !== undefined) params.set('conversation_id', String(filters.conversation_id))
+  const qs = params.toString()
+  return fetchJSON(`/assistant/confirmations${qs ? `?${qs}` : ''}`)
 }
 
 export async function getAssistantToolCalls(filters: {
