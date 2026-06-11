@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import CytoscapeComponent from 'react-cytoscapejs'
 import type { Core, EventObject, ElementDefinition } from 'cytoscape'
 import { getTFNetwork } from '../../api/client'
@@ -7,6 +7,7 @@ import type { TFNetwork } from '../../types'
 import { SearchInput } from '../common/SearchInput'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { type RegulationEffect, regulationEffect } from '../../utils/regulation'
+import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 
 const FULL_LAYOUT = {
   name: 'cose',
@@ -226,6 +227,7 @@ interface TFNetworkPageProps {
 
 export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   const { selectedGene, setSelectedGene } = useUrlWorkspaceState()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const initialMode = networkViewModeFromParam(searchParams.get('mode')) ?? 'full'
   const [network, setNetwork] = useState<TFNetwork | null>(null)
@@ -552,6 +554,13 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     return { activation, repression, all: activation + repression }
   }, [network, minTargets])
 
+  const assistantHref = buildAssistantHref({
+    surface: 'network',
+    route: `${location.pathname}${location.search}`,
+    gene: selectedGene,
+    prompt: `Help me interpret the transcription-factor network. Focus on the ${networkMode} view, ${edgeFilter} regulation edges, hub threshold ${minTargets}, and any selected gene or TF context.`,
+  })
+
   useEffect(() => {
     if (!layoutReadyRef.current) return
     if (networkMode !== 'full') return
@@ -741,6 +750,14 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
               </span>
             )}
           </span>
+          {!embedded && (
+            <Link
+              to={assistantHref}
+              className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
+            >
+              Ask Assistant
+            </Link>
+          )}
         </div>
 
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">

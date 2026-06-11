@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { getJobs, getExperiments, getExperimentResults, compareExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
+import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 import { SearchInput } from '../common/SearchInput'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { BatchDashboard } from '../experiments/BatchDashboard'
@@ -419,6 +420,7 @@ function ExperimentCard({
 }
 
 export function ResultsBrowserPage() {
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [jobs, setJobs] = useState<SimulationJob[]>([])
   const [experiments, setExperiments] = useState<Map<number, Experiment>>(new Map())
@@ -617,6 +619,13 @@ export function ResultsBrowserPage() {
     return s + 's'
   }
 
+  const assistantHref = buildAssistantHref({
+    surface: 'results',
+    route: `${location.pathname}${location.search}`,
+    variantType: typeFilter !== 'all' ? typeFilter : null,
+    prompt: `Help me triage the Results browser. Explain the ${viewMode} view, current filters, redundant controls, failed/running jobs, and which result should be opened first for biological interpretation.`,
+  })
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex flex-col gap-4 mb-5 lg:flex-row lg:items-start lg:justify-between">
@@ -626,6 +635,12 @@ export function ResultsBrowserPage() {
           <p className="mt-1 text-sm text-gray-500">{viewDescription(viewMode)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to={assistantHref}
+            className="px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
+          >
+            Ask Assistant
+          </Link>
           <Link
             to="/results/compare"
             className="px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"

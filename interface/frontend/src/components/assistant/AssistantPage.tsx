@@ -297,6 +297,8 @@ function surfaceName(context: AssistantContext): string {
   if (context.assistant_surface === 'experiments' || route.includes('/experiments')) return 'Experiments'
   if (context.assistant_surface === 'network' || route.includes('/network')) return 'Network'
   if (context.assistant_surface === 'genome' || route.includes('/genome')) return 'Genome Map'
+  if (context.assistant_surface === 'ml' || route.includes('/ml')) return 'Machine Learning'
+  if (context.assistant_surface === 'design' || route.includes('/design')) return 'Genome Design'
   return 'Assistant'
 }
 
@@ -321,6 +323,22 @@ function contextSummary(context: AssistantContext): string {
     const gene = context.selected_gene ? ` for ${context.selected_gene}` : ''
     const variant = context.selected_variant_type ? ` as ${context.selected_variant_type.replace(/_/g, ' ')}` : ''
     return `You are designing or reviewing an experiment${gene}${variant}.`
+  }
+  if (surface === 'Network') {
+    const gene = context.selected_gene ? ` focused on ${context.selected_gene}` : ''
+    return `You are inspecting the transcription-factor network${gene}.`
+  }
+  if (surface === 'Genome Map') {
+    const gene = context.selected_gene ? ` focused on ${context.selected_gene}` : ''
+    return `You are inspecting the chromosome map${gene}.`
+  }
+  if (surface === 'Machine Learning') {
+    const condition = context.selected_condition ? ` for ${context.selected_condition}` : ''
+    const variant = context.selected_variant_type ? ` and ${context.selected_variant_type.replace(/_/g, ' ')}` : ''
+    return `You are reviewing simulation-derived ML readiness${condition}${variant}.`
+  }
+  if (surface === 'Genome Design') {
+    return 'You are reviewing simulation-derived genome-design summaries.'
   }
   if (context.selected_gene) return `You are focused on gene ${context.selected_gene}.`
   return 'You are in the central Assistant workspace.'
@@ -420,6 +438,70 @@ function suggestedActions(context: AssistantContext): Array<{
         title: 'Review condition and timeline',
         description: 'Check whether the selected environment is static or uses a time-varying protocol.',
         kind: 'proposal',
+      },
+    ]
+  }
+  if (surface === 'Network') {
+    return [
+      {
+        title: 'Explain edge provenance',
+        description: 'Clarify that TF edges are reconstruction-derived and not simulation-response overlays.',
+        kind: 'proposal',
+      },
+      ...(gene
+        ? [{
+            title: 'Open selected gene in Workspace',
+            description: `Review model state IDs and genomic context for ${gene}.`,
+            kind: 'link' as const,
+            path: `/?gene=${encodeURIComponent(gene)}`,
+          }]
+        : []),
+    ]
+  }
+  if (surface === 'Genome Map') {
+    return [
+      {
+        title: 'Interpret genomic context',
+        description: 'Relate selected gene position, nearby genes, strand, and functional category to other Explore views.',
+        kind: 'proposal',
+      },
+      ...(gene
+        ? [{
+            title: 'Open linked network',
+            description: `Check regulation around ${gene}.`,
+            kind: 'link' as const,
+            path: `/network?gene=${encodeURIComponent(gene)}`,
+          }]
+        : []),
+    ]
+  }
+  if (surface === 'Machine Learning') {
+    return [
+      {
+        title: 'Assess data readiness',
+        description: 'Check whether completed simulations are broad enough for the selected target and filters.',
+        kind: 'proposal',
+      },
+      {
+        title: 'Open result library',
+        description: 'Review source simulations before trusting surrogate-model output.',
+        kind: 'link',
+        path: '/results',
+      },
+    ]
+  }
+  if (surface === 'Genome Design') {
+    return [
+      {
+        title: 'Check design evidence',
+        description: 'Separate current knockout summaries from what would be needed for a dedicated minimal-genome design workflow.',
+        kind: 'proposal',
+      },
+      {
+        title: 'Open batch experiments',
+        description: 'Plan condition-diverse knockout coverage before interpreting design calls.',
+        kind: 'link',
+        path: '/experiments/batch',
       },
     ]
   }

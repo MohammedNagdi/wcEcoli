@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { getDesignOverview, getEssentiality } from '../../api/client'
 import type { DesignOverview, GeneKOSummary, EssentialityStats } from '../../types'
+import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 
 const PHENOTYPE_COLORS: Record<string, string> = {
   essential: 'bg-red-100 text-red-800',
@@ -20,6 +22,7 @@ type SortKey = 'gene_symbol' | 'category' | 'phenotype' | 'mean_growth_rate' | '
 type SortDir = 'asc' | 'desc'
 
 export function DesignPage() {
+  const location = useLocation()
   const [overview, setOverview] = useState<DesignOverview | null>(null)
   const [essentiality, setEssentiality] = useState<EssentialityStats[]>([])
   const [loading, setLoading] = useState(true)
@@ -96,6 +99,13 @@ export function DesignPage() {
     return sortDir === 'asc' ? '↑' : '↓'
   }
 
+  const assistantHref = buildAssistantHref({
+    surface: 'design',
+    route: `${location.pathname}${location.search}`,
+    gene: searchTerm,
+    prompt: 'Help me review this Genome Design view. Explain what the current knockout phenotype summaries can and cannot support, which filters matter, and what simulation coverage is still missing before minimal-genome conclusions.',
+  })
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -117,12 +127,20 @@ export function DesignPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
         <h1 className="text-2xl font-bold text-gray-900">Genome Design</h1>
         <p className="text-gray-500 mt-1">
           In-silico gene knockout phenotype map — explore essentiality predictions
           from whole-cell simulation results.
         </p>
+        </div>
+        <Link
+          to={assistantHref}
+          className="self-start rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
+        >
+          Ask Assistant
+        </Link>
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { getDataSummary, getFeatures, getFeaturesCSVUrl, trainModel } from '../../api/client'
 import { HelpTip } from '../common/HelpTip'
+import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 import type {
   DataSummary, FeatureExtractionResponse, FeatureRow,
   TrainRequest, TrainResponse,
@@ -88,6 +90,7 @@ function FeatureImportanceBar({ features }: { features: { feature: string; impor
 
 
 export function MLPage() {
+  const location = useLocation()
   const [summary, setSummary] = useState<DataSummary | null>(null)
   const [features, setFeatures] = useState<FeatureExtractionResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -166,11 +169,19 @@ export function MLPage() {
   })
 
   const targetInfo = TARGETS.find(t => t.value === target)
+  const assistantHref = buildAssistantHref({
+    surface: 'ml',
+    route: `${location.pathname}${location.search}`,
+    condition: filterCondition,
+    variantType: filterVariant,
+    prompt: 'Help me assess this ML setup. Explain whether the available simulation data are sufficient, how the current filters and target affect interpretation, and what result batches would improve model reliability.',
+  })
 
   return (
     <div className="max-w-6xl mx-auto">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
         <h1 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
           Machine Learning
           <HelpTip text="Train surrogate models on simulation data. These models learn to predict simulation outcomes (division, growth rate) from gene/condition features — much faster than running full simulations." />
@@ -178,6 +189,13 @@ export function MLPage() {
         <p className="text-sm text-gray-400 mt-1">
           Train surrogate models to predict simulation outcomes from gene knockout features
         </p>
+        </div>
+        <Link
+          to={assistantHref}
+          className="self-start rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
+        >
+          Ask Assistant
+        </Link>
       </div>
 
       <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { getExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
+import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
 import { BatchDashboard } from './BatchDashboard'
 import { FailedJobsPanel } from './FailedJobsPanel'
@@ -20,6 +21,7 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 export function ExperimentListPage() {
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [loading, setLoading] = useState(true)
@@ -133,6 +135,14 @@ export function ExperimentListPage() {
   const selectedExperiment = selectedId != null
     ? experiments.find((e) => e.id === selectedId) ?? null
     : null
+  const assistantHref = buildAssistantHref({
+    surface: 'experiments',
+    route: `${location.pathname}${location.search}`,
+    experiment: selectedExperiment?.id,
+    condition: selectedExperiment?.condition,
+    variantType: selectedExperiment?.variant_type,
+    prompt: `Help me review the Experiments page. Explain the ${view} view, selected experiment or batch context, queue state, redundant controls, and the next safe action.`,
+  })
 
   const formatDate = (iso: string) => {
     if (!iso) return '—'
@@ -153,6 +163,12 @@ export function ExperimentListPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            to={assistantHref}
+            className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
+          >
+            Ask Assistant
+          </Link>
           <Link
             to="/experiments/batch"
             className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100

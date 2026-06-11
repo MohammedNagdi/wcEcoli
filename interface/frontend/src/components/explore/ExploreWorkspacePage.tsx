@@ -8,6 +8,7 @@ import { CategoryBadge, DirectionBadge } from '../common/Badge'
 import { getAAPathways } from '../../api/client'
 import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
+import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 import type { AAPathway, GeneDetail } from '../../types'
 
 export function ExploreWorkspacePage() {
@@ -149,14 +150,13 @@ function SelectedGeneSummary({
   const length = gene.left_end_pos && gene.right_end_pos
     ? Math.abs(gene.right_end_pos - gene.left_end_pos) + 1
     : null
-  const assistantParams = new URLSearchParams({
+  const assistantHref = buildAssistantHref({
     surface: 'workspace',
     route: `${location.pathname}${location.search}`,
     gene: gene.symbol,
+    condition: selectedCondition,
     prompt: 'Help me inspect this selected gene. Summarize its model state IDs, pathway context, regulation, and which experiment or result views would be useful next.',
   })
-  if (selectedCondition) assistantParams.set('condition', selectedCondition)
-  const assistantHref = `/assistant?${assistantParams.toString()}`
 
   return (
     <div className="flex h-full flex-col">

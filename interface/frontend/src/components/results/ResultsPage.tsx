@@ -18,6 +18,7 @@ import { HelpTip, HelpNote } from '../common/HelpTip'
 import type { SimulationJob, ResultsResponse, ResultsSummary, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { statusLabel, variantLabel } from '../../utils/labels'
+import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -461,17 +462,16 @@ export function ResultsPage() {
   const hasWildtype = Boolean(wtDelta?.has_wildtype)
   const comparisonMetricRows = comparisonRows(primarySummary, wtDelta)
   const comparisonPresets = suggestedComparisonPresets(wtDelta)
-  const assistantParams = new URLSearchParams({
+  const assistantHref = buildAssistantHref({
     surface: 'results',
     route: `${location.pathname}${location.search}`,
     job: String(job.id),
+    gene: focusGeneSymbol,
+    experiment: experiment?.id,
+    condition: experiment?.condition,
+    variantType: experiment?.variant_type,
     prompt: 'Help me interpret this simulation result. Start with the phenotype summary, WT comparison, and the most useful model outputs to inspect next.',
   })
-  if (focusGeneSymbol) assistantParams.set('gene', focusGeneSymbol)
-  if (experiment?.id != null) assistantParams.set('experiment', String(experiment.id))
-  if (experiment?.condition) assistantParams.set('condition', experiment.condition)
-  if (experiment?.variant_type) assistantParams.set('variant_type', experiment.variant_type)
-  const assistantHref = `/assistant?${assistantParams.toString()}`
 
   return (
     <div className="h-full overflow-y-auto pr-1">
