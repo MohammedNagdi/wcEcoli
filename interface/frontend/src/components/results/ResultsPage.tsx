@@ -469,6 +469,8 @@ export function ResultsPage() {
   })
   if (focusGeneSymbol) assistantParams.set('gene', focusGeneSymbol)
   if (experiment?.id != null) assistantParams.set('experiment', String(experiment.id))
+  if (experiment?.condition) assistantParams.set('condition', experiment.condition)
+  if (experiment?.variant_type) assistantParams.set('variant_type', experiment.variant_type)
   const assistantHref = `/assistant?${assistantParams.toString()}`
 
   return (

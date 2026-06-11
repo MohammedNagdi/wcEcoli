@@ -104,6 +104,7 @@ export function ExploreWorkspacePage() {
             aaPathways={aaPathways}
             loading={detailLoading}
             selectedGene={selectedGene}
+            selectedCondition={selectedCondition}
             onSelectGene={(symbol) => setSelectedGene(symbol, { replace: false })}
           />
         </section>
@@ -117,12 +118,14 @@ function SelectedGeneSummary({
   aaPathways,
   loading,
   selectedGene,
+  selectedCondition,
   onSelectGene,
 }: {
   gene: GeneDetail | null
   aaPathways: AAPathway[]
   loading: boolean
   selectedGene: string | null
+  selectedCondition: string | null
   onSelectGene: (symbol: string) => void
 }) {
   const location = useLocation()
@@ -152,6 +155,7 @@ function SelectedGeneSummary({
     gene: gene.symbol,
     prompt: 'Help me inspect this selected gene. Summarize its model state IDs, pathway context, regulation, and which experiment or result views would be useful next.',
   })
+  if (selectedCondition) assistantParams.set('condition', selectedCondition)
   const assistantHref = `/assistant?${assistantParams.toString()}`
 
   return (

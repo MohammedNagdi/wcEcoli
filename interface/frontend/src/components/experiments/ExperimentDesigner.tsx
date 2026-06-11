@@ -1235,6 +1235,7 @@ export function ExperimentDesigner() {
     prompt: `Help me review this experiment draft before saving. Check whether the experiment type, parameter index, condition, media protocol, seeds, generations, and max cell time are biologically consistent.`,
   })
   if (effectiveExperimentEnvironment.condition) assistantParams.set('condition', effectiveExperimentEnvironment.condition)
+  if (variantType) assistantParams.set('variant_type', variantType)
   const assistantHref = `/assistant?${assistantParams.toString()}`
 
   useEffect(() => {

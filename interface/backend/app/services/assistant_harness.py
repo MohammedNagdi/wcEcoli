@@ -60,6 +60,9 @@ CONTEXT_CONTRACT = [
     "selected_experiment",
     "selected_job",
     "selected_result",
+    "selected_condition",
+    "selected_variant_type",
+    "selected_builder_section",
     "assistant_surface",
 ]
 
@@ -189,6 +192,9 @@ class AssistantContext(BaseModel):
     selected_experiment: int | None = None
     selected_job: int | None = None
     selected_result: int | None = None
+    selected_condition: str | None = None
+    selected_variant_type: str | None = None
+    selected_builder_section: str | None = None
     assistant_surface: AssistantSurface = "central"
 
 

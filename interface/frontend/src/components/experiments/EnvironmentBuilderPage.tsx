@@ -1870,10 +1870,11 @@ export function EnvironmentBuilderPage() {
     currentScheduleStartReference,
   })
   const assistantParams = new URLSearchParams({
-    surface: 'environment-builder',
+    surface: 'conditions_builder',
     route: `${location.pathname}${location.search}`,
     prompt: 'Help me review this Conditions Builder draft. Check the five-step dependency chain, saved versus dirty sections, valid publish order, and whether the media recipe, growth condition, TF rules, and media protocol are internally consistent.',
   })
+  if (highlightedSection) assistantParams.set('builder_section', highlightedSection)
   const assistantHref = `/assistant?${assistantParams.toString()}`
 
   useEffect(() => {

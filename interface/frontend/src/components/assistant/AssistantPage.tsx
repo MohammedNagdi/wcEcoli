@@ -432,6 +432,9 @@ function AssistantChatPanel({
       selected_experiment: parseOptionalNumber(params.get('experiment')),
       selected_job: parseOptionalNumber(params.get('job')),
       selected_result: parseOptionalNumber(params.get('result')),
+      selected_condition: params.get('condition') || null,
+      selected_variant_type: params.get('variant_type') || null,
+      selected_builder_section: params.get('builder_section') || null,
       assistant_surface: params.get('surface') || 'central',
     }
   }, [location.pathname, location.search])
@@ -607,6 +610,9 @@ function AssistantChatPanel({
               <span>
                 Context: <span className="font-mono">{context.route || '/assistant'}</span>
                 {context.selected_gene && <span> · gene <span className="font-mono">{context.selected_gene}</span></span>}
+                {context.selected_condition && <span> · condition <span className="font-mono">{context.selected_condition}</span></span>}
+                {context.selected_variant_type && <span> · type <span className="font-mono">{context.selected_variant_type}</span></span>}
+                {context.selected_builder_section && <span> · section <span className="font-mono">{context.selected_builder_section}</span></span>}
                 {context.selected_job != null && <span> · job <span className="font-mono">#{context.selected_job}</span></span>}
               </span>
               {context.selected_job != null && (
@@ -931,6 +937,9 @@ function AssistantRunFlow() {
     selected_experiment: experimentId,
     selected_job: null,
     selected_result: null,
+    selected_condition: condition || null,
+    selected_variant_type: 'gene_knockout',
+    selected_builder_section: null,
     assistant_surface: 'central',
   }
 

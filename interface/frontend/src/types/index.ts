@@ -841,6 +841,9 @@ export interface AssistantContext {
   selected_experiment: number | null
   selected_job: number | null
   selected_result: number | null
+  selected_condition: string | null
+  selected_variant_type: string | null
+  selected_builder_section: string | null
   assistant_surface: string
 }
 
