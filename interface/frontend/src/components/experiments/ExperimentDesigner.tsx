@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, type ReactNode } from 'react'
-import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { useNavigate, useSearchParams, Link, useLocation } from 'react-router-dom'
 import {
   getVariants, getVariantDetail, getConditions, getMediaRecipes,
   createExperiment, searchGenes, getGene,
@@ -1102,6 +1102,7 @@ function TechnicalDetails({
 
 export function ExperimentDesigner() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const {
     selectedGene,
@@ -1227,6 +1228,14 @@ export function ExperimentDesigner() {
       }))
       .filter((group) => group.options.length > 0)
   }, [showAdvancedVariants, variantsByName])
+  const assistantParams = new URLSearchParams({
+    surface: 'experiments',
+    route: `${location.pathname}${location.search}`,
+    gene: geneSymbol || selectedGenes.map((gene) => gene.symbol).join(','),
+    prompt: `Help me review this experiment draft before saving. Check whether the experiment type, parameter index, condition, media protocol, seeds, generations, and max cell time are biologically consistent.`,
+  })
+  if (effectiveExperimentEnvironment.condition) assistantParams.set('condition', effectiveExperimentEnvironment.condition)
+  const assistantHref = `/assistant?${assistantParams.toString()}`
 
   useEffect(() => {
     if (maxProtocolEventSec > protocolHorizonSec) {
@@ -1405,6 +1414,12 @@ export function ExperimentDesigner() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link
+            to={assistantHref}
+            className="inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100"
+          >
+            Ask Assistant
+          </Link>
           <StatusChip label="Environment" value={environmentSourceLabel} tone={environmentLocked ? 'amber' : 'green'} />
           <StatusChip label="Media protocol" value={environmentStatusText} tone={environmentLocked ? 'amber' : 'green'} />
         </div>

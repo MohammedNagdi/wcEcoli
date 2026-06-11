@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   createBuilderDraft,
   getBuilderDrafts,
@@ -779,6 +779,7 @@ function getSectionSummaries({
 }
 
 export function EnvironmentBuilderPage() {
+  const location = useLocation()
   const [catalog, setCatalog] = useState<ConditionCatalog | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -1868,6 +1869,12 @@ export function EnvironmentBuilderPage() {
     effectiveTimelineEvents,
     currentScheduleStartReference,
   })
+  const assistantParams = new URLSearchParams({
+    surface: 'environment-builder',
+    route: `${location.pathname}${location.search}`,
+    prompt: 'Help me review this Conditions Builder draft. Check the five-step dependency chain, saved versus dirty sections, valid publish order, and whether the media recipe, growth condition, TF rules, and media protocol are internally consistent.',
+  })
+  const assistantHref = `/assistant?${assistantParams.toString()}`
 
   useEffect(() => {
     if (!highlightedSection) return
@@ -3115,6 +3122,12 @@ export function EnvironmentBuilderPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <Link
+              to={assistantHref}
+              className="inline-flex items-center justify-center rounded-xl border border-cyan-200/40 bg-cyan-200/10 px-4 py-2 text-sm font-medium text-cyan-50 transition-colors hover:bg-cyan-200/20"
+            >
+              Ask Assistant
+            </Link>
             <Link
               to="/experiments"
               className="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
