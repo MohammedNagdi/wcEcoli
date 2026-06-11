@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  createAssistantConfirmation,
   createAssistantConversation,
   createAssistantMessage,
   executeAssistantTool,
@@ -11,23 +10,19 @@ import {
   getAssistantMessages,
   getAssistantProvenance,
   getAssistantToolCalls,
-  getConditions,
   getPlatformStatus,
   previewAssistantTool,
-  resolveAssistantConfirmation,
-  searchGenes,
 } from '../../api/client'
 import type {
   AssistantToolExecution,
   AssistantToolPreview,
   AssistantToolSpec,
   AssistantConversation,
+  AssistantContext,
   AssistantMessage,
   AssistantConfirmation,
   AssistantProvenance,
   AssistantToolCall,
-  Condition,
-  Gene,
   PlatformStatus,
   ProviderStatus,
 } from '../../types'
@@ -48,18 +43,16 @@ function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: '
 
 function Card({
   title,
-  issue,
   children,
 }: {
   title: string
-  issue: string
+  issue?: string
   children: ReactNode
 }) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
       <div className="mb-3 flex items-start justify-between gap-3">
         <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-        <StatusPill tone="planned">{issue}</StatusPill>
       </div>
       {children}
     </section>
@@ -263,117 +256,6 @@ function ToolReviewPanel({
   )
 }
 
-function GeneSearchBox({
-  value,
-  onChange,
-}: {
-  value: string
-  onChange: (symbol: string) => void
-}) {
-  const [query, setQuery] = useState(value)
-  const [options, setOptions] = useState<Gene[]>([])
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    setQuery(value)
-  }, [value])
-
-  useEffect(() => {
-    let active = true
-    const search = query.trim()
-    if (search.length < 1) {
-      setOptions([])
-      return
-    }
-    setLoading(true)
-    searchGenes(search, 8)
-      .then((genes) => {
-        if (active) setOptions(genes)
-      })
-      .catch(() => {
-        if (active) setOptions([])
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [query])
-
-  return (
-    <div className="text-sm">
-      <label htmlFor="assistant-gene" className="font-medium text-gray-700">Gene</label>
-      <input
-        id="assistant-gene"
-        value={query}
-        onChange={(event) => {
-          setQuery(event.target.value)
-          onChange(event.target.value)
-        }}
-        className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
-        placeholder="Search by symbol, synonym, or ID"
-      />
-      <div className="mt-2 min-h-20 rounded-md border border-gray-100 bg-gray-50 p-2">
-        {loading && <div className="px-2 py-1 text-xs text-gray-500">Searching genes...</div>}
-        {!loading && options.length === 0 && (
-          <div className="px-2 py-1 text-xs text-gray-500">Type a gene symbol, synonym, or EcoCyc ID.</div>
-        )}
-        {!loading && options.map((gene) => (
-          <button
-            key={`${gene.ecoli_id}-${gene.symbol}`}
-            type="button"
-            onClick={() => {
-              onChange(gene.symbol)
-              setQuery(gene.symbol)
-            }}
-            className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs hover:bg-white ${gene.symbol === value ? 'bg-white ring-1 ring-brand-200' : ''}`}
-          >
-            <span>
-              <span className="font-mono font-semibold text-bio-gene">{gene.symbol}</span>
-              <span className="ml-2 text-gray-500">{gene.ecoli_id}</span>
-            </span>
-            <span className="text-gray-400">KO #{gene.ko_index || '-'}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ConditionSelect({
-  value,
-  onChange,
-  conditions,
-  loading,
-}: {
-  value: string
-  onChange: (condition: string) => void
-  conditions: Condition[]
-  loading: boolean
-}) {
-  return (
-    <label className="text-sm">
-      <span className="font-medium text-gray-700">Condition</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
-      >
-        {conditions.length === 0 && <option value={value}>{loading ? 'Loading conditions...' : value}</option>}
-        {conditions.map((condition) => (
-          <option key={condition.name} value={condition.name}>
-            {condition.name}{condition.nutrients ? ` - ${condition.nutrients}` : ''}
-          </option>
-        ))}
-      </select>
-      <p className="mt-1 text-xs text-gray-500">
-        Pick the saved growth condition the model should use unless the experiment type overrides it internally.
-      </p>
-    </label>
-  )
-}
-
 function messageStatusTone(status: string): 'neutral' | 'ready' | 'blocked' | 'planned' {
   if (status === 'completed') return 'ready'
   if (status.includes('failed') || status.includes('no_provider') || status.includes('not_configured')) return 'blocked'
@@ -405,7 +287,179 @@ function parseOptionalNumber(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function AssistantChatPanel({
+function surfaceName(context: AssistantContext): string {
+  const route = context.route || ''
+  if (context.assistant_surface === 'results' || route.includes('/results')) return 'Results'
+  if (context.assistant_surface === 'workspace' || route === '/' || route.includes('workspace')) return 'Workspace'
+  if (context.assistant_surface === 'conditions_builder' || route.includes('environment-builder')) return 'Conditions Builder'
+  if (context.assistant_surface === 'experiments' || route.includes('/experiments')) return 'Experiments'
+  if (context.assistant_surface === 'network' || route.includes('/network')) return 'Network'
+  if (context.assistant_surface === 'genome' || route.includes('/genome')) return 'Genome Map'
+  return 'Assistant'
+}
+
+function contextSummary(context: AssistantContext): string {
+  const surface = surfaceName(context)
+  if (surface === 'Results') {
+    const gene = context.selected_gene ? `${context.selected_gene} ` : ''
+    const condition = context.selected_condition ? ` under ${context.selected_condition}` : ''
+    const job = context.selected_job != null ? `, Job #${context.selected_job}` : ''
+    return `You are viewing ${gene}simulation results${condition}${job}.`
+  }
+  if (surface === 'Workspace' && context.selected_gene) {
+    return `You are inspecting gene ${context.selected_gene} in Workspace.`
+  }
+  if (surface === 'Conditions Builder') {
+    const section = context.selected_builder_section
+      ? ` in the ${context.selected_builder_section.replace(/_/g, ' ')} section`
+      : ''
+    return `You are editing environment inputs${section}.`
+  }
+  if (surface === 'Experiments') {
+    const gene = context.selected_gene ? ` for ${context.selected_gene}` : ''
+    const variant = context.selected_variant_type ? ` as ${context.selected_variant_type.replace(/_/g, ' ')}` : ''
+    return `You are designing or reviewing an experiment${gene}${variant}.`
+  }
+  if (context.selected_gene) return `You are focused on gene ${context.selected_gene}.`
+  return 'You are in the central Assistant workspace.'
+}
+
+function contextFacts(context: AssistantContext): Array<{ label: string; value: string }> {
+  const facts = [
+    { label: 'Surface', value: surfaceName(context) },
+    context.selected_gene ? { label: 'Gene', value: context.selected_gene } : null,
+    context.selected_condition ? { label: 'Condition', value: context.selected_condition } : null,
+    context.selected_variant_type ? { label: 'Experiment type', value: context.selected_variant_type.replace(/_/g, ' ') } : null,
+    context.selected_builder_section ? { label: 'Builder section', value: context.selected_builder_section.replace(/_/g, ' ') } : null,
+    context.selected_job != null ? { label: 'Job', value: `#${context.selected_job}` } : null,
+    context.selected_experiment != null ? { label: 'Experiment', value: `#${context.selected_experiment}` } : null,
+  ]
+  return facts.filter((fact): fact is { label: string; value: string } => Boolean(fact))
+}
+
+function suggestedActions(context: AssistantContext): Array<{
+  title: string
+  description: string
+  kind: 'read' | 'proposal' | 'link'
+  path?: string
+}> {
+  const surface = surfaceName(context)
+  const gene = context.selected_gene
+  if (surface === 'Results') {
+    return [
+      {
+        title: 'Inspect current result',
+        description: 'Ask the platform to summarize available deterministic outputs for this job.',
+        kind: 'read',
+      },
+      {
+        title: 'Compare with WT delta',
+        description: 'Prioritize state variables whose final values diverge from the wildtype control.',
+        kind: 'proposal',
+      },
+      {
+        title: 'Review linked model states',
+        description: 'Check mRNA, monomer, complex, reaction, and metabolite links before interpreting the phenotype.',
+        kind: 'proposal',
+      },
+      ...(gene
+        ? [{
+            title: 'Open linked network',
+            description: `Inspect local regulation around ${gene}.`,
+            kind: 'link' as const,
+            path: `/network?gene=${encodeURIComponent(gene)}`,
+          }]
+        : []),
+    ]
+  }
+  if (surface === 'Workspace' && gene) {
+    return [
+      {
+        title: 'Inspect model state IDs',
+        description: `List the mRNA, protein, complex, pathway, and metabolite IDs connected to ${gene}.`,
+        kind: 'proposal',
+      },
+      {
+        title: 'Open local TF network',
+        description: 'Check whether regulation provides a plausible route to downstream effects.',
+        kind: 'link',
+        path: `/network?gene=${encodeURIComponent(gene)}`,
+      },
+      {
+        title: 'Draft follow-up knockout',
+        description: 'Open the canonical Experiment Designer with this gene preselected.',
+        kind: 'link',
+        path: `/experiments/new?gene=${encodeURIComponent(gene)}`,
+      },
+    ]
+  }
+  if (surface === 'Conditions Builder') {
+    return [
+      {
+        title: 'Review dependency chain',
+        description: 'Check stock, recipe, condition, TF-state rules, and time-varying protocol consistency.',
+        kind: 'proposal',
+      },
+      {
+        title: 'Validate current draft',
+        description: 'Ask for missing IDs, ambiguous fields, and publish-readiness issues.',
+        kind: 'proposal',
+      },
+    ]
+  }
+  if (surface === 'Experiments') {
+    return [
+      {
+        title: 'Check experiment meaning',
+        description: 'Clarify what the selected experiment type changes in the model before saving.',
+        kind: 'proposal',
+      },
+      {
+        title: 'Review condition and timeline',
+        description: 'Check whether the selected environment is static or uses a time-varying protocol.',
+        kind: 'proposal',
+      },
+    ]
+  }
+  return [
+    {
+      title: 'Start from current page',
+      description: 'Ask what this page can do, what data it uses, or what to inspect next.',
+      kind: 'proposal',
+    },
+    {
+      title: 'Open Experiment Designer',
+      description: 'Create or review a simulation through the canonical experiment workflow.',
+      kind: 'link',
+      path: '/experiments/new',
+    },
+  ]
+}
+
+function FactBadge({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-gray-100 bg-white px-3 py-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="mt-1 truncate text-sm font-medium text-gray-900">{value}</div>
+    </div>
+  )
+}
+
+function AdvancedDisclosure({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="rounded-lg border border-gray-200 bg-white shadow-sm">
+      <summary className="cursor-pointer list-none px-5 py-4 text-sm font-semibold text-gray-900">
+        {title}
+        <span className="ml-2 text-xs font-normal text-gray-500">advanced</span>
+      </summary>
+      <div className="border-t border-gray-100 p-5">
+        {children}
+      </div>
+    </details>
+  )
+}
+
+function TaskCenteredAssistantPanel({
   providerConfigured,
   onConversationChange,
 }: {
@@ -443,6 +497,8 @@ function AssistantChatPanel({
     const params = new URLSearchParams(location.search)
     return params.get('prompt') || ''
   }, [location.search])
+  const actionCards = useMemo(() => suggestedActions(context), [context])
+  const facts = useMemo(() => contextFacts(context), [context])
 
   async function loadConversationMessages(conversation: AssistantConversation) {
     setError(null)
@@ -552,25 +608,30 @@ function AssistantChatPanel({
     }
   }
 
+  function useSuggestedAction(title: string) {
+    setInput((current) => current.trim() ? current : title)
+  }
+
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-4">
         <div>
-          <h2 className="text-base font-semibold text-gray-900">Assistant chat</h2>
+          <h2 className="text-base font-semibold text-gray-900">Assistant workspace</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-            Chat receives the current page context and can answer normally. It can run read-only result inspection, but cannot queue simulations or edit data.
+            Ask questions, inspect deterministic platform facts, and review proposed next steps. Side-effecting actions still require explicit preview and confirmation.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <StatusPill tone={providerConfigured ? 'ready' : 'blocked'}>
             {providerConfigured ? 'provider configured' : 'no provider'}
           </StatusPill>
-          <StatusPill tone="planned">read-only result tool</StatusPill>
+          <StatusPill tone="ready">read-only inspection</StatusPill>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
         <aside className="rounded-md border border-gray-100 bg-gray-50 p-3">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Conversations</div>
           <button
             type="button"
             onClick={startNewChat}
@@ -578,7 +639,7 @@ function AssistantChatPanel({
           >
             New chat
           </button>
-          <div className="mt-3 max-h-72 space-y-2 overflow-auto">
+          <div className="mt-3 max-h-[520px] space-y-2 overflow-auto">
             {loading && <div className="text-xs text-gray-500">Loading conversations...</div>}
             {!loading && conversations.length === 0 && (
               <div className="text-xs leading-5 text-gray-500">No saved conversations yet.</div>
@@ -601,31 +662,12 @@ function AssistantChatPanel({
           </div>
         </aside>
 
-        <div className="flex min-h-[420px] flex-col rounded-md border border-gray-100">
+        <div className="flex min-h-[620px] flex-col rounded-md border border-gray-100">
           <div className="border-b border-gray-100 px-4 py-3">
             <div className="text-sm font-medium text-gray-900">
               {activeConversation?.title ?? 'New assistant conversation'}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-              <span>
-                Context: <span className="font-mono">{context.route || '/assistant'}</span>
-                {context.selected_gene && <span> · gene <span className="font-mono">{context.selected_gene}</span></span>}
-                {context.selected_condition && <span> · condition <span className="font-mono">{context.selected_condition}</span></span>}
-                {context.selected_variant_type && <span> · type <span className="font-mono">{context.selected_variant_type}</span></span>}
-                {context.selected_builder_section && <span> · section <span className="font-mono">{context.selected_builder_section}</span></span>}
-                {context.selected_job != null && <span> · job <span className="font-mono">#{context.selected_job}</span></span>}
-              </span>
-              {context.selected_job != null && (
-                <button
-                  type="button"
-                  onClick={inspectCurrentResult}
-                  disabled={inspecting}
-                  className="rounded border border-gray-200 bg-white px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  {inspecting ? 'Inspecting...' : 'Inspect current result'}
-                </button>
-              )}
-            </div>
+            <div className="mt-1 text-xs leading-5 text-gray-500">{contextSummary(context)}</div>
           </div>
 
           <div className="flex-1 space-y-3 overflow-auto bg-gray-50 px-4 py-4">
@@ -638,8 +680,7 @@ function AssistantChatPanel({
             )}
             {messages.length === 0 && (
               <div className="rounded-md border border-dashed border-gray-200 bg-white p-4 text-sm leading-6 text-gray-500">
-                Ask about the current page, a result you are inspecting, or what the platform can safely do next. Read-only result inspection can run from here;
-                side effects still require explicit guided-flow confirmation.
+                Ask about the current page, a result you are inspecting, or what the platform can safely do next. The assistant can propose actions, but text alone never executes them.
               </div>
             )}
             {messages.map((message) => (
@@ -677,7 +718,7 @@ function AssistantChatPanel({
                   sendMessage()
                 }
               }}
-              placeholder="Ask about the selected route or what to inspect next..."
+              placeholder="Ask what to inspect next, or use a suggested action..."
               className="h-24 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-800"
             />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
@@ -693,6 +734,73 @@ function AssistantChatPanel({
             </div>
           </div>
         </div>
+
+        <aside className="space-y-4 rounded-md border border-gray-100 bg-gray-50 p-3">
+          <div className="rounded-md border border-brand-100 bg-white p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Current context</div>
+            <div className="mt-2 text-sm font-medium leading-6 text-gray-900">{contextSummary(context)}</div>
+            <div className="mt-3 grid gap-2">
+              {facts.map((fact) => (
+                <FactBadge key={`${fact.label}-${fact.value}`} label={fact.label} value={fact.value} />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-md border border-gray-100 bg-white p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Suggested next steps</div>
+            <div className="mt-3 space-y-2">
+              {actionCards.map((action) => (
+                <div key={action.title} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">{action.title}</div>
+                      <div className="mt-1 text-xs leading-5 text-gray-500">{action.description}</div>
+                    </div>
+                    <StatusPill tone={action.kind === 'read' ? 'ready' : action.kind === 'link' ? 'neutral' : 'planned'}>
+                      {action.kind === 'read' ? 'platform fact' : action.kind === 'link' ? 'open page' : 'proposal'}
+                    </StatusPill>
+                  </div>
+                  <div className="mt-3">
+                    {action.kind === 'read' && context.selected_job != null ? (
+                      <button
+                        type="button"
+                        onClick={inspectCurrentResult}
+                        disabled={inspecting}
+                        className="rounded-md border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50"
+                      >
+                        {inspecting ? 'Inspecting...' : 'Run read-only inspection'}
+                      </button>
+                    ) : action.path ? (
+                      <Link
+                        to={action.path}
+                        className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        Open
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => useSuggestedAction(action.title)}
+                        className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        Ask
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-md border border-gray-100 bg-white p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Trust boundary</div>
+            <div className="mt-2 space-y-2 text-xs leading-5 text-gray-600">
+              <div><span className="font-semibold text-gray-900">Platform fact:</span> fetched from deterministic app data or a read-only adapter.</div>
+              <div><span className="font-semibold text-gray-900">Assistant interpretation:</span> model-generated explanation that should cite platform facts.</div>
+              <div><span className="font-semibold text-gray-900">Proposed action:</span> never executed from text alone.</div>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
   )
@@ -892,330 +1000,6 @@ function AssistantAuditPanel({ activeConversationId }: { activeConversationId: n
   )
 }
 
-function AssistantRunFlow() {
-  const [gene, setGene] = useState('dnaA')
-  const [condition, setCondition] = useState('basal')
-  const [conditions, setConditions] = useState<Condition[]>([])
-  const [conditionsLoading, setConditionsLoading] = useState(true)
-  const [seed, setSeed] = useState(0)
-  const [generations, setGenerations] = useState(1)
-  const [lengthSec, setLengthSec] = useState(10800)
-  const [experimentId, setExperimentId] = useState<number | null>(null)
-  const [createdDraftKey, setCreatedDraftKey] = useState('')
-  const [queuedRunKey, setQueuedRunKey] = useState('')
-  const [createPreview, setCreatePreview] = useState<AssistantToolPreview | null>(null)
-  const [createExecution, setCreateExecution] = useState<AssistantToolExecution | null>(null)
-  const [runPreview, setRunPreview] = useState<AssistantToolPreview | null>(null)
-  const [runExecution, setRunExecution] = useState<AssistantToolExecution | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let active = true
-    getConditions()
-      .then((items) => {
-        if (!active) return
-        setConditions(items)
-        if (!items.some((item) => item.name === condition) && items[0]) {
-          setCondition(items[0].name)
-        }
-      })
-      .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (active) setConditionsLoading(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [])
-
-  const context = {
-    route: '/assistant',
-    selected_gene: gene || null,
-    selected_experiment: experimentId,
-    selected_job: null,
-    selected_result: null,
-    selected_condition: condition || null,
-    selected_variant_type: 'gene_knockout',
-    selected_builder_section: null,
-    assistant_surface: 'central',
-  }
-
-  const createArguments = {
-    name: `${gene || 'selected gene'} knockout`,
-    description: 'Assistant-guided draft experiment',
-    variant_type: 'gene_knockout',
-    variant_index: 0,
-    condition,
-    timeline: '',
-    sim_params: { seeds: 1, generations, length_sec: lengthSec },
-    gene_symbol: gene,
-    gene_symbols: [],
-    include_wildtype: false,
-  }
-
-  const draftKey = useMemo(
-    () => JSON.stringify(createArguments),
-    [gene, condition, generations, lengthSec]
-  )
-  const runKey = useMemo(
-    () => JSON.stringify({ experimentId, seed, generations }),
-    [experimentId, seed, generations]
-  )
-  const hasCurrentDraft = experimentId !== null && createdDraftKey === draftKey
-  const hasQueuedCurrentRun = queuedRunKey === runKey
-
-  useEffect(() => {
-    setCreatePreview(null)
-    setCreateExecution(null)
-    setExperimentId(null)
-    setCreatedDraftKey('')
-    setRunPreview(null)
-    setRunExecution(null)
-    setQueuedRunKey('')
-  }, [draftKey])
-
-  useEffect(() => {
-    setRunPreview(null)
-    setRunExecution(null)
-    setQueuedRunKey('')
-  }, [runKey])
-
-  async function previewDraft() {
-    setBusy('preview-create')
-    setError(null)
-    try {
-      const preview = await previewAssistantTool('create_experiment', { arguments: createArguments, context })
-      setCreatePreview(preview)
-      setCreateExecution(null)
-      setRunPreview(null)
-      setRunExecution(null)
-      setExperimentId(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function confirmAndCreate() {
-    setBusy('execute-create')
-    setError(null)
-    try {
-      const preview = await previewAssistantTool('create_experiment', { arguments: createArguments, context })
-      setCreatePreview(preview)
-      if (!preview.valid) return
-      const confirmation = await createAssistantConfirmation({
-        action: 'create_experiment',
-        payload: preview.normalized_arguments,
-      })
-      const approved = await resolveAssistantConfirmation(confirmation.id, {
-        status: 'approved',
-        note: 'Approved from assistant run flow.',
-      })
-      const executed = await executeAssistantTool('create_experiment', {
-        arguments: createArguments,
-        context,
-        confirmation_id: approved.id,
-      })
-      setCreateExecution(executed)
-      const experiment = asRecord(executed.result.experiment)
-      const id = numericField(experiment.id)
-      setExperimentId(id)
-      setCreatedDraftKey(draftKey)
-      setRunPreview(null)
-      setRunExecution(null)
-      setQueuedRunKey('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function previewRun() {
-    if (!experimentId || !hasCurrentDraft) {
-      setError('Create an experiment draft before previewing the run.')
-      return
-    }
-    setBusy('preview-run')
-    setError(null)
-    try {
-      const preview = await previewAssistantTool('run_simulation', {
-        arguments: { experiment_id: experimentId, seed, generations },
-        context: { ...context, selected_experiment: experimentId },
-      })
-      setRunPreview(preview)
-      setRunExecution(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function confirmAndQueueRun() {
-    if (!experimentId || !hasCurrentDraft) {
-      setError('Create an experiment draft before queueing the run.')
-      return
-    }
-    if (hasQueuedCurrentRun) {
-      setError('This exact seed/generation run has already been queued from the current draft.')
-      return
-    }
-    setBusy('execute-run')
-    setError(null)
-    try {
-      const runArguments = { experiment_id: experimentId, seed, generations }
-      const preview = await previewAssistantTool('run_simulation', {
-        arguments: runArguments,
-        context: { ...context, selected_experiment: experimentId },
-      })
-      setRunPreview(preview)
-      if (!preview.valid) return
-      const confirmation = await createAssistantConfirmation({
-        action: 'run_simulation',
-        payload: preview.normalized_arguments,
-      })
-      const approved = await resolveAssistantConfirmation(confirmation.id, {
-        status: 'approved',
-        note: 'Approved from assistant run flow.',
-      })
-      const executed = await executeAssistantTool('run_simulation', {
-        arguments: runArguments,
-        context: { ...context, selected_experiment: experimentId },
-        confirmation_id: approved.id,
-      })
-      setRunExecution(executed)
-      if (executed.executed) setQueuedRunKey(runKey)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  return (
-    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">Guided run flow</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-            This separates the two side effects: first create a reviewed experiment draft, then queue one simulation job from that draft.
-          </p>
-        </div>
-        <StatusPill tone="ready">confirmation bound</StatusPill>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        <GeneSearchBox value={gene} onChange={setGene} />
-        <ConditionSelect
-          value={condition}
-          onChange={setCondition}
-          conditions={conditions}
-          loading={conditionsLoading}
-        />
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <label className="text-sm">
-          <span className="font-medium text-gray-700">Seed</span>
-          <input
-            type="number"
-            min={0}
-            value={seed}
-            onChange={(event) => setSeed(Number(event.target.value))}
-            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
-          />
-          <p className="mt-1 text-xs text-gray-500">One deterministic replicate index for this guided run.</p>
-        </label>
-        <label className="text-sm">
-          <span className="font-medium text-gray-700">Generations</span>
-          <input
-            type="number"
-            min={1}
-            value={generations}
-            onChange={(event) => setGenerations(Number(event.target.value))}
-            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
-          />
-          <p className="mt-1 text-xs text-gray-500">How many generations the worker should attempt for the queued job.</p>
-        </label>
-        <label className="text-sm">
-          <span className="font-medium text-gray-700">Max duration (s)</span>
-          <input
-            type="number"
-            min={1}
-            value={lengthSec}
-            onChange={(event) => setLengthSec(Number(event.target.value))}
-            className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2"
-          />
-          <p className="mt-1 text-xs text-gray-500">Maximum simulated time allowed for each generation attempt.</p>
-        </label>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={previewDraft}
-          disabled={Boolean(busy) || !gene.trim() || !condition.trim()}
-          className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
-          Preview draft
-        </button>
-        <button
-          type="button"
-          onClick={confirmAndCreate}
-          disabled={Boolean(busy) || !gene.trim() || !condition.trim()}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          Confirm and create draft
-        </button>
-        <button
-          type="button"
-          onClick={previewRun}
-          disabled={Boolean(busy) || !hasCurrentDraft}
-          className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
-          Preview run
-        </button>
-        <button
-          type="button"
-          onClick={confirmAndQueueRun}
-          disabled={Boolean(busy) || !hasCurrentDraft || hasQueuedCurrentRun}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          Confirm and queue run
-        </button>
-      </div>
-
-      {error && <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-      {busy && <div className="mt-3 text-sm text-gray-500">Working: {busy.replace(/-/g, ' ')}</div>}
-      {experimentId && (
-        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          Draft experiment #{experimentId} is ready for a separately confirmed run.
-        </div>
-      )}
-      {experimentId && !hasCurrentDraft && (
-        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          The form changed after draft creation. Create a new draft before queueing a run.
-        </div>
-      )}
-      {hasQueuedCurrentRun && (
-        <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-          This seed/generation run has already been queued from the current draft.
-        </div>
-      )}
-
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <ToolReviewPanel title="Experiment draft side effect" preview={createPreview} execution={createExecution} />
-        <ToolReviewPanel title="Simulation queue side effect" preview={runPreview} execution={runExecution} />
-      </div>
-    </section>
-  )
-}
-
 export function AssistantPage() {
   const [status, setStatus] = useState<PlatformStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1248,12 +1032,11 @@ export function AssistantPage() {
         <div>
           <h1 className="text-2xl font-semibold text-gray-950">Assistant</h1>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
-            Central chat and contextual copilots are scaffolded here. The typed tool harness now supports previews,
-            provenance, and confirmation-bound experiment creation and simulation queueing.
+            Use the current page context to ask questions, inspect deterministic outputs, and review proposed next steps before anything changes.
           </p>
         </div>
         <StatusPill tone={assistantReady ? 'ready' : 'blocked'}>
-          {assistantReady ? 'Ready' : 'Scaffold only'}
+          {assistantReady ? 'Ready' : 'Provider needed'}
         </StatusPill>
       </header>
 
@@ -1263,135 +1046,113 @@ export function AssistantPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Local-first runtime" issue="#9">
-          <p className="text-sm leading-6 text-gray-600">
-            The platform should start and run locally through Docker without a hosted backend or paid platform account. Optional
-            artifact bootstrap can later download prepared data, seed databases, or precomputed examples.
-          </p>
-          <div className="mt-4 grid gap-2 text-sm">
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Mode</span>
-              <span className="font-medium text-gray-900">{status?.distribution.mode ?? 'local-first'}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Runtime</span>
-              <span className="font-medium text-gray-900">{status?.distribution.runtime ?? 'Docker Compose'}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Hosted backend required</span>
-              <span className="font-medium text-gray-900">
-                {status?.distribution.requires_hosted_backend ? 'Yes' : 'No'}
-              </span>
-            </div>
-          </div>
-          {status?.distribution.notes.map((note) => (
-            <p key={note} className="mt-3 text-xs leading-5 text-gray-500">{note}</p>
-          ))}
-        </Card>
+      <TaskCenteredAssistantPanel
+        providerConfigured={Boolean(status?.assistant.provider_configured)}
+        onConversationChange={setActiveConversationId}
+      />
 
-        <Card title="BYOK and local model providers" issue="#10">
-          <p className="text-sm leading-6 text-gray-600">
-            The app must remain usable without an LLM. Provider configuration should be explicit, local-first, and separate from
-            the scientific assistant behavior.
-          </p>
-          <div className="mt-4 rounded-md border border-gray-100 px-3">
-            {(status?.providers.providers ?? []).map((provider) => (
-              <ProviderRow key={provider.provider_id} provider={provider} />
+      <AdvancedDisclosure title="Provider, runtime, and tool settings">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card title="Local-first runtime">
+            <p className="text-sm leading-6 text-gray-600">
+              The platform should start and run locally through Docker without a hosted backend or paid platform account. Optional
+              artifact bootstrap can later download prepared data, seed databases, or precomputed examples.
+            </p>
+            <div className="mt-4 grid gap-2 text-sm">
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Mode</span>
+                <span className="font-medium text-gray-900">{status?.distribution.mode ?? 'local-first'}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Runtime</span>
+                <span className="font-medium text-gray-900">{status?.distribution.runtime ?? 'Docker Compose'}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Hosted backend required</span>
+                <span className="font-medium text-gray-900">
+                  {status?.distribution.requires_hosted_backend ? 'Yes' : 'No'}
+                </span>
+              </div>
+            </div>
+            {status?.distribution.notes.map((note) => (
+              <p key={note} className="mt-3 text-xs leading-5 text-gray-500">{note}</p>
             ))}
-          </div>
-          <p className="mt-3 text-xs text-gray-500">
-            {configuredProviders} provider{configuredProviders === 1 ? '' : 's'} configured in this environment.
-          </p>
-        </Card>
+          </Card>
 
-        <Card title="Typed assistant harness" issue="#11">
-          <p className="text-sm leading-6 text-gray-600">
-            The assistant should receive validated page context and return messages, tool-call records, proposals, links, and
-            pending confirmations. It should not receive direct database, filesystem, Docker, shell, or Python access.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {(status?.assistant.context_contract ?? ['route', 'selected_gene', 'selected_experiment', 'selected_job']).map((item) => (
-              <StatusPill key={item}>{item}</StatusPill>
-            ))}
-          </div>
-          <div className="mt-4 grid gap-2 text-sm">
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Message persistence</span>
-              <span className="font-medium text-gray-900">
-                {status?.assistant.db_persistence_enabled ? 'Enabled' : 'Disabled'}
-              </span>
+          <Card title="BYOK and local model providers">
+            <p className="text-sm leading-6 text-gray-600">
+              The app must remain usable without an LLM. Provider configuration should be explicit, local-first, and separate from
+              the scientific assistant behavior.
+            </p>
+            <div className="mt-4 rounded-md border border-gray-100 px-3">
+              {(status?.providers.providers ?? []).map((provider) => (
+                <ProviderRow key={provider.provider_id} provider={provider} />
+              ))}
             </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Tool execution</span>
-              <span className="font-medium text-gray-900">
-                {status?.assistant.tool_execution_enabled ? 'Partial' : 'Disabled'}
-              </span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Side-effect execution</span>
-              <span className="font-medium text-gray-900">
-                {status?.assistant.side_effect_execution_enabled ? 'Enabled' : 'Disabled'}
-              </span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Dry-run previews</span>
-              <span className="font-medium text-gray-900">
-                {status?.assistant.tool_preview_enabled ? 'Enabled' : 'Disabled'}
-              </span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Registered tools</span>
-              <span className="font-medium text-gray-900">{toolCount}</span>
-            </div>
-          </div>
-          <div className="mt-4 text-sm text-gray-600">
-            <div className="font-medium text-gray-900">Executable now</div>
-            <div className="mt-1">
-              {(status?.assistant.execution_enabled_tools ?? []).join(', ') || 'No tools'}
-            </div>
-          </div>
-          <div className="mt-4 text-sm text-gray-600">
-            <div className="font-medium text-gray-900">Confirmation required for</div>
-            <div className="mt-1">
-              {(status?.assistant.confirmation_required_for ?? ['run_simulation', 'publish_condition']).join(', ')}
-            </div>
-          </div>
-        </Card>
+            <p className="mt-3 text-xs text-gray-500">
+              {configuredProviders} provider{configuredProviders === 1 ? '' : 's'} configured in this environment.
+            </p>
+          </Card>
 
-        <Card title="Registered tools" issue="#11">
-          <p className="text-sm leading-6 text-gray-600">
-            Tools are visible to the UI as typed contracts. Dry-run previews can validate arguments and local references.
-            Read-only result inspection can execute now, and simulations can be queued only after explicit confirmation.
-            Other side-effecting adapters remain disabled.
-          </p>
-          <div className="mt-4 rounded-md border border-gray-100 px-3">
-            {(status?.assistant.tool_registry ?? []).map((tool) => (
-              <ToolRow key={tool.name} tool={tool} />
-            ))}
-          </div>
-        </Card>
+          <Card title="Typed assistant harness">
+            <p className="text-sm leading-6 text-gray-600">
+              The assistant receives validated page context and returns messages, records, proposals, links, and pending confirmations.
+              It does not receive direct database, filesystem, Docker, shell, or Python access.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {(status?.assistant.context_contract ?? ['route', 'selected_gene', 'selected_experiment', 'selected_job']).map((item) => (
+                <StatusPill key={item}>{item}</StatusPill>
+              ))}
+            </div>
+            <div className="mt-4 grid gap-2 text-sm">
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Message persistence</span>
+                <span className="font-medium text-gray-900">
+                  {status?.assistant.db_persistence_enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Tool execution</span>
+                <span className="font-medium text-gray-900">
+                  {status?.assistant.tool_execution_enabled ? 'Partial' : 'Disabled'}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Side-effect execution</span>
+                <span className="font-medium text-gray-900">
+                  {status?.assistant.side_effect_execution_enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Dry-run previews</span>
+                <span className="font-medium text-gray-900">
+                  {status?.assistant.tool_preview_enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Registered tools</span>
+                <span className="font-medium text-gray-900">{toolCount}</span>
+              </div>
+            </div>
+          </Card>
 
-        <AssistantChatPanel
-          providerConfigured={Boolean(status?.assistant.provider_configured)}
-          onConversationChange={setActiveConversationId}
-        />
+          <Card title="Registered tools">
+            <p className="text-sm leading-6 text-gray-600">
+              Tools are typed contracts. Dry-run previews validate arguments and local references. Read-only result inspection can
+              execute now; side effects require explicit confirmation.
+            </p>
+            <div className="mt-4 rounded-md border border-gray-100 px-3">
+              {(status?.assistant.tool_registry ?? []).map((tool) => (
+                <ToolRow key={tool.name} tool={tool} />
+              ))}
+            </div>
+          </Card>
+        </div>
+      </AdvancedDisclosure>
 
-        <AssistantRunFlow />
-
+      <AdvancedDisclosure title="Activity and provenance">
         <AssistantAuditPanel activeConversationId={activeConversationId} />
-
-        <Card title="Assistant UI surfaces" issue="#12">
-          <p className="text-sm leading-6 text-gray-600">
-            This page is the central assistant route. Contextual copilot entry points should later appear in Workspace,
-            Conditions Builder, Experiments, Results, ML, and Genome Design after the harness and provider layer are active.
-          </p>
-          <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm leading-6 text-gray-600">
-            Central chat is now active on this page. Contextual entry points are still pending and should pass richer page state into
-            the same message/runtime path.
-          </div>
-        </Card>
-      </div>
+      </AdvancedDisclosure>
     </div>
   )
 }
