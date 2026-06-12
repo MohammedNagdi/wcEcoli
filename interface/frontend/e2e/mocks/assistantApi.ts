@@ -140,6 +140,8 @@ interface MockOptions {
   proposals?: unknown[]
   /** status to stamp on the assistant message (e.g. 'provider_call_failed') */
   assistantStatus?: string
+  /** if set, stream this as reasoning before a tool call, then the reply as the final answer */
+  thinking?: string
 }
 
 export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Promise<void> {
@@ -148,13 +150,21 @@ export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Prom
   const userMsg = { id: 1, conversation_id: 1, role: 'user', content: 'hi', context: CTX, status: 'stored', created_at: '' }
   const asstMsg = { id: 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: opts.assistantStatus ?? 'completed', created_at: '' }
 
-  const streamBody = sse([
+  const streamEvents: unknown[] = [
     { type: 'meta', provider_id: 'openai', model: 'gpt-4.1-mini' },
     { type: 'user', message: userMsg },
-    { type: 'delta', text: reply.slice(0, Math.ceil(reply.length / 2)) },
-    { type: 'delta', text: reply.slice(Math.ceil(reply.length / 2)) },
-    { type: 'done', conversation: CONVERSATION, user_message: userMsg, assistant_message: asstMsg, proposals },
-  ])
+  ]
+  if (opts.thinking) {
+    // Reasoning, then a tool runs (folds the reasoning into the thinking trail), then the answer.
+    streamEvents.push({ type: 'delta', text: opts.thinking })
+    streamEvents.push({ type: 'status', status: 'running_tool', tool: 'list_conditions' })
+    streamEvents.push({ type: 'delta', text: reply })
+  } else {
+    streamEvents.push({ type: 'delta', text: reply.slice(0, Math.ceil(reply.length / 2)) })
+    streamEvents.push({ type: 'delta', text: reply.slice(Math.ceil(reply.length / 2)) })
+  }
+  streamEvents.push({ type: 'done', conversation: CONVERSATION, user_message: userMsg, assistant_message: asstMsg, proposals })
+  const streamBody = sse(streamEvents)
 
   // Catch-all FIRST so the specific handlers below (registered later) take precedence — Playwright
   // invokes the most recently registered matching handler first.

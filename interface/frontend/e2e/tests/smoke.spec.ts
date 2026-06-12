@@ -97,6 +97,27 @@ test.describe('Assistant smoke', () => {
     await expect(msg.locator('em')).toHaveCount(0)
   })
 
+  test('shows the reasoning trail separately from the final answer', async ({ page }) => {
+    await mockAssistantApi(page, {
+      thinking: 'I need a job id to read channels; let me check conditions first.',
+      reply: 'Here are the available output channels.',
+    })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('what channels are available')
+    await page.getByTestId('assistant-send').click()
+
+    // Final answer lands in the assistant bubble; reasoning is NOT in it.
+    const msg = page.getByTestId('message-assistant')
+    await expect(msg).toContainText('Here are the available output channels.')
+    await expect(msg).not.toContainText('I need a job id')
+
+    // The reasoning is preserved in a collapsible "Thought process" block.
+    const thought = page.getByText(/Thought process/)
+    await expect(thought).toBeVisible()
+    await thought.click()
+    await expect(page.getByText('I need a job id to read channels; let me check conditions first.')).toBeVisible()
+  })
+
   test('renames a conversation inline', async ({ page }) => {
     await mockAssistantApi(page, { reply: 'ok' })
     await page.goto('/assistant')

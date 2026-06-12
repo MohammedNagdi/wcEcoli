@@ -80,6 +80,10 @@ export interface AssistantContextValue {
   memory: AssistantMemory | null
   /** Set briefly when a turn folded earlier history into the rolling summary (in-chat marker). */
   compactionNotice: boolean
+  /** Live reasoning segments emitted before tool calls during the current stream. */
+  thinkingSegments: string[]
+  /** Reasoning trail attached to a completed assistant message id (session-only). */
+  messageThinking: Record<number, string[]>
   bottomRef: RefObject<HTMLDivElement>
   /** The scrollable message list element — auto-scroll targets this, not the window. */
   scrollRef: RefObject<HTMLDivElement>
@@ -214,9 +218,15 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [resolvedNote, setResolvedNote] = useState<string | null>(null)
   const [memory, setMemory] = useState<AssistantMemory | null>(null)
   const [compactionNotice, setCompactionNotice] = useState(false)
+  // The model's intermediate reasoning (text emitted before each tool call) — shown live as a
+  // collapsible "thinking" block, then attached per-message once the final answer lands.
+  const [thinkingSegments, setThinkingSegments] = useState<string[]>([])
+  const [messageThinking, setMessageThinking] = useState<Record<number, string[]>>({})
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const streamingRef = useRef('')
+  const thinkingRef = useRef<string[]>([])
 
   useEffect(() => {
     const id = activeConversation?.id
@@ -389,6 +399,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setSending(true)
     setError(null)
     setCompactionNotice(false)
+    streamingRef.current = ''
+    thinkingRef.current = []
+    setThinkingSegments([])
     setInput('')
     const tempId = -Date.now()
     const optimisticUser: AssistantMessage = {
@@ -430,13 +443,30 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
             },
             onDelta: (text) => {
               streamed = true
-              setStreamingText((prev) => (prev ?? '') + text)
+              streamingRef.current += text
+              setStreamingText(streamingRef.current)
             },
-            onStatus: (tool) => setStreamingTool(tool),
+            onStatus: (tool) => {
+              setStreamingTool(tool)
+              // A tool is about to run: whatever the model said up to here was reasoning, not the
+              // final answer — fold it into the thinking trail and reset the live answer buffer.
+              if (streamingRef.current.trim()) {
+                thinkingRef.current = [...thinkingRef.current, streamingRef.current.trim()]
+                setThinkingSegments(thinkingRef.current)
+                streamingRef.current = ''
+                setStreamingText('')
+              }
+            },
             onDone: (payload) => {
               streamed = true
-              applyExchange(payload as unknown as AssistantExchange)
+              const exchange = payload as unknown as AssistantExchange
+              applyExchange(exchange)
               setCompactionNotice(Boolean((payload as { compacted?: boolean }).compacted))
+              // Attach the reasoning trail to the final assistant message (ephemeral, session-only).
+              const asstId = exchange.assistant_message?.id
+              if (asstId != null && thinkingRef.current.length > 0) {
+                setMessageThinking((current) => ({ ...current, [asstId]: thinkingRef.current }))
+              }
             },
             onError: (message) => setError(message),
           },
@@ -582,6 +612,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     resolvedNote,
     memory,
     compactionNotice,
+    thinkingSegments,
+    messageThinking,
     bottomRef,
     scrollRef,
     clearMemory,
