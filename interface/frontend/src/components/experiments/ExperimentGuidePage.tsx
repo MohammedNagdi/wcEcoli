@@ -1,8 +1,26 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { getVariants, getConditions, getTimelines } from '../../api/client'
-import type { Variant, Condition, Timeline } from '../../types'
+import { getVariants, getConditions, getTimelines, getAssistantTools } from '../../api/client'
+import type { Variant, Condition, Timeline, AssistantToolSpec } from '../../types'
 import { variantLabel } from '../../utils/labels'
+
+/** Curated example prompts that map to real adapter capabilities. */
+const ASSISTANT_EXAMPLE_PROMPTS = [
+  'What is being modelled here, and what is the difference between a state variable and a reaction flux?',
+  'How many genes does the platform support, and how many are knockout-ready?',
+  'What reactions does the enzyme for gene pfkA catalyze, and how many metabolic reactions are there in total?',
+  'Pick an interesting gene and prepare a knockout experiment under glc_20mM — no wildtype control, no timeline.',
+  'Explain what each page in the platform does.',
+]
+
+const ASSISTANT_TIER_INFO: Record<string, { label: string; blurb: string; tone: string }> = {
+  read_only: { label: 'Ask — read-only', blurb: 'Runs on click and only reads data — safe to use freely.', tone: 'bg-green-50 text-green-700 border-green-200' },
+  draft: { label: 'Propose — needs confirmation', blurb: 'Prepares a draft; you review and confirm before anything is created.', tone: 'bg-blue-50 text-blue-700 border-blue-200' },
+  queue: { label: 'Propose — needs confirmation', blurb: 'Queues compute; you confirm before it runs.', tone: 'bg-blue-50 text-blue-700 border-blue-200' },
+  publish_destructive: { label: 'Propose — needs confirmation', blurb: 'Publishes or overwrites; always confirmed first.', tone: 'bg-amber-50 text-amber-700 border-amber-200' },
+}
+
+const ASSISTANT_TIER_ORDER = ['read_only', 'draft', 'queue', 'publish_destructive']
 
 /* ------------------------------------------------------------------ */
 /*  Human-readable documentation for each experiment configuration     */
@@ -380,13 +398,26 @@ export function ExperimentGuidePage() {
   const [variants, setVariants] = useState<Variant[]>([])
   const [conditions, setConditions] = useState<Condition[]>([])
   const [timelines, setTimelines] = useState<Timeline[]>([])
+  const [assistantTools, setAssistantTools] = useState<AssistantToolSpec[]>([])
   const [activeSection, setActiveSection] = useState<string>('variants')
 
   useEffect(() => {
     getVariants().then(setVariants)
     getConditions().then(setConditions)
     getTimelines().then(setTimelines)
+    getAssistantTools().then(setAssistantTools).catch(() => {})
   }, [])
+
+  // Group the live tool registry by permission tier so this stays in sync with the harness.
+  const assistantToolsByTier = useMemo(() => {
+    const groups: Record<string, AssistantToolSpec[]> = {}
+    for (const tool of assistantTools) {
+      if (tool.status.includes('disabled')) continue
+      const tier = tool.permission_tier ?? 'read_only'
+      ;(groups[tier] ??= []).push(tool)
+    }
+    return groups
+  }, [assistantTools])
 
   // Group variants by category
   const variantsByCategory = useMemo(() => {
@@ -409,6 +440,7 @@ export function ExperimentGuidePage() {
     { id: 'conditions', label: 'Growth conditions' },
     { id: 'timelines', label: 'Timelines' },
     { id: 'parameters', label: 'Simulation parameters' },
+    { id: 'assistant', label: 'Assistant' },
   ]
 
   return (
@@ -608,6 +640,67 @@ export function ExperimentGuidePage() {
                 The first run (Parca parameter calculation) adds a one-time overhead of ~5 minutes.
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assistant capabilities — generated from the live tool registry so it never goes stale */}
+      {activeSection === 'assistant' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <p className="text-sm text-gray-600">
+              The Assistant answers questions and proposes next steps grounded in real platform data — it never
+              changes anything on its own. Read-only tools run on click; actions that create or run things always
+              ask for your confirmation first. Open it from the sidebar, or from any page to carry that page's context.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {ASSISTANT_EXAMPLE_PROMPTS.map((prompt) => (
+                <Link
+                  key={prompt}
+                  to={`/assistant?prompt=${encodeURIComponent(prompt)}`}
+                  className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 hover:border-brand-300 hover:bg-brand-50 transition-colors"
+                >
+                  {prompt}
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {assistantTools.length === 0 ? (
+            <p className="text-sm text-gray-400">Assistant capabilities are unavailable right now.</p>
+          ) : (
+            ASSISTANT_TIER_ORDER.map((tier) => {
+              const tools = assistantToolsByTier[tier]
+              if (!tools || tools.length === 0) return null
+              const info = ASSISTANT_TIER_INFO[tier]
+              return (
+                <section key={tier}>
+                  <div className="mb-3 flex items-center gap-2">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-800">{info.label}</h2>
+                    <span className="text-xs text-gray-400">— {info.blurb}</span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {tools.map((tool) => (
+                      <div key={tool.name} className="rounded-lg border border-gray-200 bg-white p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium text-gray-900">{tool.label}</span>
+                          <span className={`rounded-full border px-2 py-0.5 text-[11px] ${info.tone}`}>
+                            {tier.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed text-gray-500">{tool.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )
+            })
+          )}
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs leading-relaxed text-gray-500">
+            For values that change over time (counts, fluxes), the Assistant can prepare a simulation for you to run,
+            then read the results — it does not invent dynamic numbers. Conceptual questions about the model and FBA
+            are answered from curated references, describing what each term does rather than reproducing equations.
           </div>
         </div>
       )}
