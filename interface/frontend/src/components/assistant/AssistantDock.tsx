@@ -67,7 +67,7 @@ export function AssistantDock() {
           <div className="absolute inset-0 bg-gray-900/20" onClick={closeAssistant} aria-hidden />
           <aside
             ref={panelRef}
-            className="relative flex h-full w-full max-w-[calc(100vw-3rem)] flex-col border-l border-gray-200 bg-gray-50 shadow-2xl"
+            className="relative flex h-full w-full max-w-5xl flex-col border-l border-gray-200 bg-gray-50 shadow-2xl"
             aria-label="Assistant panel"
           >
             <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2.5">
@@ -86,7 +86,7 @@ export function AssistantDock() {
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              <TaskCenteredAssistantPanel />
+              <TaskCenteredAssistantPanel heightClass="h-full" />
             </div>
           </aside>
         </div>

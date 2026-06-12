@@ -1367,7 +1367,10 @@ function AdvancedDisclosure({ title, children }: { title: string; children: Reac
   )
 }
 
-export function TaskCenteredAssistantPanel() {
+export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)]' }: { heightClass?: string } = {}) {
+  // `heightClass` sizes the three columns. The full `/assistant` page subtracts its header chrome
+  // (the default); the dock passes `h-full` to fill the slide-over's own height instead, so the
+  // chain section → grid → columns must all be height-defined for `h-full` to resolve.
   const {
     providerConfigured, runtimeLabel, context,
     conversations, activeConversation, messages, proposals, input, setInput,
@@ -1380,9 +1383,9 @@ export function TaskCenteredAssistantPanel() {
   const facts = useMemo(() => contextFacts(context), [context])
 
   return (
-    <section>
-      <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
-        <aside className="flex h-[calc(100vh-180px)] min-h-[560px] flex-col rounded-xl border border-gray-200 bg-gray-50 p-3">
+    <section className="h-full min-h-0">
+      <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+        <aside className={`flex ${heightClass} min-h-[560px] flex-col rounded-xl border border-gray-200 bg-gray-50 p-3`}>
           <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Conversations</div>
           <button
             type="button"
@@ -1428,7 +1431,7 @@ export function TaskCenteredAssistantPanel() {
           </div>
         </aside>
 
-        <div className="flex h-[calc(100vh-180px)] min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className={`flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm`}>
           <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-gray-900">
@@ -1586,7 +1589,7 @@ export function TaskCenteredAssistantPanel() {
           </div>
         </div>
 
-        <aside className="h-[calc(100vh-180px)] min-h-[560px] space-y-3 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <aside className={`${heightClass} min-h-[560px] space-y-3 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3`}>
           <div className="rounded-lg border border-brand-100 bg-white p-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Where you are</div>
             <div className="mt-2 text-sm font-medium leading-6 text-gray-900">{contextSummary(context)}</div>
