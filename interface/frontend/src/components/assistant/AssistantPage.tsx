@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
@@ -889,19 +889,6 @@ function contextSummary(context: AssistantContext): string {
   return 'You are in the central Assistant workspace.'
 }
 
-function contextFacts(context: AssistantContext): Array<{ label: string; value: string }> {
-  const facts = [
-    { label: 'Surface', value: surfaceName(context) },
-    context.selected_gene ? { label: 'Gene', value: context.selected_gene } : null,
-    context.selected_condition ? { label: 'Condition', value: context.selected_condition } : null,
-    context.selected_variant_type ? { label: 'Experiment type', value: context.selected_variant_type.replace(/_/g, ' ') } : null,
-    context.selected_builder_section ? { label: 'Builder section', value: context.selected_builder_section.replace(/_/g, ' ') } : null,
-    context.selected_job != null ? { label: 'Job', value: `#${context.selected_job}` } : null,
-    context.selected_experiment != null ? { label: 'Experiment', value: `#${context.selected_experiment}` } : null,
-  ]
-  return facts.filter((fact): fact is { label: string; value: string } => Boolean(fact))
-}
-
 function suggestedActions(context: AssistantContext): Array<{
   title: string
   description: string
@@ -1080,15 +1067,6 @@ function starterPrompts(context: AssistantContext): string[] {
   prompts.push('How many genes are supported?')
   prompts.push('Explain what each page does')
   return prompts.slice(0, 4)
-}
-
-function FactBadge({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-gray-100 bg-white px-3 py-2">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</div>
-      <div className="mt-1 truncate text-sm font-medium text-gray-900">{value}</div>
-    </div>
-  )
 }
 
 function proposalText(proposal: AssistantToolCall, key: string, fallback: string): string {
@@ -1398,7 +1376,6 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
     removeConversation, renameConversation, sendMessage, inspectCurrentResult, runReadOnlyProposal,
     handleProposalResolved,
   } = useAssistant()
-  const facts = useMemo(() => contextFacts(context), [context])
   const [showConversations, setShowConversations] = useState(true)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
@@ -1699,17 +1676,6 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
         </div>
 
         <aside className={`${heightClass} min-h-[560px] space-y-3 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3`}>
-          <div className="rounded-lg border border-brand-100 bg-white p-4">
-            <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Where you are</div>
-            <div className="mt-2 text-sm font-medium leading-6 text-gray-900">{contextSummary(context)}</div>
-            <p className="mt-1 text-[11px] leading-4 text-gray-500">The assistant uses this page context to ground its answers.</p>
-            <div className="mt-3 grid gap-2">
-              {facts.map((fact) => (
-                <FactBadge key={`${fact.label}-${fact.value}`} label={fact.label} value={fact.value} />
-              ))}
-            </div>
-          </div>
-
           {context.selected_job != null && (
             <button
               type="button"
@@ -1796,7 +1762,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             </summary>
             <div className="space-y-2 border-t border-gray-100 p-3 text-xs leading-5 text-gray-600">
               <div><span className="font-semibold text-gray-900">Platform fact</span> — read straight from the app's data or a read-only tool. Trustworthy.</div>
-              <div><span className="font-semibold text-gray-900">Assistant reply</span> — the model's explanation; it should cite the facts above.</div>
+              <div><span className="font-semibold text-gray-900">Assistant reply</span> — the model's explanation, grounded in read-only tool results and platform data.</div>
               <div><span className="font-semibold text-gray-900">Proposed action</span> — a reviewable card. Never runs from chat text alone.</div>
             </div>
           </details>
