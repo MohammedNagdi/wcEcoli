@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import {
   createBuilderDraft,
   getBuilderDrafts,
@@ -3123,12 +3124,12 @@ export function EnvironmentBuilderPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Link
-              to={assistantHref}
+            <AskAssistantButton
+              href={assistantHref}
               className="inline-flex items-center justify-center rounded-xl border border-cyan-200/40 bg-cyan-200/10 px-4 py-2 text-sm font-medium text-cyan-50 transition-colors hover:bg-cyan-200/20"
             >
               Ask Assistant
-            </Link>
+            </AskAssistantButton>
             <Link
               to="/experiments"
               className="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"

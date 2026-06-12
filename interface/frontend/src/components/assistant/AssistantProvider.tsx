@@ -41,6 +41,7 @@ export interface AssistantContextValue {
   // Panel visibility (used by the docked panel from Phase 2 on; harmless now)
   isOpen: boolean
   openAssistant: (opts?: { prompt?: string }) => void
+  openAssistantWithHref: (href: string) => void
   closeAssistant: () => void
 
   // Platform / provider status
@@ -53,8 +54,10 @@ export interface AssistantContextValue {
   runtimeLabel: string
   providerConfigured: boolean
 
-  // Page context (reactive to the route)
+  // Page context (reactive to the route; pages can register richer context)
   context: AssistantContext
+  registerContext: (ctx: Partial<AssistantContext>) => void
+  clearContext: () => void
   suggestedPrompt: string
 
   // Chat state
@@ -157,7 +160,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [runtimeReady, activeRuntime])
 
   // ── page context (reactive) ──
-  const context = useMemo<AssistantContext>(() => {
+  // Base context derived from the URL (used on /assistant deep links). Pages can register richer
+  // context (their selected gene/job/etc.) via useRegisterAssistantContext, which overrides this.
+  const urlContext = useMemo<AssistantContext>(() => {
     const params = new URLSearchParams(location.search)
     return {
       route: params.get('route') || `${location.pathname}${location.search}`,
@@ -171,6 +176,18 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       assistant_surface: params.get('surface') || 'central',
     }
   }, [location.pathname, location.search])
+
+  const [registeredContext, setRegisteredContext] = useState<Partial<AssistantContext> | null>(null)
+  const registerContext = (ctx: Partial<AssistantContext>) => setRegisteredContext(ctx)
+  const clearContext = () => setRegisteredContext(null)
+  // Drop stale page context when the route changes (so the dock isn't tied to a page you left).
+  useEffect(() => {
+    setRegisteredContext(null)
+  }, [location.pathname])
+  const context = useMemo<AssistantContext>(
+    () => (registeredContext ? { ...urlContext, ...registeredContext } : urlContext),
+    [urlContext, registeredContext],
+  )
 
   const suggestedPrompt = useMemo(() => new URLSearchParams(location.search).get('prompt') || '', [location.search])
 
@@ -473,9 +490,31 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setIsOpen(false)
   }
 
+  // Open the dock with the context+prompt encoded in a legacy assistantHref (/assistant?gene=...&prompt=...).
+  // Replaces the old "navigate to /assistant" links so the page stays visible beside the chat.
+  function openAssistantWithHref(href: string) {
+    const q = href.indexOf('?')
+    const params = new URLSearchParams(q >= 0 ? href.slice(q + 1) : '')
+    setRegisteredContext({
+      route: params.get('route') || `${location.pathname}${location.search}`,
+      assistant_surface: params.get('surface') || 'central',
+      selected_gene: params.get('gene') || null,
+      selected_experiment: parseOptionalNumber(params.get('experiment')),
+      selected_job: parseOptionalNumber(params.get('job')),
+      selected_result: parseOptionalNumber(params.get('result')),
+      selected_condition: params.get('condition') || null,
+      selected_variant_type: params.get('variant_type') || null,
+      selected_builder_section: params.get('builder_section') || null,
+    })
+    const prompt = params.get('prompt') || ''
+    if (prompt) setInput((current) => (current.trim() ? current : prompt))
+    setIsOpen(true)
+  }
+
   const value: AssistantContextValue = {
     isOpen,
     openAssistant,
+    openAssistantWithHref,
     closeAssistant,
     status,
     providerConfigs,
@@ -486,6 +525,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     runtimeLabel,
     providerConfigured: runtimeReady,
     context,
+    registerContext,
+    clearContext,
     suggestedPrompt,
     conversations,
     activeConversation,
@@ -516,4 +557,19 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }
 
   return <AssistantCtx.Provider value={value}>{children}</AssistantCtx.Provider>
+}
+
+/**
+ * Register the current page's context with the Assistant (selected gene/job/experiment/etc.), so the
+ * docked panel is page-aware without navigating. Clears on unmount. Pass a stable/memoized object or
+ * primitive fields — re-registers whenever they change.
+ */
+export function useRegisterAssistantContext(ctx: Partial<AssistantContext>) {
+  const { registerContext, clearContext } = useAssistant()
+  const key = JSON.stringify(ctx)
+  useEffect(() => {
+    registerContext(ctx)
+    return () => clearContext()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
 }

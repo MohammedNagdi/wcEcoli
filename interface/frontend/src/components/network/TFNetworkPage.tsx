@@ -1,5 +1,6 @@
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import CytoscapeComponent from 'react-cytoscapejs'
 import type { Core, EventObject, ElementDefinition } from 'cytoscape'
 import { getTFNetwork } from '../../api/client'
@@ -751,12 +752,12 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
             )}
           </span>
           {!embedded && (
-            <Link
-              to={assistantHref}
+            <AskAssistantButton
+              href={assistantHref}
               className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
             >
               Ask Assistant
-            </Link>
+            </AskAssistantButton>
           )}
         </div>
 

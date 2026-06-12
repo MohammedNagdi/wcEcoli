@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, type ReactNode } from 'react'
 import { useNavigate, useSearchParams, Link, useLocation } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import {
   getVariants, getVariantDetail, getConditions, getMediaRecipes,
   createExperiment, searchGenes, getGene,
@@ -1415,12 +1416,12 @@ export function ExperimentDesigner() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            to={assistantHref}
+          <AskAssistantButton
+            href={assistantHref}
             className="inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100"
           >
             Ask Assistant
-          </Link>
+          </AskAssistantButton>
           <StatusChip label="Environment" value={environmentSourceLabel} tone={environmentLocked ? 'amber' : 'green'} />
           <StatusChip label="Media protocol" value={environmentStatusText} tone={environmentLocked ? 'amber' : 'green'} />
         </div>

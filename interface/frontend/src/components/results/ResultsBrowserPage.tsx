@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import { getJobs, getExperiments, getExperimentResults, compareExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
 import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
@@ -635,12 +636,12 @@ export function ResultsBrowserPage() {
           <p className="mt-1 text-sm text-gray-500">{viewDescription(viewMode)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to={assistantHref}
+          <AskAssistantButton
+            href={assistantHref}
             className="px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
           >
             Ask Assistant
-          </Link>
+          </AskAssistantButton>
           <Link
             to="/results/compare"
             className="px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"

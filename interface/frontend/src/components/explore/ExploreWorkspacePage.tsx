@@ -9,6 +9,7 @@ import { getAAPathways } from '../../api/client'
 import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import type { AAPathway, GeneDetail } from '../../types'
 
 export function ExploreWorkspacePage() {
@@ -166,12 +167,12 @@ function SelectedGeneSummary({
           <p className="text-xs text-gray-400">{gene.ecoli_id}</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
-          <Link
-            to={assistantHref}
+          <AskAssistantButton
+            href={assistantHref}
             className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
           >
             Ask Assistant
-          </Link>
+          </AskAssistantButton>
           <Link
             to={'/genome?gene=' + encodeURIComponent(gene.symbol)}
             className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"

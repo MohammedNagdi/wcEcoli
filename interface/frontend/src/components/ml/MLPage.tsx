@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import { getDataSummary, getFeatures, getFeaturesCSVUrl, trainModel } from '../../api/client'
 import { HelpTip } from '../common/HelpTip'
 import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
@@ -190,12 +191,12 @@ export function MLPage() {
           Train surrogate models to predict simulation outcomes from gene knockout features
         </p>
         </div>
-        <Link
-          to={assistantHref}
+        <AskAssistantButton
+          href={assistantHref}
           className="self-start rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
         >
           Ask Assistant
-        </Link>
+        </AskAssistantButton>
       </div>
 
       <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

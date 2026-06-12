@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import { getExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
 import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
@@ -163,12 +164,12 @@ export function ExperimentListPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            to={assistantHref}
+          <AskAssistantButton
+            href={assistantHref}
             className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
           >
             Ask Assistant
-          </Link>
+          </AskAssistantButton>
           <Link
             to="/experiments/batch"
             className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100

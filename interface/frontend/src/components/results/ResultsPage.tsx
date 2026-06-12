@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -484,12 +485,12 @@ export function ResultsPage() {
             <h1 className="text-2xl font-semibold text-gray-900">{resultTitle}</h1>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <Link
-              to={assistantHref}
+            <AskAssistantButton
+              href={assistantHref}
               className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 font-medium text-brand-700 hover:bg-brand-100"
             >
               Ask Assistant
-            </Link>
+            </AskAssistantButton>
             <span className={'rounded-full border px-2.5 py-1 font-medium ' + statusTone(job.status)}>
               {statusLabel(job.status)}
             </span>

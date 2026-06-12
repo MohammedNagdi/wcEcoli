@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import { getDesignOverview, getEssentiality } from '../../api/client'
 import type { DesignOverview, GeneKOSummary, EssentialityStats } from '../../types'
 import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
@@ -135,12 +136,12 @@ export function DesignPage() {
           from whole-cell simulation results.
         </p>
         </div>
-        <Link
-          to={assistantHref}
+        <AskAssistantButton
+          href={assistantHref}
           className="self-start rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
         >
           Ask Assistant
-        </Link>
+        </AskAssistantButton>
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

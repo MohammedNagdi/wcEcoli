@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { AskAssistantButton } from '../assistant/AskAssistantButton'
 import { getAllGenes } from '../../api/client'
 import type { Gene } from '../../types'
 import { CATEGORY_FILL, hasGenomePosition } from '../../utils/genome'
@@ -133,12 +134,12 @@ export function GenomeViewerPage({ embedded = false, compact = false }: GenomeVi
             </p>
           </div>
           <div className="flex w-full items-center gap-2 lg:w-auto">
-            <Link
-              to={assistantHref}
+            <AskAssistantButton
+              href={assistantHref}
               className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
             >
               Ask Assistant
-            </Link>
+            </AskAssistantButton>
             <SearchInput
               value={genomeSearch ?? ''}
               onChange={setGenomeSearch}
