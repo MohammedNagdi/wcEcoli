@@ -10,6 +10,11 @@ const ASSISTANT_EXAMPLE_PROMPTS = [
   'How many genes does the platform support, and how many are knockout-ready?',
   'What reactions does the enzyme for gene pfkA catalyze, and how many metabolic reactions are there in total?',
   'Pick an interesting gene and prepare a knockout experiment under glc_20mM — no wildtype control, no timeline.',
+  'Summarize the conditions, media recipes, timelines, and TF rules in the Conditions Builder.',
+  'Make a high-glucose version of the basal condition with a 30-minute doubling time and prepare it for review.',
+  'Draft a timeline that shifts from minimal to minimal_acetate at 20 minutes.',
+  'Compare the growth rate and final mass across my completed results and tell me which grew fastest.',
+  'Read the growth-rate time-series for this result and describe how it changed over the cell cycle.',
   'Explain what each page in the platform does.',
 ]
 
