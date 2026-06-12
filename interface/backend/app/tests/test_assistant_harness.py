@@ -885,6 +885,60 @@ def test_create_experiment_execution_requires_approved_matching_confirmation_and
         engine.dispose()
 
 
+def test_compare_results_aggregates_and_ranks():
+    engine, session = _build_session()
+    try:
+        session.add(Experiment(id=1, name="WT", variant_type="wildtype", condition="basal", status="done", sim_params="{}"))
+        session.add(Experiment(id=2, name="dnaA KO", variant_type="gene_knockout", condition="basal", status="done", gene_symbol="dnaA", sim_params="{}"))
+        session.add(SimulationJob(id=1, experiment_id=1, status="done", condition="basal", seed=0, generations=1, sim_dir="a"))
+        session.add(SimulationJob(id=2, experiment_id=2, status="done", condition="basal", seed=0, generations=1, sim_dir="b"))
+        session.add(SimulationResult(job_id=1, experiment_id=1, seed=0, generation=0, growth_rate=0.020, final_mass_fg=600))
+        session.add(SimulationResult(job_id=2, experiment_id=2, seed=0, generation=0, growth_rate=0.010, final_mass_fg=500))
+        session.commit()
+
+        out = execute_tool(session, "compare_results", AssistantToolExecutionRequest(
+            arguments={"job_ids": [1, 2], "metric": "growth_rate"}))
+        assert out.executed is True
+        r = out.result
+        assert r["compared_job_count"] == 2
+        # Ranked by growth_rate mean, higher first -> WT (job 1) leads.
+        assert r["ranking"][0]["job_id"] == 1
+        wt = next(e for e in r["comparison"] if e["job_id"] == 1)
+        assert wt["metrics"]["growth_rate"]["mean"] == 0.020
+
+        # experiment_ids expand to their jobs.
+        by_exp = execute_tool(session, "compare_results", AssistantToolExecutionRequest(
+            arguments={"experiment_ids": [1, 2]}))
+        assert by_exp.result["compared_job_count"] == 2
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_read_result_series_lists_channels_and_reads_values():
+    engine, session = _build_session()
+    try:
+        session.add(SimulationJob(id=5, experiment_id=1, status="done", condition="basal", seed=0, generations=1, sim_dir="x"))
+        session.commit()
+
+        # No series -> list available channels (synthetic fallback since no real simOut).
+        listing = execute_tool(session, "read_result_series", AssistantToolExecutionRequest(arguments={"job_id": 5}))
+        assert listing.executed is True
+        assert listing.result["available_series"], "expected at least one channel"
+        assert listing.result["data_source"] in {"real_simOut", "synthetic_demo"}
+
+        channel = listing.result["available_series"][0]
+        read = execute_tool(session, "read_result_series", AssistantToolExecutionRequest(
+            arguments={"job_id": 5, "series": channel, "max_points": 10}))
+        s = read.result["series"]
+        assert s["channel"] == channel
+        assert len(s["points"]) <= 10 and s["points"]
+        assert s["stats"]["n_points"] == len(s["points"])
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_list_conditions_returns_full_detail():
     engine, session = _build_session()
     try:
@@ -2010,6 +2064,8 @@ READ_ONLY_ADAPTER_CASES = [
     ("inspect_experiment", {"experiment_id": 7}, "experiment"),
     ("inspect_result", {"job_id": 12}, "summary"),
     ("inspect_molecule_trajectories", {"job_id": 12}, "trajectory_scope"),
+    ("compare_results", {"job_ids": [12]}, "comparison"),
+    ("read_result_series", {"job_id": 12}, "available_series"),
     ("platform_guide", {}, "pages"),
     ("explain_modeling", {"topic": "fba"}, "explanation"),
 ]

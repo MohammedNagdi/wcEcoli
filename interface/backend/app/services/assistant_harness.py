@@ -1100,6 +1100,38 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             argument_schema={"job_id": "integer", "gene": "string"},
             result_schema={"trajectory_scope": "object", "molecules": "array"},
         ),
+        AssistantToolSpec(
+            name="compare_results",
+            label="Compare results",
+            description=(
+                "Compare phenotype metrics across MULTIPLE completed results in one call — growth rate, division "
+                "time, final mass, and doubling time, aggregated (mean/min/max) per job across its seeds and "
+                "generations. Pass `job_ids` and/or `experiment_ids` (experiments expand to their jobs). Use for "
+                "'compare WT vs the dnaA knockout', 'which condition grew fastest', or ranking results. Read-only."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"job_ids": "array", "experiment_ids": "array", "metric": "string"},
+            result_schema={"comparison": "array", "ranking": "array"},
+        ),
+        AssistantToolSpec(
+            name="read_result_series",
+            label="Read result time-series",
+            description=(
+                "Read the actual NUMERIC time-series of one output channel for a completed job (the values behind "
+                "the Molecule Explorer / phenotype plots) — e.g. cell mass, growth rate, protein/RNA/DNA mass, mRNA "
+                "counts. Returns downsampled time/value points plus stats (min/max/mean/first/last). Call with no "
+                "`series` (or an unmatched one) to list the available channels first. Flags whether the data is "
+                "real simOut or synthetic. Use for 'what was the growth rate over time', 'how did mass change'. "
+                "Read-only; for static model structure use model_structure instead."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"job_id": "integer", "series": "string", "seed": "integer", "max_points": "integer"},
+            result_schema={"series": "object", "available_series": "array"},
+        ),
     ]
 
 
@@ -1113,6 +1145,8 @@ READ_ONLY_TOOLS = (
     "list_experiments",
     "inspect_experiment",
     "inspect_molecule_trajectories",
+    "compare_results",
+    "read_result_series",
     "platform_guide",
     "explain_modeling",
     "model_structure",
@@ -1282,14 +1316,14 @@ PLATFORM_PAGES = [
         "route": "/results",
         "purpose": "Browse completed simulation results and open one for detail.",
         "data": "Simulation jobs and summary metrics (division time, mass, growth rate, doubling time).",
-        "assistant_tools": ["inspect_result", "list_experiments"],
+        "assistant_tools": ["inspect_result", "list_experiments", "compare_results"],
     },
     {
         "name": "Result detail & Molecule Explorer",
         "route": "/results/:jobId",
         "purpose": "Figures and per-molecule trajectories for one result; Molecule Explorer plots state variables.",
         "data": "Per-job phenotype figures and per-molecule timeseries (scoped to this job's lineages only).",
-        "assistant_tools": ["inspect_result", "inspect_molecule_trajectories"],
+        "assistant_tools": ["inspect_result", "inspect_molecule_trajectories", "read_result_series", "compare_results"],
     },
     {
         "name": "ML",
@@ -1917,6 +1951,48 @@ def _preview_inspect_molecule_trajectories(session: Session, args: dict[str, Any
     return normalized, preview, [], errors
 
 
+def _int_list_arg(args: dict[str, Any], key: str) -> list[int]:
+    value = args.get(key)
+    if value is None:
+        return []
+    if isinstance(value, (int, str)):
+        value = [value]
+    out: list[int] = []
+    for item in value if isinstance(value, list) else []:
+        try:
+            if isinstance(item, bool):
+                continue
+            out.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _preview_compare_results(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    job_ids = _int_list_arg(args, "job_ids")
+    experiment_ids = _int_list_arg(args, "experiment_ids")
+    metric = _string_arg(args, "metric", errors, required=False)
+    if not job_ids and not experiment_ids:
+        errors.append("Provide at least one of 'job_ids' or 'experiment_ids' to compare.")
+    normalized = {"job_ids": job_ids, "experiment_ids": experiment_ids, "metric": metric}
+    preview = {"summary": f"Compare metrics across {len(job_ids)} job(s) and {len(experiment_ids)} experiment(s)."}
+    return normalized, preview, [], errors
+
+
+def _preview_read_result_series(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    job_id = _int_arg(args, "job_id", required=True, errors=errors)
+    series = _string_arg(args, "series", errors, required=False)
+    seed = _int_arg(args, "seed", required=False, errors=errors, minimum=0)
+    max_points = _int_arg(args, "max_points", required=False, errors=errors, minimum=2)
+    if job_id is not None and not session.get(SimulationJob, job_id):
+        errors.append(f"Simulation job {job_id} not found.")
+    normalized = {"job_id": job_id, "series": series, "seed": seed, "max_points": max_points or 40}
+    preview = {"summary": f"Read the '{series or '(list available)'}' time-series for job {job_id}."}
+    return normalized, preview, [], errors
+
+
 def _resolve_modeling_topic(raw: str) -> str | None:
     key = (raw or "").strip().lower()
     if not key:
@@ -2074,6 +2150,8 @@ _PREVIEW_DISPATCH = {
     "list_experiments": _preview_list_experiments,
     "inspect_experiment": _preview_inspect_experiment,
     "inspect_molecule_trajectories": _preview_inspect_molecule_trajectories,
+    "compare_results": _preview_compare_results,
+    "read_result_series": _preview_read_result_series,
     "platform_guide": _preview_platform_guide,
     "explain_modeling": _preview_explain_modeling,
     "model_structure": _preview_model_structure,
@@ -3338,6 +3416,178 @@ def _execute_inspect_molecule_trajectories(session: Session, normalized_argument
     }
 
 
+def _aggregate_job_metrics(results: list[SimulationResult]) -> dict[str, Any]:
+    def stats(values: list[float]) -> dict[str, float] | None:
+        nums = [v for v in values if v is not None]
+        if not nums:
+            return None
+        return {"mean": sum(nums) / len(nums), "min": min(nums), "max": max(nums), "n": len(nums)}
+
+    return {
+        "growth_rate": stats([r.growth_rate for r in results]),
+        "division_time_sec": stats([r.division_time_sec for r in results]),
+        "final_mass_fg": stats([r.final_mass_fg for r in results]),
+        "doubling_time_min": stats([r.doubling_time_min for r in results]),
+    }
+
+
+def _execute_compare_results(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    job_ids = list(normalized_arguments.get("job_ids") or [])
+    experiment_ids = list(normalized_arguments.get("experiment_ids") or [])
+    metric = (normalized_arguments.get("metric") or "growth_rate").strip() or "growth_rate"
+
+    # Expand experiment_ids to their jobs, preserving order and de-duplicating.
+    resolved: list[int] = []
+    seen: set[int] = set()
+    for jid in job_ids:
+        if jid not in seen:
+            seen.add(jid); resolved.append(jid)
+    for eid in experiment_ids:
+        jobs = session.exec(select(SimulationJob).where(SimulationJob.experiment_id == eid)).all()
+        for job in jobs:
+            if job.id not in seen:
+                seen.add(job.id); resolved.append(job.id)
+
+    comparison: list[dict[str, Any]] = []
+    missing: list[int] = []
+    for jid in resolved:
+        job = session.get(SimulationJob, jid)
+        if not job:
+            missing.append(jid); continue
+        experiment = session.get(Experiment, job.experiment_id)
+        results = session.exec(select(SimulationResult).where(SimulationResult.job_id == jid)).all()
+        comparison.append({
+            "job_id": jid,
+            "experiment_id": job.experiment_id,
+            "experiment_name": experiment.name if experiment else "",
+            "gene_symbol": (experiment.gene_symbol if experiment else "") or job.variant_type or "",
+            "variant_type": experiment.variant_type if experiment else job.variant_type,
+            "condition": job.condition,
+            "status": job.status,
+            "result_rows": len(results),
+            "metrics": _aggregate_job_metrics(results),
+        })
+
+    # Rank by the requested metric's mean (only jobs that have it).
+    def metric_mean(entry: dict[str, Any]) -> float | None:
+        m = entry["metrics"].get(metric)
+        return m["mean"] if isinstance(m, dict) else None
+
+    ranked = sorted(
+        [e for e in comparison if metric_mean(e) is not None],
+        key=lambda e: metric_mean(e),
+        reverse=True,
+    )
+    ranking = [{"job_id": e["job_id"], "label": e["experiment_name"] or f"job {e['job_id']}", f"{metric}_mean": metric_mean(e)} for e in ranked]
+
+    return {
+        "metric": metric,
+        "compared_job_count": len(comparison),
+        "missing_job_ids": missing,
+        "comparison": comparison,
+        "ranking": ranking,
+        "note": "Metrics are aggregated across each job's seeds and generations. Ranking is by the requested metric's mean (higher first).",
+        "links": [{"label": "Results", "path": "/results"}],
+    }
+
+
+def _execute_read_result_series(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    job_id = normalized_arguments.get("job_id")
+    job = session.get(SimulationJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Simulation job {job_id} not found.")
+    requested = (normalized_arguments.get("series") or "").strip()
+    seed = normalized_arguments.get("seed")
+    max_points = int(normalized_arguments.get("max_points") or 40)
+
+    # Reuse the Results router's real-or-mock timeseries builder so the agent reads exactly what the
+    # Molecule Explorer plots; flag clearly whether the numbers are real simOut or synthetic.
+    from app.services.results_timeseries import generate_mock_timeseries as _generate_mock_timeseries
+    from app.services.results_timeseries import load_real_timeseries as _load_real_timeseries
+
+    timeseries = _load_real_timeseries(job)
+    data_source = "real_simOut"
+    if not timeseries:
+        data_source = "synthetic_demo"
+        db_results = session.exec(select(SimulationResult).where(SimulationResult.job_id == job_id)).all()
+        num_seeds = max(1, (max((r.seed for r in db_results), default=job.seed or 0)) + 1)
+        timeseries = {}
+        for s in range(num_seeds):
+            for channel, sdata in _generate_mock_timeseries(s).items():
+                timeseries.setdefault(channel, []).append(sdata)
+
+    available = sorted(timeseries.keys())
+
+    def find_channel(name: str) -> str | None:
+        low = name.lower()
+        if name in timeseries:
+            return name
+        for key in timeseries:
+            if key.lower() == low:
+                return key
+        for key, series_list in timeseries.items():
+            if low in key.lower() or any(low in (sd.label or "").lower() for sd in series_list):
+                return key
+        return None
+
+    channel = find_channel(requested) if requested else None
+    if not channel:
+        return {
+            "job_id": job_id,
+            "data_source": data_source,
+            "available_series": available,
+            "note": (
+                "Pass one of available_series as `series` to read its numeric values."
+                + (" Data is synthetic demo data (no real simOut for this job) — caveat any numbers as illustrative." if data_source == "synthetic_demo" else "")
+            ),
+            "links": [{"label": f"Molecule explorer for job {job_id}", "path": f"/results/{job_id}?view=model-outputs"}],
+        }
+
+    series_list = timeseries[channel]
+    chosen = series_list[0]
+    if seed is not None and 0 <= int(seed) < len(series_list):
+        chosen = series_list[int(seed)]
+    points = [{"time": p.time, "value": p.value} for p in chosen.points]
+
+    # Downsample evenly to at most max_points.
+    if len(points) > max_points:
+        step = (len(points) - 1) / (max_points - 1)
+        idx = sorted({int(round(i * step)) for i in range(max_points)})
+        points = [points[i] for i in idx if i < len(points)]
+
+    values = [p["value"] for p in points]
+    stats = None
+    if values:
+        stats = {
+            "n_points": len(points),
+            "t_start": points[0]["time"],
+            "t_end": points[-1]["time"],
+            "min": min(values),
+            "max": max(values),
+            "mean": sum(values) / len(values),
+            "first": values[0],
+            "last": values[-1],
+        }
+    return {
+        "job_id": job_id,
+        "data_source": data_source,
+        "series": {
+            "channel": channel,
+            "label": chosen.label,
+            "unit": chosen.unit,
+            "seed_index": int(seed) if seed is not None else 0,
+            "stats": stats,
+            "points": points,
+        },
+        "available_series": available,
+        "note": (
+            "Synthetic demo data (no real simOut for this job) — numbers are illustrative, not measured."
+            if data_source == "synthetic_demo" else "Real simOut values, downsampled for readability."
+        ),
+        "links": [{"label": f"Molecule explorer for job {job_id}", "path": f"/results/{job_id}?view=model-outputs"}],
+    }
+
+
 def _execute_create_experiment(
     session: Session,
     normalized_arguments: dict[str, Any],
@@ -3631,6 +3881,8 @@ _READ_ONLY_EXECUTORS = {
     "list_experiments": _execute_list_experiments,
     "inspect_experiment": _execute_inspect_experiment,
     "inspect_molecule_trajectories": _execute_inspect_molecule_trajectories,
+    "compare_results": _execute_compare_results,
+    "read_result_series": _execute_read_result_series,
     "platform_guide": _execute_platform_guide,
     "explain_modeling": _execute_explain_modeling,
     "model_structure": _execute_model_structure,
