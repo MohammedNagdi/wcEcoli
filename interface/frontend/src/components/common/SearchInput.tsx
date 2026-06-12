@@ -12,10 +12,14 @@ export function SearchInput({ value, onChange, placeholder = 'Search...', classN
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === '/' && document.activeElement !== inputRef.current) {
-        e.preventDefault()
-        inputRef.current?.focus()
-      }
+      if (e.key !== '/' || document.activeElement === inputRef.current) return
+      // Don't hijack '/' while the user is typing in another field (e.g. the Assistant composer,
+      // any input/textarea/select, or a contenteditable) — it would steal focus and swallow the key.
+      const active = document.activeElement as HTMLElement | null
+      const tag = active?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || active?.isContentEditable) return
+      e.preventDefault()
+      inputRef.current?.focus()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
