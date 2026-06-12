@@ -626,6 +626,33 @@ export async function warmAssistantProvider(): Promise<{
   return fetchJSON('/assistant/providers/warm', { method: 'POST' })
 }
 
+export interface AssistantRuntimeSettings {
+  request_timeout_sec: number
+  local_timeout_sec: number
+  ollama_keep_alive: string
+  max_agent_turns: number
+  keep_recent_turns: number
+  compact_threshold: number
+  context_token_budget: number
+  confirmation_ttl_sec: number
+  summary_model: string
+  updated_at: string
+}
+
+export async function getAssistantRuntimeSettings(): Promise<AssistantRuntimeSettings> {
+  return fetchJSON('/assistant/runtime-settings')
+}
+
+export async function updateAssistantRuntimeSettings(
+  data: Partial<AssistantRuntimeSettings>,
+): Promise<AssistantRuntimeSettings> {
+  return fetchJSON('/assistant/runtime-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
 export interface AssistantStreamHandlers {
   onUser?: (message: AssistantMessage) => void
   onDelta?: (text: string) => void

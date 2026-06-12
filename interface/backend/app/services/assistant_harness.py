@@ -26,6 +26,7 @@ from app.db.models import (
     AssistantMessage,
     AssistantProviderConfig,
     AssistantProvenance,
+    AssistantRuntimeSettings,
     AssistantToolCall,
     BuilderSectionDraft,
     Condition,
@@ -685,6 +686,122 @@ def get_ollama_models(
             models=[],
             error=f"{type(exc).__name__}: {exc}",
         )
+
+
+# ── Runtime settings (DB-backed overrides applied over env) ──────────────────
+
+# DB column -> settings attribute it overrides.
+RUNTIME_SETTING_FIELDS = {
+    "request_timeout_sec": "assistant_request_timeout_sec",
+    "local_timeout_sec": "assistant_local_timeout_sec",
+    "ollama_keep_alive": "assistant_ollama_keep_alive",
+    "max_agent_turns": "assistant_max_agent_turns",
+    "keep_recent_turns": "assistant_keep_recent_turns",
+    "compact_threshold": "assistant_compact_threshold",
+    "context_token_budget": "assistant_context_token_budget",
+    "confirmation_ttl_sec": "assistant_confirmation_ttl_sec",
+    "summary_model": "assistant_summary_model",
+}
+
+_INT_SETTING_BOUNDS = {
+    "request_timeout_sec": (5, 600),
+    "local_timeout_sec": (30, 1800),
+    "max_agent_turns": (1, 12),
+    "keep_recent_turns": (2, 50),
+    "compact_threshold": (1, 50),
+    "context_token_budget": (500, 20000),
+    "confirmation_ttl_sec": (30, 86400),
+}
+
+
+class AssistantRuntimeSettingsOut(BaseModel):
+    request_timeout_sec: int
+    local_timeout_sec: int
+    ollama_keep_alive: str
+    max_agent_turns: int
+    keep_recent_turns: int
+    compact_threshold: int
+    context_token_budget: int
+    confirmation_ttl_sec: int
+    summary_model: str
+    updated_at: str
+
+
+class AssistantRuntimeSettingsUpdate(BaseModel):
+    request_timeout_sec: int | None = None
+    local_timeout_sec: int | None = None
+    ollama_keep_alive: str | None = None
+    max_agent_turns: int | None = None
+    keep_recent_turns: int | None = None
+    compact_threshold: int | None = None
+    context_token_budget: int | None = None
+    confirmation_ttl_sec: int | None = None
+    summary_model: str | None = None
+
+
+def _get_or_create_runtime_settings(session: Session) -> AssistantRuntimeSettings:
+    row = session.get(AssistantRuntimeSettings, 1)
+    if row:
+        return row
+    row = AssistantRuntimeSettings(
+        id=1,
+        request_timeout_sec=int(settings.assistant_request_timeout_sec or 30),
+        local_timeout_sec=int(settings.assistant_local_timeout_sec or 300),
+        ollama_keep_alive=settings.assistant_ollama_keep_alive or "30m",
+        max_agent_turns=int(settings.assistant_max_agent_turns or 6),
+        keep_recent_turns=int(settings.assistant_keep_recent_turns or 12),
+        compact_threshold=int(settings.assistant_compact_threshold or 6),
+        context_token_budget=int(settings.assistant_context_token_budget or 3500),
+        confirmation_ttl_sec=int(settings.assistant_confirmation_ttl_sec or 900),
+        summary_model=settings.assistant_summary_model or "",
+        updated_at=now_iso(),
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
+
+
+def apply_runtime_settings_to_env(row: AssistantRuntimeSettings) -> None:
+    """Mutate the global settings singleton so all `settings.assistant_*` reads see the overrides."""
+    for db_field, attr in RUNTIME_SETTING_FIELDS.items():
+        setattr(settings, attr, getattr(row, db_field))
+
+
+def _runtime_settings_out(row: AssistantRuntimeSettings) -> AssistantRuntimeSettingsOut:
+    return AssistantRuntimeSettingsOut(
+        request_timeout_sec=row.request_timeout_sec,
+        local_timeout_sec=row.local_timeout_sec,
+        ollama_keep_alive=row.ollama_keep_alive,
+        max_agent_turns=row.max_agent_turns,
+        keep_recent_turns=row.keep_recent_turns,
+        compact_threshold=row.compact_threshold,
+        context_token_budget=row.context_token_budget,
+        confirmation_ttl_sec=row.confirmation_ttl_sec,
+        summary_model=row.summary_model,
+        updated_at=row.updated_at,
+    )
+
+
+def get_runtime_settings(session: Session) -> AssistantRuntimeSettingsOut:
+    row = _get_or_create_runtime_settings(session)
+    apply_runtime_settings_to_env(row)
+    return _runtime_settings_out(row)
+
+
+def update_runtime_settings(session: Session, data: AssistantRuntimeSettingsUpdate) -> AssistantRuntimeSettingsOut:
+    row = _get_or_create_runtime_settings(session)
+    for field, value in data.model_dump(exclude_none=True).items():
+        if field in _INT_SETTING_BOUNDS:
+            low, high = _INT_SETTING_BOUNDS[field]
+            value = max(low, min(high, int(value)))
+        setattr(row, field, value)
+    row.updated_at = now_iso()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    apply_runtime_settings_to_env(row)
+    return _runtime_settings_out(row)
 
 
 def get_tool_registry() -> list[AssistantToolSpec]:

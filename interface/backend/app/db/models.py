@@ -169,6 +169,23 @@ class AssistantProvenance(SQLModel, table=True):
     created_at: str = ""                         # ISO timestamp
 
 
+class AssistantRuntimeSettings(SQLModel, table=True):
+    """Single-row, UI-editable runtime knobs that override the environment defaults."""
+    __tablename__ = "assistant_runtime_settings"
+
+    id: Optional[int] = Field(default=1, primary_key=True)
+    request_timeout_sec: int = 30
+    local_timeout_sec: int = 300
+    ollama_keep_alive: str = "30m"
+    max_agent_turns: int = 6
+    keep_recent_turns: int = 12
+    compact_threshold: int = 6
+    context_token_budget: int = 3500
+    confirmation_ttl_sec: int = 900
+    summary_model: str = ""
+    updated_at: str = ""
+
+
 class AssistantProviderConfig(SQLModel, table=True):
     __tablename__ = "assistant_provider_configs"
 

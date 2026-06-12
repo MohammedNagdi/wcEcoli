@@ -43,6 +43,7 @@ import type {
 } from '../../types'
 import type { AssistantMemory } from '../../api/client'
 import { useAssistant } from './AssistantProvider'
+import { RuntimeSettingsCard, ConnectionTestCard } from './AssistantSettings'
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'ready' | 'blocked' | 'planned' }) {
   const classes = {
@@ -1901,110 +1902,8 @@ export function AssistantPage() {
           </div>
         )}
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card title="Local-first runtime">
-            <p className="text-xs leading-5 text-gray-500">
-              Runs locally through Docker — no hosted backend or paid account required.
-            </p>
-            <div className="mt-4 grid gap-2 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Mode</span>
-                <span className="font-medium text-gray-900">{status?.distribution.mode ?? 'local-first'}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Runtime</span>
-                <span className="font-medium text-gray-900">{status?.distribution.runtime ?? 'Docker Compose'}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Hosted backend required</span>
-                <span className="font-medium text-gray-900">
-                  {status?.distribution.requires_hosted_backend ? 'Yes' : 'No'}
-                </span>
-              </div>
-            </div>
-            {status?.distribution.notes.map((note) => (
-              <p key={note} className="mt-3 text-xs leading-5 text-gray-500">{note}</p>
-            ))}
-          </Card>
-
-          <Card title="BYOK and local model providers">
-            <p className="text-xs leading-5 text-gray-500">
-              Bring your own API key, or point at a local endpoint. The app stays usable with no LLM.
-            </p>
-            <div className="mt-3 rounded-md border border-gray-100 px-3">
-              {(status?.providers.providers ?? []).map((provider) => (
-                <ProviderRow key={provider.provider_id} provider={provider} />
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-gray-500">
-              {configuredProviders} provider{configuredProviders === 1 ? '' : 's'} configured in this environment.
-            </p>
-            <div className="mt-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-600">
-              <div>
-                <span className="font-semibold text-gray-800">Runtime:</span>{' '}
-                {status?.providers.runtime_ready
-                  ? `${status.providers.active_runtime_provider_id}${status.providers.active_runtime_model ? ` (${status.providers.active_runtime_model})` : ''}`
-                  : status?.providers.runtime_issue || 'No runtime provider selected.'}
-              </div>
-              {status?.providers.selected_provider_id && (
-                <div>
-                  <span className="font-semibold text-gray-800">Selected:</span>{' '}
-                  {status.providers.selected_provider_id}
-                </div>
-              )}
-            </div>
-          </Card>
-
-          <Card title="Typed assistant harness">
-            <p className="text-xs leading-5 text-gray-500">
-              Gets validated page context only — no direct database, filesystem, Docker, shell, or Python access.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(status?.assistant.context_contract ?? ['route', 'selected_gene', 'selected_experiment', 'selected_job']).map((item) => (
-                <StatusPill key={item}>{item}</StatusPill>
-              ))}
-            </div>
-            <div className="mt-4 grid gap-2 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Message persistence</span>
-                <span className="font-medium text-gray-900">
-                  {status?.assistant.db_persistence_enabled ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Tool execution</span>
-                <span className="font-medium text-gray-900">
-                  {status?.assistant.tool_execution_enabled ? 'Partial' : 'Disabled'}
-                </span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Side-effect execution</span>
-                <span className="font-medium text-gray-900">
-                  {status?.assistant.side_effect_execution_enabled ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Dry-run previews</span>
-                <span className="font-medium text-gray-900">
-                  {status?.assistant.tool_preview_enabled ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Registered tools</span>
-                <span className="font-medium text-gray-900">{toolCount}</span>
-              </div>
-            </div>
-          </Card>
-
-          <Card title="Registered tools">
-            <p className="text-xs leading-5 text-gray-500">
-              Typed contracts with dry-run previews. Read-only tools run on click; side effects need confirmation.
-            </p>
-            <div className="mt-3 rounded-md border border-gray-100 px-3">
-              {(status?.assistant.tool_registry ?? []).map((tool) => (
-                <ToolRow key={tool.name} tool={tool} />
-              ))}
-            </div>
-          </Card>
+          <RuntimeSettingsCard />
+          <ConnectionTestCard />
         </div>
       </AdvancedDisclosure>
 

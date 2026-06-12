@@ -36,6 +36,10 @@ from app.services.assistant_harness import (
     AssistantToolSpec,
     AssistantProviderConfigOut,
     AssistantProviderConfigUpdate,
+    AssistantRuntimeSettingsOut,
+    AssistantRuntimeSettingsUpdate,
+    get_runtime_settings,
+    update_runtime_settings,
     ConfirmationCreate,
     ConfirmationOut,
     ConfirmationResolve,
@@ -92,6 +96,19 @@ def get_status(session: Session = Depends(get_session)) -> AssistantHarnessStatu
 @router.get("/providers", response_model=ProviderLayerStatus)
 def get_providers(session: Session = Depends(get_session)) -> ProviderLayerStatus:
     return get_provider_layer_status(session)
+
+
+@router.get("/runtime-settings", response_model=AssistantRuntimeSettingsOut)
+def read_runtime_settings(session: Session = Depends(get_session)) -> AssistantRuntimeSettingsOut:
+    return get_runtime_settings(session)
+
+
+@router.put("/runtime-settings", response_model=AssistantRuntimeSettingsOut)
+def write_runtime_settings(
+    data: AssistantRuntimeSettingsUpdate,
+    session: Session = Depends(get_session),
+) -> AssistantRuntimeSettingsOut:
+    return update_runtime_settings(session, data)
 
 
 @router.post("/providers/warm", response_model=dict)

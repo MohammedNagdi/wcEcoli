@@ -42,6 +42,14 @@ async def lifespan(app: FastAPI):
     # (caused by earlier broken TableReader import)
     _auto_reingest_stale_results(_engine)
 
+    # Apply any DB-stored assistant runtime overrides over the environment defaults.
+    try:
+        from app.services.assistant_harness import _get_or_create_runtime_settings, apply_runtime_settings_to_env
+        with Session(_engine) as _session:
+            apply_runtime_settings_to_env(_get_or_create_runtime_settings(_session))
+    except Exception as exc:  # noqa: BLE001 — never block startup on settings
+        logger.warning("Assistant runtime settings not applied: %s", exc)
+
     logger.info("wcEcoli API ready - database at %s", settings.database_path)
     yield
     logger.info("Shutting down")

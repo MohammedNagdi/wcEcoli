@@ -1952,3 +1952,35 @@ def test_streaming_degrades_gracefully_on_provider_failure():
         _restore_runtime_settings(snapshot)
         session.close()
         engine.dispose()
+
+
+def test_runtime_settings_seed_clamp_and_apply():
+    from app.services.assistant_harness import (
+        AssistantRuntimeSettingsUpdate,
+        get_runtime_settings,
+        update_runtime_settings,
+    )
+
+    engine, session = _build_session()
+    snap = {
+        "assistant_max_agent_turns": settings.assistant_max_agent_turns,
+        "assistant_summary_model": settings.assistant_summary_model,
+        "assistant_local_timeout_sec": settings.assistant_local_timeout_sec,
+    }
+    try:
+        out = get_runtime_settings(session)
+        assert out.max_agent_turns == settings.assistant_max_agent_turns
+        updated = update_runtime_settings(session, AssistantRuntimeSettingsUpdate(
+            max_agent_turns=999, local_timeout_sec=5, summary_model="claude-haiku-4-5",
+        ))
+        assert updated.max_agent_turns == 12
+        assert updated.local_timeout_sec == 30
+        assert updated.summary_model == "claude-haiku-4-5"
+        assert settings.assistant_max_agent_turns == 12
+        assert settings.assistant_summary_model == "claude-haiku-4-5"
+        assert get_runtime_settings(session).max_agent_turns == 12
+    finally:
+        for k, v in snap.items():
+            setattr(settings, k, v)
+        session.close()
+        engine.dispose()

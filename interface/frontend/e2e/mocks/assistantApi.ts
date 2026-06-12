@@ -141,6 +141,15 @@ export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Prom
   await page.route('**/api/assistant/providers', (r) => r.fulfill({ json: STATUS.providers }))
   await page.route('**/api/assistant/provider-configs', (r) => r.fulfill({ json: [] }))
   await page.route('**/api/assistant/tools', (r) => r.fulfill({ json: [] }))
+  await page.route('**/api/assistant/runtime-settings', (r) =>
+    r.fulfill({
+      json: {
+        request_timeout_sec: 30, local_timeout_sec: 300, ollama_keep_alive: '30m', max_agent_turns: 6,
+        keep_recent_turns: 12, compact_threshold: 6, context_token_budget: 3500, confirmation_ttl_sec: 900,
+        summary_model: '', updated_at: '',
+      },
+    }),
+  )
 
   // Conversations + memory + messages
   await page.route('**/api/assistant/conversations', (r) =>
