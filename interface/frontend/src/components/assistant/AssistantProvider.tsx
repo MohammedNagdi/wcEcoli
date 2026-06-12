@@ -293,6 +293,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   async function loadConversationMessages(conversation: AssistantConversation) {
     setError(null)
+    setCompactionNotice(false)
+    setThinkingSegments([])
     setActiveConversation(conversation)
     try {
       const [rows, proposalRows] = await Promise.all([
@@ -357,6 +359,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   async function startNewChat() {
     setError(null)
+    setCompactionNotice(false)
+    setThinkingSegments([])
     setActiveConversation(null)
     setMessages([])
     setProposals([])

@@ -1412,102 +1412,85 @@ function ThinkingBlock({ segments, live = false }: { segments: string[]; live?: 
   )
 }
 
-/** The inspect/proposals/memory/labels cards — shown beneath the conversations list. */
+/** Below the conversation list: a "current chat" group (inspect/result note/memory) + labels help.
+ * Proposed actions render inline in the chat (Claude-style), not here. */
 function SidePanelCards({
-  context, inspecting, inspectCurrentResult, resolvedNote, proposals, activeConversationId,
-  runReadOnlyProposal, handleProposalResolved, memory, clearMemory,
+  context, inspecting, inspectCurrentResult, resolvedNote, hasActiveConversation, memory, clearMemory,
 }: {
   context: AssistantContext
   inspecting: boolean
   inspectCurrentResult: () => void
   resolvedNote: string | null
-  proposals: AssistantToolCall[]
-  activeConversationId: number | null
-  runReadOnlyProposal: (proposal: AssistantToolCall) => void
-  handleProposalResolved: (proposalId: number, outcome: 'executed' | 'rejected') => void
+  hasActiveConversation: boolean
   memory: AssistantMemory | null
   clearMemory: () => void
 }) {
+  const hasMemory = Boolean(memory && (memory.summary || memory.remembered_genes.length > 0))
+  const showCurrentChat = hasActiveConversation || hasMemory || context.selected_job != null || Boolean(resolvedNote)
   return (
     <>
-      {context.selected_job != null && (
-        <button
-          type="button"
-          onClick={inspectCurrentResult}
-          disabled={inspecting}
-          className="w-full rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-left text-sm font-medium text-brand-700 transition hover:bg-brand-100 disabled:opacity-50"
-        >
-          {inspecting ? 'Inspecting…' : `Inspect current result (Job #${context.selected_job})`}
-        </button>
-      )}
-
-      {resolvedNote && (
-        <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-700">
-          {resolvedNote}
-        </div>
-      )}
-
-      {proposals.length > 0 && (
-        <section className="rounded-lg border border-blue-200 bg-white">
-          <div className="flex items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-blue-700">
-            <span>Actions awaiting your review</span>
-            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">{proposals.length}</span>
+      {showCurrentChat && (
+        <div className="space-y-2 rounded-xl border border-brand-100 bg-white p-2.5">
+          <div className="flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-brand-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
+            Current chat
           </div>
-          <div className="space-y-2 border-t border-blue-50 p-3">
-            <p className="text-xs leading-5 text-gray-500">
-              The assistant proposed these. Nothing runs until you preview and confirm — read-only inspections run on click; experiments and simulations ask again before executing.
-            </p>
-            {proposals.slice(0, 5).map((proposal) => (
-              <AssistantProposalCard
-                key={proposal.id}
-                proposal={proposal}
-                context={context}
-                conversationId={activeConversationId}
-                busy={inspecting}
-                onRunReadOnly={runReadOnlyProposal}
-                onResolved={handleProposalResolved}
-              />
-            ))}
-            {proposals.length > 5 && (
-              <div className="rounded-md border border-dashed border-blue-200 bg-blue-50/40 px-3 py-2 text-xs text-blue-700">
-                +{proposals.length - 5} more proposed action{proposals.length - 5 === 1 ? '' : 's'} — refine your request to narrow these down.
-              </div>
-            )}
-          </div>
-        </section>
-      )}
 
-      {memory && (memory.summary || memory.remembered_genes.length > 0) && (
-        <details className="rounded-lg border border-gray-200 bg-white" open>
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-            <span>What the assistant remembers</span>
+          {context.selected_job != null && (
             <button
               type="button"
-              onClick={(event) => {
-                event.preventDefault()
-                clearMemory()
-              }}
-              className="rounded border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-50"
+              onClick={inspectCurrentResult}
+              disabled={inspecting}
+              className="w-full rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-left text-sm font-medium text-brand-700 transition hover:bg-brand-100 disabled:opacity-50"
             >
-              Clear
+              {inspecting ? 'Inspecting…' : `Inspect current result (Job #${context.selected_job})`}
             </button>
-          </summary>
-          <div className="space-y-2 border-t border-gray-100 p-3">
-            {memory.summary && (
-              <p className="break-words text-xs leading-5 text-gray-600">{memory.summary}</p>
-            )}
-            {memory.remembered_genes.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {memory.remembered_genes.map((gene) => (
-                  <span key={gene} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600">{gene}</span>
-                ))}
-              </div>
-            )}
-            <p className="text-[11px] leading-4 text-gray-500">
-              Older turns are compacted into this summary so long chats keep context. Clearing forgets it.
-            </p>
-          </div>
-        </details>
+          )}
+
+          {resolvedNote && (
+            <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-700">
+              {resolvedNote}
+            </div>
+          )}
+
+          <details className="rounded-lg border border-gray-200 bg-gray-50" open={hasMemory}>
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              <span>What this chat remembers</span>
+              {hasMemory && (
+                <button
+                  type="button"
+                  onClick={(event) => { event.preventDefault(); clearMemory() }}
+                  className="rounded border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-100"
+                >
+                  Clear
+                </button>
+              )}
+            </summary>
+            <div className="space-y-2 border-t border-gray-200 p-3">
+              {hasMemory ? (
+                <>
+                  {memory?.summary && (
+                    <p className="break-words text-xs leading-5 text-gray-600">{memory.summary}</p>
+                  )}
+                  {memory && memory.remembered_genes.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {memory.remembered_genes.map((gene) => (
+                        <span key={gene} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600">{gene}</span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[11px] leading-4 text-gray-500">
+                    Older turns are compacted into this summary so long chats keep context. Clearing forgets it.
+                  </p>
+                </>
+              ) : (
+                <p className="text-[11px] leading-4 text-gray-500">
+                  Nothing remembered yet — once this chat runs long enough, earlier turns are compacted here.
+                </p>
+              )}
+            </div>
+          </details>
+        </div>
       )}
 
       <details className="rounded-lg border border-gray-200 bg-white">
@@ -1582,10 +1565,10 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             {conversations.map((conversation) => (
               <div
                 key={conversation.id}
-                className={`group flex items-start gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
+                className={`group flex items-start gap-2 rounded-md border border-l-[3px] px-3 py-2 text-xs transition-colors ${
                   activeConversation?.id === conversation.id
-                    ? 'border-brand-200 bg-white text-gray-900'
-                    : 'border-gray-100 bg-white/70 text-gray-600 hover:bg-white'
+                    ? 'border-brand-200 border-l-brand-500 bg-brand-50 text-gray-900 shadow-sm'
+                    : 'border-gray-100 border-l-gray-100 bg-white/70 text-gray-600 hover:bg-white'
                 }`}
               >
                 {editingId === conversation.id ? (
@@ -1609,7 +1592,9 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="truncate font-medium">{conversation.title}</div>
-                    <div className="mt-1 text-gray-500">{conversation.status.replace(/_/g, ' ')}</div>
+                    <div className={`mt-1 ${activeConversation?.id === conversation.id ? 'font-medium text-brand-600' : 'text-gray-500'}`}>
+                      {activeConversation?.id === conversation.id ? '● current chat' : conversation.status.replace(/_/g, ' ')}
+                    </div>
                   </button>
                 )}
                 {editingId !== conversation.id && (
@@ -1644,10 +1629,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             inspecting={inspecting}
             inspectCurrentResult={inspectCurrentResult}
             resolvedNote={resolvedNote}
-            proposals={proposals}
-            activeConversationId={activeConversation?.id ?? null}
-            runReadOnlyProposal={runReadOnlyProposal}
-            handleProposalResolved={handleProposalResolved}
+            hasActiveConversation={activeConversation != null}
             memory={memory}
             clearMemory={clearMemory}
           />
@@ -1734,6 +1716,34 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                 </div>
               )
             })}
+            {/* Proposed actions appear inline at the end of the conversation (Claude-style). */}
+            {proposals.length > 0 && (
+              <div className="space-y-2 rounded-xl border border-blue-200 bg-blue-50/50 p-3" data-testid="chat-proposals">
+                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                  <span>Actions awaiting your review</span>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-blue-700">{proposals.length}</span>
+                </div>
+                <p className="text-xs leading-5 text-gray-600">
+                  The assistant proposed these. Nothing runs until you preview and confirm.
+                </p>
+                {proposals.slice(0, 5).map((proposal) => (
+                  <AssistantProposalCard
+                    key={proposal.id}
+                    proposal={proposal}
+                    context={context}
+                    conversationId={activeConversation?.id ?? null}
+                    busy={inspecting}
+                    onRunReadOnly={runReadOnlyProposal}
+                    onResolved={handleProposalResolved}
+                  />
+                ))}
+                {proposals.length > 5 && (
+                  <div className="rounded-md border border-dashed border-blue-200 bg-white/60 px-3 py-2 text-xs text-blue-700">
+                    +{proposals.length - 5} more proposed action{proposals.length - 5 === 1 ? '' : 's'} — refine your request to narrow these down.
+                  </div>
+                )}
+              </div>
+            )}
             {/* Live reasoning trail (folds in before each tool call), then the in-progress answer. */}
             {sending && thinkingSegments.length > 0 && <ThinkingBlock segments={thinkingSegments} live />}
             {sending && streamingText !== null && streamingText.length > 0 && (
