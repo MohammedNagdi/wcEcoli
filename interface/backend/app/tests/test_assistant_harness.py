@@ -4,14 +4,17 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from app.config import settings
 from app.db.models import (
     AssistantConfirmation,
+    AssistantProvenance,
     AssistantProviderConfig,
     AssistantToolCall,
     Condition,
     Experiment,
     Gene,
+    MediaRecipe,
     SimulationJob,
     SimulationResult,
     TFEdge,
+    Timeline,
     Variant,
 )
 from app.services.assistant_runtime import generate_assistant_runtime_reply
@@ -1758,6 +1761,193 @@ def test_agent_loop_surfaces_side_effect_tool_without_executing():
         tool_msg = calls[1]["payload"]["messages"][-1]
         assert tool_msg["role"] == "tool"
         assert "pending_user_confirmation" in tool_msg["content"]
+    finally:
+        _restore_runtime_settings(snapshot)
+        session.close()
+        engine.dispose()
+
+
+# --------------------------------------------------------------------------- #
+# Exhaustive per-adapter coverage: execute + audit, reject invalid, confirmation
+# --------------------------------------------------------------------------- #
+
+
+def _seed_adapter_fixture(session):
+    session.add(Condition(name="basal", nutrients="minimal"))
+    session.add(Condition(name="glc_20mM", nutrients="minimal + glucose"))
+    session.add(MediaRecipe(media_id="minimal", base_media="MIX0"))
+    session.add(Timeline(name="000000_basal", definition="[]"))
+    session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
+    session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", category="replication",
+                     ko_index=42, is_mechanistic=True, monomer_id="DNAA-MONOMER"))
+    session.add(TFEdge(tf_symbol="dnaA", target_symbol="lacZ", log2fc_mean=1.0, regulation_direct="+"))
+    session.add(Experiment(id=7, name="dnaA KO", variant_type="gene_knockout", variant_index=42,
+                           condition="basal", status="done", gene_symbol="dnaA", sim_params="{}"))
+    session.add(SimulationJob(id=12, experiment_id=7, status="done", condition="basal", seed=0, generations=2, sim_dir="out/run"))
+    session.add(SimulationResult(job_id=12, experiment_id=7, seed=0, generation=0, divided=True, growth_rate=0.010))
+    session.add(SimulationResult(job_id=12, experiment_id=7, seed=0, generation=1, divided=True, growth_rate=0.011))
+    session.commit()
+
+
+READ_ONLY_ADAPTER_CASES = [
+    ("inspect_gene", {"gene": "dnaA"}, "gene"),
+    ("gene_catalog", {}, "totals"),
+    ("inspect_tf_network", {"gene": "dnaA"}, "targets"),
+    ("list_conditions", {}, "conditions"),
+    ("list_experiments", {}, "experiments"),
+    ("inspect_experiment", {"experiment_id": 7}, "experiment"),
+    ("inspect_result", {"job_id": 12}, "summary"),
+    ("inspect_molecule_trajectories", {"job_id": 12}, "trajectory_scope"),
+    ("platform_guide", {}, "pages"),
+    ("explain_modeling", {"topic": "fba"}, "explanation"),
+]
+
+
+def test_every_read_only_adapter_executes_and_is_audited():
+    engine, session = _build_session()
+    try:
+        _seed_adapter_fixture(session)
+        for tool, args, expect_key in READ_ONLY_ADAPTER_CASES:
+            out = execute_tool(session, tool, AssistantToolExecutionRequest(arguments=args))
+            assert out.executed is True, tool
+            assert out.requires_confirmation is False, tool
+            assert out.status == "executed", (tool, out.status)
+            assert expect_key in out.result, (tool, expect_key)
+            # Audited: a tool-call row AND a provenance row were written.
+            assert out.tool_call_id is not None and out.provenance_id is not None, tool
+        tool_calls = session.exec(select(AssistantToolCall)).all()
+        provenance = session.exec(select(AssistantProvenance)).all()
+        assert len(tool_calls) >= len(READ_ONLY_ADAPTER_CASES)
+        assert len(provenance) >= len(READ_ONLY_ADAPTER_CASES)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_read_only_adapters_reject_invalid_arguments():
+    engine, session = _build_session()
+    try:
+        _seed_adapter_fixture(session)
+        cases = [
+            ("inspect_gene", {"gene": "NOTAGENE"}),          # unknown gene
+            ("inspect_tf_network", {"gene": "NOTAGENE"}),
+            ("inspect_experiment", {"experiment_id": 999}),  # missing row
+            ("inspect_result", {"job_id": 999}),
+            ("inspect_molecule_trajectories", {"job_id": 999}),
+            ("inspect_experiment", {}),                      # missing required arg
+            ("inspect_result", {}),
+            ("inspect_gene", {}),
+        ]
+        for tool, args in cases:
+            out = execute_tool(session, tool, AssistantToolExecutionRequest(arguments=args))
+            assert out.executed is False, (tool, args)
+            assert out.status == "validation_failed", (tool, args, out.status)
+            assert out.errors, (tool, args)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_side_effect_adapters_require_confirmation_and_make_no_changes():
+    engine, session = _build_session()
+    try:
+        _seed_adapter_fixture(session)
+        # create_experiment with valid args but NO confirmation -> gated, nothing created.
+        create = execute_tool(session, "create_experiment", AssistantToolExecutionRequest(arguments={
+            "variant_type": "gene_knockout", "condition": "basal", "gene_symbol": "dnaA", "include_wildtype": False,
+        }))
+        assert create.executed is False
+        assert create.status == "confirmation_required"
+        assert create.requires_confirmation is True
+        assert create.tool_call_id is not None  # still audited
+        assert session.exec(select(Experiment).where(Experiment.id != 7)).all() == []
+
+        # run_simulation with valid experiment but NO confirmation -> gated, no job queued.
+        run = execute_tool(session, "run_simulation", AssistantToolExecutionRequest(arguments={
+            "experiment_id": 7, "seed": 0, "generations": 1,
+        }))
+        assert run.executed is False
+        assert run.status == "confirmation_required"
+        jobs = session.exec(select(SimulationJob).where(SimulationJob.id != 12)).all()
+        assert jobs == []
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_execute_unknown_tool_is_a_clean_404():
+    from fastapi import HTTPException
+
+    engine, session = _build_session()
+    try:
+        raised = False
+        try:
+            execute_tool(session, "does_not_exist", AssistantToolExecutionRequest(arguments={}))
+        except HTTPException as exc:
+            raised = True
+            assert exc.status_code == 404
+        assert raised
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_agent_degrades_gracefully_on_provider_failure():
+    import urllib.error
+    from app.services.assistant_agent import generate_assistant_agent_reply
+
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_model = ""
+        settings.openai_api_key = ""
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+
+        def boom(url, headers, payload, timeout):
+            raise urllib.error.URLError("connection refused")
+
+        result = generate_assistant_agent_reply(
+            "hello", {"route": "/"}, session=session, history=[], conversation_id=None, transport=boom,
+        )
+        assert result.status == "provider_call_failed"  # no exception bubbled up
+        assert "failed" in result.content.lower()
+        assert result.pending_side_effects == [] and result.executed_tools == []
+    finally:
+        _restore_runtime_settings(snapshot)
+        session.close()
+        engine.dispose()
+
+
+def test_streaming_degrades_gracefully_on_provider_failure():
+    import urllib.error
+    from app.services.assistant_stream import stream_assistant_agent_events
+
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_model = ""
+        settings.openai_api_key = ""
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+
+        def boom(url, headers, payload, timeout):
+            raise urllib.error.URLError("connection refused")
+            yield  # pragma: no cover (makes this a generator)
+
+        events = list(stream_assistant_agent_events(
+            "hello", {"route": "/"}, session=session, history=[], conversation_id=None, stream_transport=boom,
+        ))
+        result = next(e["result"] for e in events if e.get("type") == "result")
+        assert result["status"] == "provider_call_failed"
     finally:
         _restore_runtime_settings(snapshot)
         session.close()
