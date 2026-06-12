@@ -17,10 +17,12 @@ import { DesignPage } from './components/design/DesignPage'
 import { GenomeViewerPage } from './components/genome/GenomeViewerPage'
 import { PathwaysPage } from './components/pathways/PathwaysPage'
 import { WorkspaceUrlSync } from './hooks/useUrlWorkspaceState'
+import { AssistantProvider } from './components/assistant/AssistantProvider'
 
 export default function App() {
   return (
-    <Shell>
+    <AssistantProvider>
+      <Shell>
       <WorkspaceUrlSync />
       <Routes>
         <Route path="/" element={<ExploreWorkspacePage />} />
@@ -41,6 +43,7 @@ export default function App() {
         <Route path="/ml" element={<MLPage />} />
         <Route path="/design" element={<DesignPage />} />
       </Routes>
-    </Shell>
+      </Shell>
+    </AssistantProvider>
   )
 }
