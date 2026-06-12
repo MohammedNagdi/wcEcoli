@@ -86,6 +86,9 @@ CONFIRMATION_REQUIRED_ACTIONS = [
     "create_experiment",
     "run_simulation",
     "save_condition",
+    "save_timeline",
+    "save_recipe",
+    "save_tf_condition",
     "cancel_simulation",
     "delete_experiment",
     "publish_environment_builder_artifact",
@@ -871,6 +874,68 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             result_schema={"draft_id": "integer", "status": "draft"},
         ),
         AssistantToolSpec(
+            name="save_timeline",
+            label="Save timeline draft",
+            description=(
+                "Prepare a Conditions Builder *timeline* draft — a media-shift schedule as an event string like "
+                "'0 minimal, 1200 minimal_acetate' (time in seconds -> media id). Use when the user wants to create "
+                "a time-varying protocol. Read existing timelines/recipes with `list_conditions` first so the media "
+                "ids are real. Writes a reviewable draft, not a published file."
+            ),
+            status="confirmation_execution_enabled",
+            requires_confirmation=True,
+            side_effect=True,
+            permission_tier="draft",
+            argument_schema={"name": "string", "events": "string"},
+            result_schema={"draft_id": "integer", "status": "draft"},
+        ),
+        AssistantToolSpec(
+            name="save_recipe",
+            label="Save media-recipe draft",
+            description=(
+                "Prepare a Conditions Builder *media-recipe* draft: a media formulation id built from a base growth "
+                "medium (and optional added medium + extra ingredient molecule ids). Use when the user wants to "
+                "define a new medium recipe. Read existing media stocks/recipes with `list_conditions` first so "
+                "`base_media` is a real medium. Writes a reviewable draft, not a published file."
+            ),
+            status="confirmation_execution_enabled",
+            requires_confirmation=True,
+            side_effect=True,
+            permission_tier="draft",
+            argument_schema={
+                "media_id": "string",
+                "base_media": "string",
+                "added_media": "string",
+                "ingredients": "array",
+            },
+            result_schema={"draft_id": "integer", "status": "draft"},
+        ),
+        AssistantToolSpec(
+            name="save_tf_condition",
+            label="Save TF-condition draft",
+            description=(
+                "Prepare a Conditions Builder *TF-condition* draft — a transcription-factor regulation rule: which "
+                "TF is active vs inactive under which media (nutrients) and its TF type. Use when the user wants to "
+                "add a TF regulation rule. Read existing TF rules/recipes with `list_conditions` first so the "
+                "active/inactive nutrients are real media recipes. Writes a reviewable draft, not a published file."
+            ),
+            status="confirmation_execution_enabled",
+            requires_confirmation=True,
+            side_effect=True,
+            permission_tier="draft",
+            argument_schema={
+                "name": "string",
+                "tf": "string",
+                "active_tf": "string",
+                "active_nutrients": "string",
+                "inactive_nutrients": "string",
+                "tf_type": "string",
+                "active_genotype_perturbations": "object",
+                "inactive_genotype_perturbations": "object",
+            },
+            result_schema={"draft_id": "integer", "status": "draft"},
+        ),
+        AssistantToolSpec(
             name="publish_environment_builder_artifact",
             label="Publish builder artifact",
             description="Publish a saved Conditions Builder draft to the local reconstruction files.",
@@ -933,8 +998,11 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             name="list_conditions",
             label="List growth conditions",
             description=(
-                "Summarize the growth conditions, media recipes, and timelines available in the Conditions Builder: "
-                "nutrients, active/inactive transcription factors, doubling time, and counts. Optional name search."
+                "Read the Conditions Builder surface in full: growth conditions (nutrients, active/inactive "
+                "transcription factors, genotype perturbations, doubling time), media-recipe compositions (base/added "
+                "media + ingredients), timelines WITH their event schedule (media shifts over time), and "
+                "TF-condition rules (which TF is active/inactive under which nutrients, and TF type). Use for any "
+                "question about conditions, recipes, timelines, or TF regulation rules. Optional name search."
             ),
             status="execution_enabled",
             requires_confirmation=False,
@@ -1179,8 +1247,14 @@ PLATFORM_PAGES = [
         "name": "Conditions Builder",
         "route": "/environment-builder",
         "purpose": "Define and review growth conditions, media recipes, and timelines.",
-        "data": "Conditions (nutrients, active/inactive TFs, doubling time), media recipes, timelines.",
-        "assistant_tools": ["list_conditions", "save_condition (confirmation-gated)"],
+        "data": "Conditions (nutrients, active/inactive TFs, doubling time), media recipes, timelines, TF rules.",
+        "assistant_tools": [
+            "list_conditions",
+            "save_condition (confirmation-gated)",
+            "save_timeline (confirmation-gated)",
+            "save_recipe (confirmation-gated)",
+            "save_tf_condition (confirmation-gated)",
+        ],
     },
     {
         "name": "Experiments",
@@ -1249,7 +1323,7 @@ def get_assistant_harness_status(session: Session | None = None) -> AssistantHar
         provider_configured=provider_configured,
         tool_execution_enabled=True,
         tool_preview_enabled=True,
-        execution_enabled_tools=[*READ_ONLY_TOOLS, "create_experiment", "run_simulation", "save_condition"],
+        execution_enabled_tools=[*READ_ONLY_TOOLS, *_SIDE_EFFECT_EXECUTORS],
         side_effect_execution_enabled=True,
         db_persistence_enabled=True,
         confirmation_required_for=CONFIRMATION_REQUIRED_ACTIONS,
@@ -1571,6 +1645,114 @@ def _preview_save_condition(session: Session, args: dict[str, Any]) -> tuple[dic
     return normalized, preview, warnings, errors
 
 
+def _preview_save_timeline(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    name = _string_arg(args, "name", errors)
+    events = _string_arg(args, "events", errors)
+    if name and session.exec(select(Timeline).where(Timeline.name == name)).first():
+        warnings.append(f"A published timeline named '{name}' already exists; publishing this draft would be rejected.")
+    if events:
+        try:
+            from app.services.timelines import validate_timeline_definition
+            validate_timeline_definition(session, events)
+        except HTTPException as exc:
+            warnings.append(f"Timeline events may be invalid and will be re-checked on publish: {exc.detail}")
+        except Exception:
+            pass
+    normalized = {"name": name, "events": events}
+    preview = {
+        "action": "would_create_timeline_draft",
+        "summary": f"Save timeline '{name or 'unnamed'}' with schedule: {events or '(empty)'}.",
+        "timeline_name": name,
+        "events": events,
+        "side_effect_if_executed": "A new 'timeline' draft would be saved in the Conditions Builder for review and publishing.",
+    }
+    return normalized, preview, warnings, errors
+
+
+def _preview_save_recipe(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    media_id = _string_arg(args, "media_id", errors)
+    base_media = _string_arg(args, "base_media", errors)
+    added_media = _string_arg(args, "added_media", errors, required=False)
+    ingredients = _string_list_arg(args, "ingredients", errors)
+
+    if media_id and session.exec(select(MediaRecipe).where(MediaRecipe.media_id == media_id)).first():
+        warnings.append(f"A media recipe '{media_id}' already exists; publishing this draft would be rejected.")
+    media_dir = getattr(settings, "condition_media_dir", None)
+    if base_media and media_dir is not None and not (media_dir / f"{base_media}.tsv").exists():
+        warnings.append(
+            f"Base medium '{base_media}' is not a published growth-medium stock; you can save the draft, but "
+            "publishing will require that stock to exist first."
+        )
+    normalized = {
+        "media_id": media_id,
+        "base_media": base_media,
+        "added_media": added_media,
+        "ingredients": ingredients,
+    }
+    preview = {
+        "action": "would_create_media_recipe_draft",
+        "summary": (
+            f"Save media recipe '{media_id or 'unnamed'}' from base '{base_media or 'unknown'}'"
+            + (f" + '{added_media}'" if added_media else "")
+            + (f" with {len(ingredients)} extra ingredient(s)" if ingredients else "") + "."
+        ),
+        "media_id": media_id,
+        "base_media": base_media,
+        "added_media": added_media,
+        "ingredients": ingredients,
+        "side_effect_if_executed": "A new 'mediaRecipe' draft would be saved in the Conditions Builder for review and publishing.",
+    }
+    return normalized, preview, warnings, errors
+
+
+def _preview_save_tf_condition(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    tf = _string_arg(args, "tf", errors)
+    active_tf = _string_arg(args, "active_tf", errors)
+    active_nutrients = _string_arg(args, "active_nutrients", errors)
+    inactive_nutrients = _string_arg(args, "inactive_nutrients", errors)
+    tf_type = _string_arg(args, "tf_type", errors)
+    name = _string_arg(args, "name", errors, required=False) or (f"{tf} rule" if tf else "")
+    active_geno = _object_arg(args, "active_genotype_perturbations", errors)
+    inactive_geno = _object_arg(args, "inactive_genotype_perturbations", errors)
+
+    for media in (active_nutrients, inactive_nutrients):
+        if media and not session.exec(select(MediaRecipe).where(MediaRecipe.media_id == media)).first():
+            warnings.append(
+                f"Media recipe '{media}' is not published yet; you can save the draft, but publishing will "
+                "require that recipe to exist first."
+            )
+    normalized = {
+        "name": name,
+        "tf": tf,
+        "active_tf": active_tf,
+        "active_nutrients": active_nutrients,
+        "inactive_nutrients": inactive_nutrients,
+        "tf_type": tf_type,
+        "active_genotype_perturbations": active_geno,
+        "inactive_genotype_perturbations": inactive_geno,
+    }
+    preview = {
+        "action": "would_create_tf_condition_draft",
+        "summary": (
+            f"Save TF rule '{name or tf}': {tf or '?'} active on '{active_nutrients or '?'}', inactive on "
+            f"'{inactive_nutrients or '?'}' (type {tf_type or '?'})."
+        ),
+        "tf": tf,
+        "active_tf": active_tf,
+        "active_nutrients": active_nutrients,
+        "inactive_nutrients": inactive_nutrients,
+        "tf_type": tf_type,
+        "side_effect_if_executed": "A new 'tfCondition' draft would be saved in the Conditions Builder for review and publishing.",
+    }
+    return normalized, preview, warnings, errors
+
+
 def _preview_publish_builder_artifact(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -1880,6 +2062,9 @@ _PREVIEW_DISPATCH = {
     "create_experiment": _preview_create_experiment,
     "run_simulation": _preview_run_simulation,
     "save_condition": _preview_save_condition,
+    "save_timeline": _preview_save_timeline,
+    "save_recipe": _preview_save_recipe,
+    "save_tf_condition": _preview_save_tf_condition,
     "publish_environment_builder_artifact": _preview_publish_builder_artifact,
     "inspect_result": _preview_inspect_result,
     "inspect_gene": _preview_inspect_gene,
@@ -1911,7 +2096,7 @@ def preview_tool(
         valid=not errors,
         requires_confirmation=spec.requires_confirmation,
         side_effect=spec.side_effect,
-        execution_enabled=tool_name in READ_ONLY_TOOLS or tool_name in {"create_experiment", "run_simulation", "save_condition"},
+        execution_enabled=tool_name in READ_ONLY_TOOLS or tool_name in _SIDE_EFFECT_EXECUTORS,
         normalized_arguments=normalized,
         preview=preview,
         warnings=warnings,
@@ -2900,21 +3085,51 @@ def _execute_inspect_tf_network(session: Session, normalized_arguments: dict[str
     }
 
 
+def _read_tf_conditions() -> list[dict[str, str]]:
+    """TF-condition rules live only in the flat reconstruction file (no DB model)."""
+    import csv as _csv
+
+    path = getattr(settings, "tf_condition_tsv", None)
+    if not path or not path.exists():
+        return []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = [ln for ln in handle if ln.strip() and not ln.lstrip().startswith("#")]
+        rows: list[dict[str, str]] = []
+        for row in _csv.DictReader(lines, delimiter="\t"):
+            rows.append({(k or "").strip().strip('"'): (v or "").strip() for k, v in row.items() if k})
+        return rows
+    except OSError:
+        return []
+
+
 def _execute_list_conditions(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
     search = (normalized_arguments.get("search") or "").strip().lower()
     limit = int(normalized_arguments.get("limit") or 20)
     conditions = session.exec(select(Condition)).all()
     media = session.exec(select(MediaRecipe)).all()
     timelines = session.exec(select(Timeline)).all()
+    tf_rows = _read_tf_conditions()
 
     def matches(condition: Condition) -> bool:
         if not search:
             return True
         return search in (condition.name or "").lower() or search in (condition.nutrients or "").lower()
 
+    def tf_matches(row: dict[str, str]) -> bool:
+        if not search:
+            return True
+        return any(search in (row.get(k) or "").lower() for k in ("TF", "active nutrients", "inactive nutrients", "TF type"))
+
     matched = [condition for condition in conditions if matches(condition)]
+    matched_tf = [row for row in tf_rows if tf_matches(row)]
     return {
-        "totals": {"conditions": len(conditions), "media_recipes": len(media), "timelines": len(timelines)},
+        "totals": {
+            "conditions": len(conditions),
+            "media_recipes": len(media),
+            "timelines": len(timelines),
+            "tf_conditions": len(tf_rows),
+        },
         "matched_count": len(matched),
         "conditions": [
             {
@@ -2922,12 +3137,37 @@ def _execute_list_conditions(session: Session, normalized_arguments: dict[str, A
                 "nutrients": condition.nutrients,
                 "active_tfs": condition.active_tfs,
                 "inactive_tfs": condition.inactive_tfs,
+                "genotype_perturbations": condition.genotype_perturbations,
                 "doubling_time": condition.doubling_time,
             }
             for condition in matched[:limit]
         ],
-        "media_recipes": [recipe.media_id for recipe in media[:limit]],
-        "timelines": [timeline.name for timeline in timelines[:limit]],
+        # Full recipe compositions (base/added media + ingredients), not just names.
+        "media_recipes": [
+            {
+                "media_id": recipe.media_id,
+                "base_media": recipe.base_media,
+                "added_media": recipe.added_media,
+                "ingredients": recipe.ingredients,
+            }
+            for recipe in media[:limit]
+        ],
+        # Timelines with their actual event schedule (media shifts over time), not just names.
+        "timelines": [
+            {"name": timeline.name, "definition": timeline.definition}
+            for timeline in timelines[:limit]
+        ],
+        # TF-condition rules: which TF is active/inactive under which nutrients, and TF type.
+        "tf_conditions": [
+            {
+                "tf": row.get("TF", ""),
+                "active_tf": row.get("active TF", ""),
+                "active_nutrients": row.get("active nutrients", ""),
+                "inactive_nutrients": row.get("inactive nutrients", ""),
+                "tf_type": row.get("TF type", ""),
+            }
+            for row in matched_tf[:limit]
+        ],
         "links": [{"label": "Conditions Builder", "path": "/environment-builder"}],
     }
 
@@ -3169,6 +3409,35 @@ def _execute_run_simulation(
     }
 
 
+def _persist_builder_draft(session: Session, *, section: str, name: str, payload: dict[str, Any]) -> BuilderSectionDraft:
+    """Create a reviewable Conditions Builder draft (shared by the save_* tools). 409 on name clash."""
+    if not name:
+        raise HTTPException(status_code=422, detail=f"{section} draft requires a name.")
+    existing = session.exec(
+        select(BuilderSectionDraft)
+        .where(BuilderSectionDraft.section == section)
+        .where(BuilderSectionDraft.name == name)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"A {section} draft named '{name}' already exists.")
+    timestamp = now_iso()
+    draft = BuilderSectionDraft(
+        section=section,
+        name=name,
+        payload=json.dumps(payload, separators=(",", ":")),
+        status="draft",
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session.add(draft)
+    session.commit()
+    session.refresh(draft)
+    return draft
+
+
+_CONDITION_BUILDER_LINK = {"label": "Open in Conditions Builder", "path": "/environment-builder"}
+
+
 def _execute_save_condition(
     session: Session,
     normalized_arguments: dict[str, Any],
@@ -3178,14 +3447,6 @@ def _execute_save_condition(
     nutrients = str(normalized_arguments.get("nutrients") or "").strip()
     if not name or not nutrients:
         raise HTTPException(status_code=422, detail="Condition draft requires a name and nutrients.")
-
-    existing = session.exec(
-        select(BuilderSectionDraft)
-        .where(BuilderSectionDraft.section == "condition")
-        .where(BuilderSectionDraft.name == name)
-    ).first()
-    if existing:
-        raise HTTPException(status_code=409, detail=f"A condition draft named '{name}' already exists.")
 
     doubling_time = normalized_arguments.get("doubling_time")
     active_tfs = normalized_arguments.get("active_tfs") or []
@@ -3204,33 +3465,84 @@ def _execute_save_condition(
             "inactive_tfs": json.dumps(inactive_tfs, separators=(",", ":")),
         },
     }
-    timestamp = now_iso()
-    draft = BuilderSectionDraft(
-        section="condition",
-        name=name,
-        payload=json.dumps(payload, separators=(",", ":")),
-        status="draft",
-        created_at=timestamp,
-        updated_at=timestamp,
-    )
-    session.add(draft)
-    session.commit()
-    session.refresh(draft)
+    draft = _persist_builder_draft(session, section="condition", name=name, payload=payload)
     return {
         "action": "created_condition_draft",
         "draft": {
-            "id": draft.id,
-            "section": "condition",
-            "name": draft.name,
-            "status": draft.status,
-            "nutrients": nutrients,
-            "doubling_time": payload["draft"]["doubling_time"],
-            "active_tfs": active_tfs,
-            "inactive_tfs": inactive_tfs,
+            "id": draft.id, "section": "condition", "name": draft.name, "status": draft.status,
+            "nutrients": nutrients, "doubling_time": payload["draft"]["doubling_time"],
+            "active_tfs": active_tfs, "inactive_tfs": inactive_tfs,
         },
-        "links": [
-            {"label": "Open in Conditions Builder", "path": "/environment-builder?section=condition"},
-        ],
+        "links": [_CONDITION_BUILDER_LINK],
+    }
+
+
+def _execute_save_timeline(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    name = str(normalized_arguments.get("name") or "").strip()
+    events = str(normalized_arguments.get("events") or "").strip()
+    if not name or not events:
+        raise HTTPException(status_code=422, detail="Timeline draft requires a name and events.")
+    payload = {"mode": "create", "source": "assistant", "name": name, "events": events}
+    draft = _persist_builder_draft(session, section="timeline", name=name, payload=payload)
+    return {
+        "action": "created_timeline_draft",
+        "draft": {"id": draft.id, "section": "timeline", "name": draft.name, "status": draft.status, "events": events},
+        "links": [_CONDITION_BUILDER_LINK],
+    }
+
+
+def _execute_save_recipe(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    media_id = str(normalized_arguments.get("media_id") or "").strip()
+    base_media = str(normalized_arguments.get("base_media") or "").strip()
+    if not media_id or not base_media:
+        raise HTTPException(status_code=422, detail="Media-recipe draft requires media_id and base_media.")
+    added_media = str(normalized_arguments.get("added_media") or "").strip()
+    ingredients = normalized_arguments.get("ingredients") or []
+    payload = {
+        "mode": "create",
+        "source": "assistant",
+        "draft": {
+            "media_id": media_id,
+            "base_media": base_media,
+            "base_media_volume": "1.0",
+            "added_media": added_media,
+            "added_media_volume": "0",
+            "ingredients": json.dumps(ingredients, separators=(",", ":")),
+            "ingredients_weight": "[]",
+            "ingredients_counts": "[]",
+            "ingredients_volume": "[]",
+        },
+    }
+    draft = _persist_builder_draft(session, section="mediaRecipe", name=media_id, payload=payload)
+    return {
+        "action": "created_media_recipe_draft",
+        "draft": {"id": draft.id, "section": "mediaRecipe", "name": draft.name, "status": draft.status,
+                  "base_media": base_media, "added_media": added_media, "ingredients": ingredients},
+        "links": [_CONDITION_BUILDER_LINK],
+    }
+
+
+def _execute_save_tf_condition(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    name = str(normalized_arguments.get("name") or "").strip()
+    tf = str(normalized_arguments.get("tf") or "").strip()
+    if not name or not tf:
+        raise HTTPException(status_code=422, detail="TF-condition draft requires a name and tf.")
+    row = {
+        "tf": tf,
+        "active_tf": str(normalized_arguments.get("active_tf") or "").strip(),
+        "active_nutrients": str(normalized_arguments.get("active_nutrients") or "").strip(),
+        "active_genotype_perturbations": json.dumps(normalized_arguments.get("active_genotype_perturbations") or {}, separators=(",", ":")),
+        "inactive_nutrients": str(normalized_arguments.get("inactive_nutrients") or "").strip(),
+        "inactive_genotype_perturbations": json.dumps(normalized_arguments.get("inactive_genotype_perturbations") or {}, separators=(",", ":")),
+        "tf_type": str(normalized_arguments.get("tf_type") or "").strip(),
+    }
+    # The tfCondition publish step expects payload.draft to be a LIST of rows.
+    payload = {"mode": "create", "source": "assistant", "draft": [row]}
+    draft = _persist_builder_draft(session, section="tfCondition", name=name, payload=payload)
+    return {
+        "action": "created_tf_condition_draft",
+        "draft": {"id": draft.id, "section": "tfCondition", "name": draft.name, "status": draft.status, "tf": tf},
+        "links": [_CONDITION_BUILDER_LINK],
     }
 
 
@@ -3296,6 +3608,18 @@ def supersede_open_proposals(session: Session, conversation_id: int | None) -> i
     if open_records:
         session.commit()
     return len(open_records)
+
+
+# Side-effecting tools: execute only after an approved, matching confirmation. The keys also drive
+# the execution-enabled membership checks (preview, status, execute dispatch).
+_SIDE_EFFECT_EXECUTORS = {
+    "create_experiment": _execute_create_experiment,
+    "run_simulation": _execute_run_simulation,
+    "save_condition": _execute_save_condition,
+    "save_timeline": _execute_save_timeline,
+    "save_recipe": _execute_save_recipe,
+    "save_tf_condition": _execute_save_tf_condition,
+}
 
 
 _READ_ONLY_EXECUTORS = {
@@ -3377,13 +3701,8 @@ def execute_tool(
                 errors=confirmation_errors,
             )
 
-        if tool_name in {"create_experiment", "run_simulation", "save_condition"}:
-            if tool_name == "create_experiment":
-                result = _execute_create_experiment(session, preview.normalized_arguments)
-            elif tool_name == "run_simulation":
-                result = _execute_run_simulation(session, preview.normalized_arguments)
-            else:
-                result = _execute_save_condition(session, preview.normalized_arguments)
+        if tool_name in _SIDE_EFFECT_EXECUTORS:
+            result = _SIDE_EFFECT_EXECUTORS[tool_name](session, preview.normalized_arguments)
             tool_call = _record_tool_call(
                 session,
                 conversation_id=request.conversation_id,

@@ -1069,6 +1069,18 @@ function starterPrompts(context: AssistantContext): string[] {
   return prompts.slice(0, 4)
 }
 
+const CONFIRM_BUTTON_LABELS: Record<string, string> = {
+  run_simulation: 'Confirm and queue',
+  save_condition: 'Save condition draft',
+  save_timeline: 'Save timeline draft',
+  save_recipe: 'Save recipe draft',
+  save_tf_condition: 'Save TF rule draft',
+}
+
+function confirmButtonLabel(toolName: string): string {
+  return CONFIRM_BUTTON_LABELS[toolName] ?? 'Create draft experiment'
+}
+
 function proposalText(proposal: AssistantToolCall, key: string, fallback: string): string {
   const value = proposal.result[key]
   return typeof value === 'string' && value.trim() ? value : fallback
@@ -1117,6 +1129,29 @@ function proposalFactRows(proposal: AssistantToolCall): Array<{ label: string; v
       { label: 'Active TFs', value: activeTfs.length ? activeTfs.join(', ') : 'None', mono: activeTfs.length > 0 },
       { label: 'Inactive TFs', value: inactiveTfs.length ? inactiveTfs.join(', ') : 'None', mono: inactiveTfs.length > 0 },
       { label: 'Cloned from', value: stringField(proposal.arguments.base_condition) || 'New condition', mono: Boolean(proposal.arguments.base_condition) },
+    ]
+  }
+  if (proposal.tool_name === 'save_timeline') {
+    return [
+      { label: 'Timeline name', value: stringField(proposal.arguments.name) || 'Unnamed', mono: true },
+      { label: 'Schedule', value: stringField(proposal.arguments.events) || '(empty)', mono: true },
+    ]
+  }
+  if (proposal.tool_name === 'save_recipe') {
+    const ingredients = Array.isArray(proposal.arguments.ingredients) ? (proposal.arguments.ingredients as string[]) : []
+    return [
+      { label: 'Recipe id', value: stringField(proposal.arguments.media_id) || 'Unnamed', mono: true },
+      { label: 'Base medium', value: stringField(proposal.arguments.base_media) || 'Not set', mono: true },
+      { label: 'Added medium', value: stringField(proposal.arguments.added_media) || 'None', mono: Boolean(proposal.arguments.added_media) },
+      { label: 'Ingredients', value: ingredients.length ? ingredients.join(', ') : 'None', mono: ingredients.length > 0 },
+    ]
+  }
+  if (proposal.tool_name === 'save_tf_condition') {
+    return [
+      { label: 'TF', value: stringField(proposal.arguments.tf) || 'Not set', mono: true },
+      { label: 'Active on', value: stringField(proposal.arguments.active_nutrients) || 'Not set', mono: true },
+      { label: 'Inactive on', value: stringField(proposal.arguments.inactive_nutrients) || 'Not set', mono: true },
+      { label: 'TF type', value: stringField(proposal.arguments.tf_type) || 'Not set' },
     ]
   }
   if (proposal.tool_name === 'inspect_result') {
@@ -1318,13 +1353,7 @@ function AssistantProposalCard({
             disabled={!canConfirm || Boolean(cardBusy)}
             className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
-            {cardBusy === 'execute'
-              ? 'Executing...'
-              : proposal.tool_name === 'run_simulation'
-                ? 'Confirm and queue'
-                : proposal.tool_name === 'save_condition'
-                  ? 'Save condition draft'
-                  : 'Create draft experiment'}
+            {cardBusy === 'execute' ? 'Executing...' : confirmButtonLabel(proposal.tool_name)}
           </button>
           <button
             type="button"

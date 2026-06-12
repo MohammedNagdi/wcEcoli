@@ -885,6 +885,29 @@ def test_create_experiment_execution_requires_approved_matching_confirmation_and
         engine.dispose()
 
 
+def test_list_conditions_returns_full_detail():
+    engine, session = _build_session()
+    try:
+        session.add(Condition(name="basal", nutrients="minimal", doubling_time=44.0,
+                              active_tfs='["CRP"]', inactive_tfs="[]", genotype_perturbations="{}"))
+        session.add(MediaRecipe(media_id="minimal", base_media="MIX0-57", added_media="", ingredients='["GLC"]'))
+        session.add(Timeline(name="shift", definition="0 minimal, 1200 minimal_acetate"))
+        session.commit()
+
+        out = execute_tool(session, "list_conditions", AssistantToolExecutionRequest(arguments={}))
+        assert out.executed is True
+        r = out.result
+        # Recipes carry composition, not just names; timelines carry their schedule.
+        assert r["media_recipes"][0]["base_media"] == "MIX0-57"
+        assert r["media_recipes"][0]["ingredients"] == '["GLC"]'
+        assert r["timelines"][0]["definition"] == "0 minimal, 1200 minimal_acetate"
+        assert r["conditions"][0]["genotype_perturbations"] == "{}"
+        assert "tf_conditions" in r["totals"] and "tf_conditions" in r
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_save_condition_drafts_after_confirmation_and_clones_base():
     engine, session = _build_session()
     try:
@@ -943,6 +966,45 @@ def test_save_condition_drafts_after_confirmation_and_clones_base():
     finally:
         session.close()
         engine.dispose()
+
+
+def test_conditions_builder_writers_draft_after_confirmation():
+    """save_timeline / save_recipe / save_tf_condition each draft the right Builder section."""
+    cases = [
+        ("save_timeline", {"name": "shift", "events": "0 minimal, 1200 minimal_acetate"}, "timeline", "shift"),
+        ("save_recipe", {"media_id": "rich_glc", "base_media": "MIX0-57", "ingredients": ["GLC"]}, "mediaRecipe", "rich_glc"),
+        ("save_tf_condition", {"name": "crp_rule", "tf": "CRP", "active_tf": "CRP",
+                               "active_nutrients": "minimal", "inactive_nutrients": "minimal_glucose",
+                               "tf_type": "1CS"}, "tfCondition", "crp_rule"),
+    ]
+    for tool, args, section, draft_name in cases:
+        engine, session = _build_session()
+        try:
+            preview = preview_tool(session, tool, AssistantToolPreviewRequest(arguments=args))
+            assert preview.valid is True, (tool, preview.errors)
+            assert preview.side_effect is True
+
+            blocked = execute_tool(session, tool, AssistantToolExecutionRequest(arguments=args))
+            assert blocked.executed is False and blocked.status == "confirmation_required", tool
+            assert session.exec(select(BuilderSectionDraft)).all() == [], tool
+
+            confirmation = create_confirmation(
+                session, ConfirmationCreate(action=tool, payload=preview.normalized_arguments)
+            )
+            resolve_confirmation(session, confirmation, ConfirmationResolve(status="approved"))
+            executed = execute_tool(
+                session, tool,
+                AssistantToolExecutionRequest(arguments=args, confirmation_id=confirmation.id),
+            )
+            assert executed.executed is True, tool
+            drafts = session.exec(select(BuilderSectionDraft)).all()
+            assert len(drafts) == 1 and drafts[0].section == section and drafts[0].name == draft_name, tool
+            # tfCondition payload.draft must be a LIST of rows (publish contract).
+            if section == "tfCondition":
+                assert isinstance(json.loads(drafts[0].payload)["draft"], list)
+        finally:
+            session.close()
+            engine.dispose()
 
 
 def test_save_condition_preview_flags_missing_nutrients_and_unknown_base():
