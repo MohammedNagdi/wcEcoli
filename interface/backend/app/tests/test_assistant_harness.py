@@ -1609,6 +1609,32 @@ def test_stream_fence_filter_suppresses_code_blocks():
     assert "Done." in shown
 
 
+def test_explain_modeling_adapter_topics_and_guardrail():
+    engine, session = _build_session()
+    try:
+        # FBA topic: returns term roles + the no-equation guardrail.
+        fba = execute_tool(session, "explain_modeling", AssistantToolExecutionRequest(arguments={"topic": "what is FBA"}))
+        assert fba.executed is True
+        assert fba.result["topic"] == "fba"
+        terms = {t["term"] for t in fba.result["explanation"]["terms"]}
+        assert {"flux vector", "stoichiometric matrix", "reversible split"} <= terms
+        assert "do NOT" in fba.result["guardrail"]
+
+        # Mechanistic processes resolve via alias; describe terms, not equations.
+        proc = execute_tool(session, "explain_modeling", AssistantToolExecutionRequest(arguments={"topic": "mechanistic equations"}))
+        assert proc.result["topic"] == "processes"
+        processes = {e["process"] for e in proc.result["explanation"]["examples"]}
+        assert {"transcription", "translation", "metabolism"} <= processes
+
+        # No topic -> overview + full catalog so the model can pick.
+        overview = execute_tool(session, "explain_modeling", AssistantToolExecutionRequest(arguments={}))
+        assert overview.result["topic"] == "overview"
+        assert "output_series" in overview.result["all_topics"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_platform_guide_adapter_describes_pages():
     engine, session = _build_session()
     try:

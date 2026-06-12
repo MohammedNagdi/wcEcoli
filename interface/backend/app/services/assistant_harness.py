@@ -821,6 +821,23 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             result_schema={"experiment": "object", "jobs": "array"},
         ),
         AssistantToolSpec(
+            name="explain_modeling",
+            label="Explain the model & FBA",
+            description=(
+                "Explain what the whole-cell model represents and how: dynamic state variables vs FBA-derived "
+                "terms, what Flux Balance Analysis is and what each of its terms does, what the mechanistic "
+                "processes (transcription, translation, complexation, metabolism) describe, and what the Molecule "
+                "Explorer output series/trajectories mean. Use this for conceptual 'what is FBA', 'what are reaction "
+                "fluxes', 'what do the mechanistic equations describe', or 'what is being modelled' questions. "
+                "Optional `topic` narrows the answer. Describe term roles only — do not reproduce literal equations."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"topic": "string"},
+            result_schema={"topic": "string", "explanation": "object"},
+        ),
+        AssistantToolSpec(
             name="platform_guide",
             label="Platform & page guide",
             description=(
@@ -864,7 +881,102 @@ READ_ONLY_TOOLS = (
     "inspect_experiment",
     "inspect_molecule_trajectories",
     "platform_guide",
+    "explain_modeling",
 )
+
+
+# Curated, authoritative modeling explanations. Describe what each term represents and DOES; never
+# reproduce the literal governing equation. Counts are per-cell catalog figures (see output_series).
+MODELING_GUARDRAIL = (
+    "Explain what each term represents and what it does, and you may give an illustrative example of "
+    "the terms — but do NOT write out or reproduce the actual governing differential/stochastic/LP equation."
+)
+
+MODELING_TOPICS: dict[str, dict[str, Any]] = {
+    "overview": {
+        "title": "Whole-cell model overview",
+        "summary": (
+            "wcEcoli is a hybrid whole-cell model of E. coli K-12 MG1655. Many submodels share one pool of "
+            "molecule counts and are advanced together in small time steps. Two regimes coexist: (1) dynamic "
+            "state variables — molecule counts that evolve over time and carry memory (gene expression, "
+            "complexation, growth); and (2) metabolism, solved each step by Flux Balance Analysis (FBA), which "
+            "is an optimization, not an integration."
+        ),
+        "see_also": ["state_variables", "fba", "processes", "output_series"],
+    },
+    "state_variables": {
+        "title": "Dynamic state variables (counts)",
+        "summary": (
+            "Molecule counts tracked over time and updated each step by stochastic/ODE-style processes; a value "
+            "depends on its history. Plottable families (per cell): protein monomers (~4,310), mRNA transcription "
+            "units (~3,133), the same mRNA at gene/cistron granularity (~4,346), rRNA species (~7), homeostatic "
+            "metabolite pools (~172), and amino-acid pools (~21) — about 12,000 series, all in molecule-count units."
+        ),
+        "see_also": ["processes", "output_series"],
+    },
+    "fba": {
+        "title": "Flux Balance Analysis (metabolism)",
+        "summary": (
+            "Metabolism is solved each time step as a constraint-based optimization, not integrated like a "
+            "differential equation. Intuitively: given the enzymes and nutrients available right now, what set of "
+            "reaction rates best meets the cell's metabolic demands while no internal metabolite piles up?"
+        ),
+        "terms": [
+            {"term": "stoichiometric matrix", "role": "the fixed wiring of metabolism — which metabolites each reaction consumes and produces."},
+            {"term": "flux vector", "role": "the unknowns solved for: one rate per reaction (units mmol/gDCW/h). This is what 'reaction flux' plots show."},
+            {"term": "mass-balance constraint", "role": "requires internal metabolites to be produced and consumed at equal rates within a step, so nothing accumulates unphysically."},
+            {"term": "flux bounds", "role": "per-reaction lower/upper limits; in wcEcoli they are set from current enzyme counts and turnover rates — this is how metabolism couples to the dynamic state."},
+            {"term": "objective", "role": "what the optimization favors — here, producing the biomass/metabolite demands the cell needs to grow at its current rate."},
+            {"term": "reversible split", "role": "a reversible reaction is represented as two non-negative fluxes (forward and reverse), which is why the FBA reaction count (~9,612) exceeds the ~6,770 base reactions."},
+            {"term": "exchange flux", "role": "boundary reactions importing nutrients or secreting byproducts (~87 series)."},
+            {"term": "metabolite delta", "role": "the net change FBA assigns to tracked metabolite pools each step (~172 series)."},
+        ],
+        "guardrail": MODELING_GUARDRAIL,
+        "see_also": ["output_series", "processes"],
+    },
+    "processes": {
+        "title": "Mechanistic processes — what the equations describe",
+        "summary": (
+            "Each submodel advances specific molecules using a rate law whose TERMS represent biological "
+            "quantities. The descriptions below explain what those terms are and do, not the literal formula."
+        ),
+        "examples": [
+            {"process": "transcription", "describes": "RNA polymerase initiating on promoters and elongating RNA. Terms represent available RNA polymerase, promoter strength/regulation (transcription factors, ppGpp), NTP availability, and an elongation rate. Produces mRNA/rRNA/tRNA counts."},
+            {"process": "translation", "describes": "ribosomes reading mRNA into protein monomers. Terms represent free-ribosome availability, per-mRNA ribosome loading, amino-acid/charged-tRNA availability, and an elongation rate. Produces protein monomer counts."},
+            {"process": "complexation", "describes": "monomers assembling into protein complexes. Terms represent monomer availability and assembly stoichiometry."},
+            {"process": "metabolism", "describes": "solved by Flux Balance Analysis — an optimization over reaction rates, not an integrated rate law (see the fba topic)."},
+            {"process": "replication_and_division", "describes": "DNA replication and growth setting cell mass and the division cycle. Terms represent replication initiation/elongation and mass accumulation."},
+        ],
+        "guardrail": MODELING_GUARDRAIL,
+        "see_also": ["fba", "state_variables"],
+    },
+    "output_series": {
+        "title": "What the Molecule Explorer series/trajectories are",
+        "summary": (
+            "For one cell the platform exposes ~21,860 plottable output series: ~12,000 dynamic state-variable "
+            "counts plus ~9,871 FBA terms (reaction fluxes ~9,612, exchange fluxes ~87, metabolite deltas ~172). "
+            "This is a per-cell column count, constant across runs — NOT a total across seeds, generations, or "
+            "other jobs. It exceeds the number of distinct biological entities because mRNA is offered at both "
+            "transcription-unit and gene/cistron granularity, and reversible reactions appear as forward+reverse "
+            "fluxes. When you plot one molecule you get one trajectory per cell lineage in that job — i.e. "
+            "(number of seeds) x (number of generations)."
+        ),
+        "see_also": ["fba", "state_variables"],
+    },
+}
+
+_MODELING_TOPIC_ALIASES = {
+    "fba": "fba", "flux": "fba", "fluxes": "fba", "reaction flux": "fba", "reaction_flux": "fba",
+    "metabolism": "fba", "metabolic": "fba", "exchange": "fba", "stoichiometry": "fba",
+    "state": "state_variables", "state variable": "state_variables", "state_variables": "state_variables",
+    "counts": "state_variables",
+    "process": "processes", "processes": "processes", "equation": "processes", "equations": "processes",
+    "mechanistic": "processes", "transcription": "processes", "translation": "processes",
+    "complexation": "processes",
+    "series": "output_series", "trajectory": "output_series", "trajectories": "output_series",
+    "output": "output_series", "molecule explorer": "output_series", "how many": "output_series",
+    "overview": "overview", "model": "overview",
+}
 
 
 # Authoritative, curated page guide. Keeps the model from inventing page descriptions.
@@ -1364,6 +1476,28 @@ def _preview_inspect_molecule_trajectories(session: Session, args: dict[str, Any
     return normalized, preview, [], errors
 
 
+def _resolve_modeling_topic(raw: str) -> str | None:
+    key = (raw or "").strip().lower()
+    if not key:
+        return None
+    if key in MODELING_TOPICS:
+        return key
+    if key in _MODELING_TOPIC_ALIASES:
+        return _MODELING_TOPIC_ALIASES[key]
+    for alias, topic in _MODELING_TOPIC_ALIASES.items():
+        if alias in key:
+            return topic
+    return None
+
+
+def _preview_explain_modeling(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    topic = _string_arg(args, "topic", required=False, errors=[]) or ""
+    resolved = _resolve_modeling_topic(topic)
+    normalized = {"topic": resolved or ""}
+    preview = {"summary": f"Explain modeling topic '{resolved}'." if resolved else "Explain the model (overview + topics)."}
+    return normalized, preview, [], []
+
+
 def _preview_platform_guide(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
     page = _string_arg(args, "page", required=False, errors=[]) or ""
     normalized = {"page": page.strip()}
@@ -1384,6 +1518,7 @@ _PREVIEW_DISPATCH = {
     "inspect_experiment": _preview_inspect_experiment,
     "inspect_molecule_trajectories": _preview_inspect_molecule_trajectories,
     "platform_guide": _preview_platform_guide,
+    "explain_modeling": _preview_explain_modeling,
 }
 
 
@@ -2509,6 +2644,25 @@ def _execute_inspect_experiment(session: Session, normalized_arguments: dict[str
     }
 
 
+def _execute_explain_modeling(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    topic = (normalized_arguments.get("topic") or "").strip().lower()
+    if topic and topic in MODELING_TOPICS:
+        return {
+            "topic": topic,
+            "explanation": MODELING_TOPICS[topic],
+            "available_topics": list(MODELING_TOPICS.keys()),
+            "guardrail": MODELING_GUARDRAIL,
+        }
+    # No (or unknown) topic: return the overview plus the catalog of topics so the model can pick.
+    return {
+        "topic": "overview",
+        "explanation": MODELING_TOPICS["overview"],
+        "all_topics": MODELING_TOPICS,
+        "available_topics": list(MODELING_TOPICS.keys()),
+        "guardrail": MODELING_GUARDRAIL,
+    }
+
+
 def _execute_platform_guide(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
     page = (normalized_arguments.get("page") or "").strip().lower()
     if page:
@@ -2716,6 +2870,7 @@ _READ_ONLY_EXECUTORS = {
     "inspect_experiment": _execute_inspect_experiment,
     "inspect_molecule_trajectories": _execute_inspect_molecule_trajectories,
     "platform_guide": _execute_platform_guide,
+    "explain_modeling": _execute_explain_modeling,
 }
 
 
