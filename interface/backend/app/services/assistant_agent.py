@@ -702,11 +702,33 @@ def compact_conversation(
     summary_record = _get_summary(session, conversation_id)
     covered = int(_from_json(summary_record.context_json, {}).get("covered_up_to_message_id") or 0) if summary_record else 0
     turns = [r for r in records if r.role in {"user", "assistant"}]
+
+    # Semantic boundary: the user switched focus gene or page between their last two turns. When that
+    # happens we compact sooner and keep a tighter verbatim window, so the summary aligns to the task
+    # boundary instead of straddling two topics.
+    user_msgs = [r for r in records if r.role == "user"]
+    boundary = False
+    if len(user_msgs) >= 2:
+        c_now = _from_json(user_msgs[-1].context_json, {}) or {}
+        c_prev = _from_json(user_msgs[-2].context_json, {}) or {}
+        gene_now, gene_prev = (c_now.get("selected_gene") or ""), (c_prev.get("selected_gene") or "")
+        if gene_now and gene_prev and gene_now != gene_prev:
+            boundary = True
+        route_now = (c_now.get("route") or "").split("?")[0]
+        route_prev = (c_prev.get("route") or "").split("?")[0]
+        if route_now and route_prev and route_now != route_prev:
+            boundary = True
+
     keep = max(2, int(settings.assistant_keep_recent_turns or 12))
+    threshold = max(1, int(settings.assistant_compact_threshold or 6))
+    if boundary:
+        keep = max(2, keep // 2)
+        threshold = 2
+
     older = [r for r in turns if (r.id or 0) > covered]
     to_summarize = older[:-keep] if len(older) > keep else []
-    if len(to_summarize) < max(1, int(settings.assistant_compact_threshold or 6)):
-        return {"compacted": False, "reason": "below_threshold", "pending_old": len(to_summarize)}
+    if len(to_summarize) < threshold:
+        return {"compacted": False, "reason": "below_threshold", "pending_old": len(to_summarize), "boundary": boundary}
 
     existing = summary_record.content if summary_record else ""
     transcript = "\n".join(f"{r.role}: {r.content[:1200]}" for r in to_summarize)
@@ -742,7 +764,7 @@ def compact_conversation(
         return {"compacted": False, "reason": "empty_summary"}
     covered_new = max((r.id or 0) for r in to_summarize)
     _upsert_summary(session, conversation_id, new_summary, covered_new)
-    return {"compacted": True, "covered_up_to": covered_new, "summarized": len(to_summarize), "model": model}
+    return {"compacted": True, "covered_up_to": covered_new, "summarized": len(to_summarize), "model": model, "boundary": boundary}
 
 
 def warm_provider(session: Session | None) -> dict[str, Any]:

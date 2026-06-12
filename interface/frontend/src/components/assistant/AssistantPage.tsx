@@ -541,6 +541,45 @@ function MessageMarkdown({ text }: { text: string }) {
       )
       continue
     }
+    // GFM table: a row starting with "|" whose next line is a separator (---|---).
+    const isTableRow = (l: string) => l.trim().startsWith('|')
+    const isSeparator = (l: string) => /^\s*\|?[\s:|-]+\|?\s*$/.test(l) && l.includes('-')
+    if (isTableRow(line) && i + 1 < lines.length && isSeparator(lines[i + 1])) {
+      flush()
+      const splitRow = (l: string) =>
+        l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+      const headers = splitRow(line)
+      i += 2 // skip header + separator
+      const rows: string[][] = []
+      while (i < lines.length && isTableRow(lines[i]) && !isSeparator(lines[i])) {
+        rows.push(splitRow(lines[i]))
+        i++
+      }
+      i-- // the for-loop will re-increment
+      blocks.push(
+        <div key={key++} className="my-2 overflow-x-auto">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr>
+                {headers.map((h, hi) => (
+                  <th key={hi} className="border border-gray-200 bg-gray-50 px-2 py-1 text-left font-semibold text-gray-700">{mdInline(h)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, ri) => (
+                <tr key={ri}>
+                  {r.map((c, ci) => (
+                    <td key={ci} className="border border-gray-200 px-2 py-1 align-top text-gray-700">{mdInline(c)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
+      continue
+    }
     const heading = line.match(/^(#{1,6})\s+(.*)$/)
     if (heading) {
       flush()

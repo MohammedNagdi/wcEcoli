@@ -1984,3 +1984,51 @@ def test_runtime_settings_seed_clamp_and_apply():
             setattr(settings, k, v)
         session.close()
         engine.dispose()
+
+
+def test_semantic_boundary_triggers_earlier_compaction():
+    """A focus-gene switch between the last two turns compacts sooner (tighter window) than the
+    size threshold alone would."""
+    from app.services.assistant_agent import compact_conversation
+    from app.services.assistant_harness import AssistantConversationCreate
+
+    engine, session = _build_session()
+    snap = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_keep_recent_turns": settings.assistant_keep_recent_turns,
+        "assistant_compact_threshold": settings.assistant_compact_threshold,
+    }
+
+    def fake(url, headers, payload, timeout):
+        return {"choices": [{"message": {"content": "User studied dnaA, then switched to crp."}}]}
+
+    def build(conv, last_gene):
+        dnaA = AssistantContext(selected_gene="dnaA", route="/")
+        for i in range(3):
+            store_message(session, conv, "user", f"q{i} about dnaA", dnaA)
+            store_message(session, conv, "assistant", f"a{i}", dnaA)
+        store_message(session, conv, "user", "next question", AssistantContext(selected_gene=last_gene, route="/"))
+
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_keep_recent_turns = 4
+        settings.assistant_compact_threshold = 6  # high enough that size alone won't trigger
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+
+        # Control: same gene throughout -> below threshold, no compaction.
+        same = create_conversation(session, AssistantConversationCreate(title="same"))
+        build(same, "dnaA")
+        ctrl = compact_conversation(session, same.id or 0, transport=fake)
+        assert ctrl["compacted"] is False and ctrl["boundary"] is False
+
+        # Boundary: last turn switches gene -> compacts despite being under the size threshold.
+        switched = create_conversation(session, AssistantConversationCreate(title="switch"))
+        build(switched, "crp")
+        out = compact_conversation(session, switched.id or 0, transport=fake)
+        assert out["boundary"] is True
+        assert out["compacted"] is True
+    finally:
+        for k, v in snap.items():
+            setattr(settings, k, v)
+        session.close()
+        engine.dispose()

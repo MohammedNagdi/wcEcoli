@@ -59,6 +59,21 @@ test.describe('Assistant smoke', () => {
     await expect(msg).not.toContainText('### Genes')
   })
 
+  test('renders a GFM table', async ({ page }) => {
+    await mockAssistantApi(page, {
+      reply: 'Comparison:\n\n| Gene | KO index |\n|------|----------|\n| dnaA | 42 |\n| crp | 84 |',
+    })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('compare')
+    await page.getByTestId('assistant-send').click()
+
+    const msg = page.getByTestId('message-assistant')
+    await expect(msg.locator('table')).toBeVisible()
+    await expect(msg.locator('th')).toHaveCount(2)
+    await expect(msg.locator('tbody tr')).toHaveCount(2)
+    await expect(msg).not.toContainText('|------|') // separator row is not shown literally
+  })
+
   test('surfaces a provider error clearly', async ({ page }) => {
     await mockAssistantApi(page, {
       reply: 'Ollama call failed. Check the endpoint is reachable. No side effects were executed.',
