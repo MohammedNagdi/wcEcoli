@@ -1317,7 +1317,7 @@ function AdvancedDisclosure({ title, children }: { title: string; children: Reac
   )
 }
 
-function TaskCenteredAssistantPanel() {
+export function TaskCenteredAssistantPanel() {
   const {
     providerConfigured, runtimeLabel, context,
     conversations, activeConversation, messages, proposals, input, setInput,

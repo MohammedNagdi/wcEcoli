@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { CommandSearch } from '../common/CommandSearch'
+import { AssistantDock } from '../assistant/AssistantDock'
 
 interface NavItem {
   path: string
@@ -193,6 +194,7 @@ export function Shell({ children }: { children: ReactNode }) {
         {children}
       </main>
       <CommandSearch open={commandSearchOpen} onClose={() => setCommandSearchOpen(false)} />
+      <AssistantDock />
     </div>
   )
 }

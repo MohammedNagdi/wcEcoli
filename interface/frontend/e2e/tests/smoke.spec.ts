@@ -43,4 +43,25 @@ test.describe('Assistant smoke', () => {
     // After execution the card is removed from the awaiting-review rail.
     await expect(card).toHaveCount(0)
   })
+
+  test('docked panel: summon from another page, chat, Esc to close', async ({ page }) => {
+    // Quiet other pages' own data calls. Anchor to the API origin so we don't intercept the app's
+    // own /src/api/* module scripts.
+    await page.route(/^https?:\/\/[^/]+\/api\//, (r) => r.fulfill({ json: [] }))
+    await mockAssistantApi(page, { reply: 'There are 4,749 genes.' })
+    await page.goto('/guide') // a non-assistant page
+
+    // Summon the dock (it's not the /assistant route).
+    await page.getByTestId('assistant-dock-toggle').click()
+    const input = page.getByTestId('assistant-input')
+    await expect(input).toBeVisible()
+    await input.fill('How many genes?')
+    await page.getByTestId('assistant-send').click()
+    await expect(page.getByTestId('message-assistant')).toContainText('There are 4,749 genes.')
+
+    // Esc closes the dock and restores the floating toggle.
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('assistant-input')).toHaveCount(0)
+    await expect(page.getByTestId('assistant-dock-toggle')).toBeVisible()
+  })
 })
