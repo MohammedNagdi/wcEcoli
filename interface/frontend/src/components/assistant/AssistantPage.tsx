@@ -1203,7 +1203,7 @@ function AssistantProposalCard({
   }
 
   return (
-    <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+    <div data-testid="proposal-card" data-tool={proposal.tool_name} className="rounded-md border border-gray-100 bg-gray-50 p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="break-words text-sm font-semibold text-gray-900">{title}</div>
@@ -1238,6 +1238,7 @@ function AssistantProposalCard({
         {isSideEffect && (
           <button
             type="button"
+            data-testid="proposal-preview"
             onClick={previewProposal}
             disabled={Boolean(cardBusy)}
             className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
@@ -1271,6 +1272,7 @@ function AssistantProposalCard({
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="button"
+            data-testid="proposal-confirm"
             onClick={confirmAndExecuteProposal}
             disabled={!canConfirm || Boolean(cardBusy)}
             className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
@@ -1279,6 +1281,7 @@ function AssistantProposalCard({
           </button>
           <button
             type="button"
+            data-testid="proposal-reject"
             onClick={rejectProposal}
             disabled={Boolean(cardBusy) || confirmation?.status === 'rejected' || Boolean(execution?.executed)}
             className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
@@ -1773,6 +1776,7 @@ function TaskCenteredAssistantPanel({
                       )}
                     </div>
                     <div
+                      data-testid={isUser ? 'message-user' : 'message-assistant'}
                       className={`overflow-hidden break-words [overflow-wrap:anywhere] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
                         isUser
                           ? 'whitespace-pre-wrap rounded-br-sm bg-brand-600 text-white'
@@ -1826,6 +1830,7 @@ function TaskCenteredAssistantPanel({
               <label htmlFor="assistant-chat-input" className="sr-only">Assistant message</label>
               <textarea
                 id="assistant-chat-input"
+                data-testid="assistant-input"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -1841,6 +1846,7 @@ function TaskCenteredAssistantPanel({
               {sending ? (
                 <button
                   type="button"
+                  data-testid="assistant-stop"
                   onClick={stopStreaming}
                   className="mb-0.5 flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                 >
@@ -1850,6 +1856,7 @@ function TaskCenteredAssistantPanel({
               ) : (
                 <button
                   type="button"
+                  data-testid="assistant-send"
                   onClick={() => sendMessage()}
                   disabled={!input.trim()}
                   className="mb-0.5 shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition disabled:opacity-40"
