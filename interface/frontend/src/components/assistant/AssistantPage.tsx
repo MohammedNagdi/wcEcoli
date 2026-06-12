@@ -1381,12 +1381,25 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
     handleProposalResolved,
   } = useAssistant()
   const facts = useMemo(() => contextFacts(context), [context])
+  const [showConversations, setShowConversations] = useState(true)
 
   return (
     <section className="h-full min-h-0">
-      <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+      <div className={`grid h-full min-h-0 gap-4 ${showConversations ? 'xl:grid-cols-[240px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}>
+        {showConversations && (
         <aside className={`flex ${heightClass} min-h-[560px] flex-col rounded-xl border border-gray-200 bg-gray-50 p-3`}>
-          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Conversations</div>
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Conversations</span>
+            <button
+              type="button"
+              onClick={() => setShowConversations(false)}
+              className="inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+              title="Hide conversations"
+              aria-label="Hide conversations panel"
+            >
+              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-5 5 5 5M5 5v10" /></svg>
+            </button>
+          </div>
           <button
             type="button"
             onClick={startNewChat}
@@ -1430,14 +1443,28 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             ))}
           </div>
         </aside>
+        )}
 
         <div className={`flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm`}>
           <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-gray-900">
-                {activeConversation?.title ?? 'New chat'}
+            <div className="flex min-w-0 items-center gap-2">
+              {!showConversations && (
+                <button
+                  type="button"
+                  onClick={() => setShowConversations(true)}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                  title="Show conversations"
+                  aria-label="Show conversations panel"
+                >
+                  <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 5l5 5-5 5m10-10v10" /></svg>
+                </button>
+              )}
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-gray-900">
+                  {activeConversation?.title ?? 'New chat'}
+                </div>
+                <div className="mt-0.5 truncate text-xs leading-5 text-gray-500">{contextSummary(context)}</div>
               </div>
-              <div className="mt-0.5 truncate text-xs leading-5 text-gray-500">{contextSummary(context)}</div>
             </div>
             <span className="shrink-0 text-[11px] text-gray-500">read-only · actions need confirmation</span>
           </div>

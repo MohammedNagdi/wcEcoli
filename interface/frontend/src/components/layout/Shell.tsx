@@ -11,7 +11,8 @@ interface NavItem {
 
 interface NavGroup {
   id: string
-  label: string
+  /** Section header; omit for a standalone, category-less item. */
+  label?: string
   items: NavItem[]
 }
 
@@ -52,7 +53,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Analyze',
     items: [
       { path: '/results', label: 'Results', icon: ICON_RESULTS },
-      { path: '/assistant', label: 'Assistant', icon: ICON_ASSISTANT },
     ],
   },
   {
@@ -61,6 +61,13 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: '/design', label: 'Genome Design', icon: ICON_DESIGN },
       { path: '/ml', label: 'ML', icon: ICON_ML },
+    ],
+  },
+  {
+    // Standalone, category-less — the Assistant is a cross-cutting tool, not an Analyze page.
+    id: 'assistant',
+    items: [
+      { path: '/assistant', label: 'Assistant', icon: ICON_ASSISTANT },
     ],
   },
 ]
@@ -140,7 +147,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
           {NAV_GROUPS.map((group) => (
             <div key={group.id} className="mb-4">
-              {!collapsed && (
+              {!collapsed && group.label && (
                 <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                   {group.label}
                 </div>
