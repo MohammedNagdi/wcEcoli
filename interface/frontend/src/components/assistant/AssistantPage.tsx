@@ -450,17 +450,25 @@ function AssistantProviderSetup({
   )
 }
 
+const TIER_LABELS: Record<string, { label: string; tone: 'neutral' | 'ready' | 'blocked' | 'planned' }> = {
+  read_only: { label: 'read-only', tone: 'ready' },
+  draft: { label: 'draft', tone: 'planned' },
+  queue: { label: 'queue', tone: 'planned' },
+  publish_destructive: { label: 'destructive', tone: 'blocked' },
+}
+
 function ToolRow({ tool }: { tool: AssistantToolSpec }) {
+  const tier = TIER_LABELS[tool.permission_tier ?? 'read_only']
   return (
     <div className="border-b border-gray-100 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-medium text-gray-900">{tool.label}</div>
         <div className="flex flex-wrap gap-2">
+          {tier && <StatusPill tone={tier.tone}>{tier.label}</StatusPill>}
           <StatusPill tone={tool.status.includes('disabled') ? 'blocked' : 'ready'}>
             {tool.status.replace(/_/g, ' ')}
           </StatusPill>
           {tool.requires_confirmation && <StatusPill tone="planned">confirmation</StatusPill>}
-          {tool.side_effect && <StatusPill tone="blocked">side effect</StatusPill>}
         </div>
       </div>
       <p className="mt-1 text-xs leading-5 text-gray-500">{tool.description}</p>
@@ -470,6 +478,95 @@ function ToolRow({ tool }: { tool: AssistantToolSpec }) {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+// --- Lightweight, dependency-free Markdown for assistant replies --------------
+// Renders a safe subset (headers, bold/italic, inline code, code fences, lists,
+// links, paragraphs) as React elements — never dangerouslySetInnerHTML, so no XSS.
+const MD_INLINE = /(\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\))/g
+
+function mdInline(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  let last = 0
+  let key = 0
+  let m: RegExpExecArray | null
+  MD_INLINE.lastIndex = 0
+  while ((m = MD_INLINE.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    if (m[2] !== undefined || m[3] !== undefined) {
+      out.push(<strong key={key++}>{m[2] ?? m[3]}</strong>)
+    } else if (m[4] !== undefined || m[5] !== undefined) {
+      out.push(<em key={key++}>{m[4] ?? m[5]}</em>)
+    } else if (m[6] !== undefined) {
+      out.push(<code key={key++} className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[12px]">{m[6]}</code>)
+    } else if (m[7] !== undefined) {
+      const href = m[8]
+      const safe = /^(https?:\/\/|\/)/i.test(href)
+      out.push(safe
+        ? <a key={key++} href={href} target="_blank" rel="noopener noreferrer" className="text-brand-600 underline">{m[7]}</a>
+        : m[7])
+    }
+    last = MD_INLINE.lastIndex
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+function MessageMarkdown({ text }: { text: string }) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const blocks: ReactNode[] = []
+  let key = 0
+  let list: { ordered: boolean; items: string[] } | null = null
+  const flush = () => {
+    if (!list) return
+    const items = list.items.map((it, i) => <li key={i}>{mdInline(it)}</li>)
+    blocks.push(list.ordered
+      ? <ol key={key++} className="my-1 ml-5 list-decimal space-y-0.5">{items}</ol>
+      : <ul key={key++} className="my-1 ml-5 list-disc space-y-0.5">{items}</ul>)
+    list = null
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim().startsWith('```')) {
+      flush()
+      const buf: string[] = []
+      i++
+      while (i < lines.length && !lines[i].trim().startsWith('```')) { buf.push(lines[i]); i++ }
+      blocks.push(
+        <pre key={key++} className="my-1 overflow-x-auto rounded-md bg-gray-900/90 p-2 text-[12px] text-gray-100">
+          <code>{buf.join('\n')}</code>
+        </pre>,
+      )
+      continue
+    }
+    const heading = line.match(/^(#{1,6})\s+(.*)$/)
+    if (heading) {
+      flush()
+      blocks.push(
+        <div key={key++} className={`${heading[1].length <= 2 ? 'text-sm' : 'text-[13px]'} mt-2 font-semibold text-gray-900`}>
+          {mdInline(heading[2])}
+        </div>,
+      )
+      continue
+    }
+    const ul = line.match(/^\s*[-*]\s+(.*)$/)
+    const ol = line.match(/^\s*\d+\.\s+(.*)$/)
+    if (ul) {
+      if (!list || list.ordered) { flush(); list = { ordered: false, items: [] } }
+      list.items.push(ul[1])
+      continue
+    }
+    if (ol) {
+      if (!list || !list.ordered) { flush(); list = { ordered: true, items: [] } }
+      list.items.push(ol[1])
+      continue
+    }
+    if (line.trim() === '') { flush(); continue }
+    flush()
+    blocks.push(<p key={key++} className="my-1 leading-6">{mdInline(line)}</p>)
+  }
+  flush()
+  return <div className="space-y-0.5">{blocks}</div>
 }
 
 function numericField(value: unknown): number | null {
@@ -646,6 +743,19 @@ function messageStatusTone(status: string): 'neutral' | 'ready' | 'blocked' | 'p
   if (status === 'completed') return 'ready'
   if (status.includes('failed') || status.includes('no_provider') || status.includes('not_configured')) return 'blocked'
   return 'neutral'
+}
+
+const MESSAGE_STATUS_LABELS: Record<string, string> = {
+  sending: 'sending',
+  failed: 'failed to send',
+  provider_call_failed: 'provider error',
+  no_provider_configured: 'no provider',
+  selected_provider_not_configured: 'provider not configured',
+  provider_not_supported: 'unsupported provider',
+}
+
+function messageStatusLabel(status: string): string {
+  return MESSAGE_STATUS_LABELS[status] ?? status.replace(/_/g, ' ')
 }
 
 function actionStatusTone(status: string): 'neutral' | 'ready' | 'blocked' | 'planned' {
@@ -1658,18 +1768,24 @@ function TaskCenteredAssistantPanel({
                       </span>
                       {showStatus && (
                         <StatusPill tone={messageStatusTone(message.status)}>
-                          {message.status.replace(/_/g, ' ')}
+                          {messageStatusLabel(message.status)}
                         </StatusPill>
                       )}
                     </div>
                     <div
-                      className={`overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+                      className={`overflow-hidden break-words [overflow-wrap:anywhere] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
                         isUser
-                          ? 'rounded-br-sm bg-brand-600 text-white'
+                          ? 'whitespace-pre-wrap rounded-br-sm bg-brand-600 text-white'
                           : 'rounded-bl-sm border border-gray-200 bg-white text-gray-800 shadow-sm'
                       } ${message.status === 'failed' ? 'opacity-60' : ''}`}
                     >
-                      {message.content || (message.status === 'failed' ? 'Message could not be sent.' : '')}
+                      {isUser ? (
+                        message.content
+                      ) : message.content ? (
+                        <MessageMarkdown text={message.content} />
+                      ) : (
+                        message.status === 'failed' ? 'Message could not be sent.' : ''
+                      )}
                     </div>
                   </div>
                 </div>

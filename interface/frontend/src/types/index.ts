@@ -879,6 +879,7 @@ export interface AssistantToolSpec {
   status: string
   requires_confirmation: boolean
   side_effect: boolean
+  permission_tier?: 'read_only' | 'draft' | 'queue' | 'publish_destructive'
   argument_schema: Record<string, unknown>
   result_schema: Record<string, unknown>
 }
