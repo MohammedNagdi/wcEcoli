@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { mockAssistantApi, CREATE_EXPERIMENT_PROPOSAL } from '../mocks/assistantApi'
+import { mockAssistantApi, CREATE_EXPERIMENT_PROPOSAL, SAVE_CONDITION_PROPOSAL } from '../mocks/assistantApi'
 
 /**
  * Phase 0 regression baseline for the Assistant UI (current page layout).
@@ -41,6 +41,26 @@ test.describe('Assistant smoke', () => {
     await card.getByTestId('proposal-confirm').click()
 
     // After execution the card is removed from the awaiting-review rail.
+    await expect(card).toHaveCount(0)
+  })
+
+  test('proposes a save_condition draft, preview → confirm clears it', async ({ page }) => {
+    await mockAssistantApi(page, {
+      reply: "I've prepared a high_glucose condition draft for your review.",
+      proposals: [SAVE_CONDITION_PROPOSAL],
+    })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('Save a high-glucose version of basal.')
+    await page.getByTestId('assistant-send').click()
+
+    const card = page.locator('[data-testid="proposal-card"][data-tool="save_condition"]')
+    await expect(card).toBeVisible()
+
+    await card.getByTestId('proposal-preview').click()
+    // The confirm button is labelled for this tool (not "Create draft experiment").
+    await expect(card.getByTestId('proposal-confirm')).toHaveText('Save condition draft')
+    await expect(card.getByTestId('proposal-confirm')).toBeEnabled()
+    await card.getByTestId('proposal-confirm').click()
     await expect(card).toHaveCount(0)
   })
 

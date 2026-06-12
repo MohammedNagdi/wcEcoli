@@ -1129,6 +1129,18 @@ function proposalFactRows(proposal: AssistantToolCall): Array<{ label: string; v
       { label: 'Generations', value: String(proposal.arguments.generations ?? 1), mono: true },
     ]
   }
+  if (proposal.tool_name === 'save_condition') {
+    const activeTfs = Array.isArray(proposal.arguments.active_tfs) ? (proposal.arguments.active_tfs as string[]) : []
+    const inactiveTfs = Array.isArray(proposal.arguments.inactive_tfs) ? (proposal.arguments.inactive_tfs as string[]) : []
+    return [
+      { label: 'Condition name', value: stringField(proposal.arguments.name) || 'Unnamed', mono: true },
+      { label: 'Media recipe', value: stringField(proposal.arguments.nutrients) || 'Not set', mono: true },
+      { label: 'Doubling time', value: `${String(proposal.arguments.doubling_time ?? '?')} min` },
+      { label: 'Active TFs', value: activeTfs.length ? activeTfs.join(', ') : 'None', mono: activeTfs.length > 0 },
+      { label: 'Inactive TFs', value: inactiveTfs.length ? inactiveTfs.join(', ') : 'None', mono: inactiveTfs.length > 0 },
+      { label: 'Cloned from', value: stringField(proposal.arguments.base_condition) || 'New condition', mono: Boolean(proposal.arguments.base_condition) },
+    ]
+  }
   if (proposal.tool_name === 'inspect_result') {
     return [
       { label: 'Job', value: String(proposal.arguments.job_id ?? 'Current result'), mono: true },
@@ -1328,7 +1340,13 @@ function AssistantProposalCard({
             disabled={!canConfirm || Boolean(cardBusy)}
             className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
-            {cardBusy === 'execute' ? 'Executing...' : proposal.tool_name === 'run_simulation' ? 'Confirm and queue' : 'Create draft experiment'}
+            {cardBusy === 'execute'
+              ? 'Executing...'
+              : proposal.tool_name === 'run_simulation'
+                ? 'Confirm and queue'
+                : proposal.tool_name === 'save_condition'
+                  ? 'Save condition draft'
+                  : 'Create draft experiment'}
           </button>
           <button
             type="button"

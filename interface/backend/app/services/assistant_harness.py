@@ -85,6 +85,7 @@ VISIBLE_ARTIFACTS = [
 CONFIRMATION_REQUIRED_ACTIONS = [
     "create_experiment",
     "run_simulation",
+    "save_condition",
     "cancel_simulation",
     "delete_experiment",
     "publish_environment_builder_artifact",
@@ -844,6 +845,32 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             result_schema={"job_id": "integer", "status": "pending"},
         ),
         AssistantToolSpec(
+            name="save_condition",
+            label="Save condition draft",
+            description=(
+                "Prepare a Conditions Builder *condition* draft (nutrients/media recipe, doubling time, "
+                "active/inactive transcription factors, genotype perturbations) for the user to review and "
+                "publish. Use this when the user wants to create or edit a growth condition or recipe and apply "
+                "it. Optionally clone an existing condition with `base_condition` and override only what changes. "
+                "This does NOT publish to the reconstruction — it creates a reviewable draft; the user publishes "
+                "from the Conditions Builder. Read current conditions/recipes with `list_conditions` first."
+            ),
+            status="confirmation_execution_enabled",
+            requires_confirmation=True,
+            side_effect=True,
+            permission_tier="draft",
+            argument_schema={
+                "name": "string",
+                "nutrients": "string",
+                "doubling_time": "number",
+                "active_tfs": "array",
+                "inactive_tfs": "array",
+                "genotype_perturbations": "object",
+                "base_condition": "string",
+            },
+            result_schema={"draft_id": "integer", "status": "draft"},
+        ),
+        AssistantToolSpec(
             name="publish_environment_builder_artifact",
             label="Publish builder artifact",
             description="Publish a saved Conditions Builder draft to the local reconstruction files.",
@@ -1153,7 +1180,7 @@ PLATFORM_PAGES = [
         "route": "/environment-builder",
         "purpose": "Define and review growth conditions, media recipes, and timelines.",
         "data": "Conditions (nutrients, active/inactive TFs, doubling time), media recipes, timelines.",
-        "assistant_tools": ["list_conditions"],
+        "assistant_tools": ["list_conditions", "save_condition (confirmation-gated)"],
     },
     {
         "name": "Experiments",
@@ -1222,7 +1249,7 @@ def get_assistant_harness_status(session: Session | None = None) -> AssistantHar
         provider_configured=provider_configured,
         tool_execution_enabled=True,
         tool_preview_enabled=True,
-        execution_enabled_tools=[*READ_ONLY_TOOLS, "create_experiment", "run_simulation"],
+        execution_enabled_tools=[*READ_ONLY_TOOLS, "create_experiment", "run_simulation", "save_condition"],
         side_effect_execution_enabled=True,
         db_persistence_enabled=True,
         confirmation_required_for=CONFIRMATION_REQUIRED_ACTIONS,
@@ -1447,6 +1474,99 @@ def _preview_run_simulation(session: Session, args: dict[str, Any]) -> tuple[dic
         "experiment_name": experiment.name if experiment else "",
         "condition": experiment.condition if experiment else "",
         "side_effect_if_executed": "A simulation job would be queued for the worker.",
+    }
+    return normalized, preview, warnings, errors
+
+
+def _parse_str_list(value: Any) -> list[str]:
+    """Best-effort: a JSON array string, a comma list, or already a list -> list[str]."""
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    text = str(value or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [str(v).strip() for v in parsed if str(v).strip()]
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return [token.strip() for token in text.split(",") if token.strip()]
+
+
+def _preview_save_condition(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    name = _string_arg(args, "name", errors)
+    base_condition = _string_arg(args, "base_condition", errors, required=False)
+
+    # Optionally clone an existing condition and override only what the user changed.
+    base: Condition | None = None
+    if base_condition:
+        base = session.exec(select(Condition).where(Condition.name == base_condition)).first()
+        if not base:
+            errors.append(f"Base condition '{base_condition}' does not exist.")
+
+    nutrients = _string_arg(args, "nutrients", errors, required=False) or (base.nutrients if base else "")
+    if not nutrients:
+        errors.append("Missing 'nutrients' — the media recipe id for this condition (or give a base_condition).")
+
+    # doubling_time: number | numeric string; default from base, else 44.0.
+    doubling_time: float | None = None
+    raw_dt = args.get("doubling_time")
+    if raw_dt is None or raw_dt == "":
+        doubling_time = base.doubling_time if base and base.doubling_time else 44.0
+    else:
+        try:
+            doubling_time = float(raw_dt)
+        except (TypeError, ValueError):
+            errors.append("Argument 'doubling_time' must be numeric (minutes).")
+    if doubling_time is not None and doubling_time <= 0:
+        errors.append("Argument 'doubling_time' must be positive (minutes).")
+
+    active_tfs = _parse_str_list(args.get("active_tfs")) or (_parse_str_list(base.active_tfs) if base else [])
+    inactive_tfs = _parse_str_list(args.get("inactive_tfs")) or (_parse_str_list(base.inactive_tfs) if base else [])
+    geno = _object_arg(args, "genotype_perturbations", errors)
+    if not geno and base and base.genotype_perturbations:
+        try:
+            parsed = json.loads(base.genotype_perturbations)
+            if isinstance(parsed, dict):
+                geno = parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Soft checks: the draft can still be created, but publishing later would fail on these.
+    if nutrients and not session.exec(select(MediaRecipe).where(MediaRecipe.media_id == nutrients)).first():
+        warnings.append(
+            f"Media recipe '{nutrients}' is not published yet; you can save the draft, but publishing it will "
+            "require that recipe to exist first."
+        )
+    if name and session.exec(select(Condition).where(Condition.name == name)).first():
+        warnings.append(f"A published condition named '{name}' already exists; publishing this draft would be rejected.")
+
+    normalized = {
+        "name": name,
+        "nutrients": nutrients,
+        "doubling_time": doubling_time,
+        "active_tfs": active_tfs,
+        "inactive_tfs": inactive_tfs,
+        "genotype_perturbations": geno,
+        "base_condition": base_condition,
+    }
+    preview = {
+        "action": "would_create_condition_draft",
+        "summary": (
+            f"Save '{name or 'unnamed'}' as a Conditions Builder draft on media '{nutrients or 'unknown'}' "
+            f"(doubling time {doubling_time if doubling_time is not None else '?'} min)."
+            + (f" Cloned from '{base_condition}'." if base_condition else "")
+        ),
+        "condition_name": name,
+        "nutrients": nutrients,
+        "doubling_time": doubling_time,
+        "active_tfs": active_tfs,
+        "inactive_tfs": inactive_tfs,
+        "base_condition": base_condition,
+        "side_effect_if_executed": "A new 'condition' draft would be saved in the Conditions Builder for review and publishing.",
     }
     return normalized, preview, warnings, errors
 
@@ -1759,6 +1879,7 @@ def _preview_platform_guide(session: Session, args: dict[str, Any]) -> tuple[dic
 _PREVIEW_DISPATCH = {
     "create_experiment": _preview_create_experiment,
     "run_simulation": _preview_run_simulation,
+    "save_condition": _preview_save_condition,
     "publish_environment_builder_artifact": _preview_publish_builder_artifact,
     "inspect_result": _preview_inspect_result,
     "inspect_gene": _preview_inspect_gene,
@@ -1790,7 +1911,7 @@ def preview_tool(
         valid=not errors,
         requires_confirmation=spec.requires_confirmation,
         side_effect=spec.side_effect,
-        execution_enabled=tool_name in READ_ONLY_TOOLS or tool_name in {"create_experiment", "run_simulation"},
+        execution_enabled=tool_name in READ_ONLY_TOOLS or tool_name in {"create_experiment", "run_simulation", "save_condition"},
         normalized_arguments=normalized,
         preview=preview,
         warnings=warnings,
@@ -3048,6 +3169,71 @@ def _execute_run_simulation(
     }
 
 
+def _execute_save_condition(
+    session: Session,
+    normalized_arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist a 'condition' Conditions Builder draft (reviewable; not published)."""
+    name = str(normalized_arguments.get("name") or "").strip()
+    nutrients = str(normalized_arguments.get("nutrients") or "").strip()
+    if not name or not nutrients:
+        raise HTTPException(status_code=422, detail="Condition draft requires a name and nutrients.")
+
+    existing = session.exec(
+        select(BuilderSectionDraft)
+        .where(BuilderSectionDraft.section == "condition")
+        .where(BuilderSectionDraft.name == name)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"A condition draft named '{name}' already exists.")
+
+    doubling_time = normalized_arguments.get("doubling_time")
+    active_tfs = normalized_arguments.get("active_tfs") or []
+    inactive_tfs = normalized_arguments.get("inactive_tfs") or []
+    geno = normalized_arguments.get("genotype_perturbations") or {}
+    # The Builder publish step expects each draft cell as a string (it writes straight to TSV).
+    payload = {
+        "mode": "create",
+        "source": "assistant",
+        "draft": {
+            "condition": name,
+            "nutrients": nutrients,
+            "genotype_perturbations": json.dumps(geno, separators=(",", ":")),
+            "doubling_time": str(doubling_time if doubling_time is not None else 44.0),
+            "active_tfs": json.dumps(active_tfs, separators=(",", ":")),
+            "inactive_tfs": json.dumps(inactive_tfs, separators=(",", ":")),
+        },
+    }
+    timestamp = now_iso()
+    draft = BuilderSectionDraft(
+        section="condition",
+        name=name,
+        payload=json.dumps(payload, separators=(",", ":")),
+        status="draft",
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session.add(draft)
+    session.commit()
+    session.refresh(draft)
+    return {
+        "action": "created_condition_draft",
+        "draft": {
+            "id": draft.id,
+            "section": "condition",
+            "name": draft.name,
+            "status": draft.status,
+            "nutrients": nutrients,
+            "doubling_time": payload["draft"]["doubling_time"],
+            "active_tfs": active_tfs,
+            "inactive_tfs": inactive_tfs,
+        },
+        "links": [
+            {"label": "Open in Conditions Builder", "path": "/environment-builder?section=condition"},
+        ],
+    }
+
+
 def _mark_confirmation_used(
     session: Session,
     confirmation: AssistantConfirmation,
@@ -3191,12 +3377,13 @@ def execute_tool(
                 errors=confirmation_errors,
             )
 
-        if tool_name in {"create_experiment", "run_simulation"}:
-            result = (
-                _execute_create_experiment(session, preview.normalized_arguments)
-                if tool_name == "create_experiment"
-                else _execute_run_simulation(session, preview.normalized_arguments)
-            )
+        if tool_name in {"create_experiment", "run_simulation", "save_condition"}:
+            if tool_name == "create_experiment":
+                result = _execute_create_experiment(session, preview.normalized_arguments)
+            elif tool_name == "run_simulation":
+                result = _execute_run_simulation(session, preview.normalized_arguments)
+            else:
+                result = _execute_save_condition(session, preview.normalized_arguments)
             tool_call = _record_tool_call(
                 session,
                 conversation_id=request.conversation_id,

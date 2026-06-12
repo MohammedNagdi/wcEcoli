@@ -70,6 +70,29 @@ export const CREATE_EXPERIMENT_PROPOSAL = {
   updated_at: '',
 }
 
+export const SAVE_CONDITION_PROPOSAL = {
+  id: 20,
+  conversation_id: 1,
+  message_id: 2,
+  tool_name: 'save_condition',
+  status: 'proposed',
+  arguments: {
+    name: 'high_glucose', nutrients: 'minimal_glucose', doubling_time: 30,
+    active_tfs: ['CRP'], inactive_tfs: [], base_condition: 'basal',
+  },
+  result: {
+    title: 'Save condition draft',
+    description: "Save 'high_glucose' as a Conditions Builder draft on media 'minimal_glucose'.",
+    side_effect: true,
+    requires_confirmation: true,
+    source: 'model_tool_call',
+    execution_state: 'not_executed',
+    proposal_kind: 'side_effect_preview',
+  },
+  created_at: '',
+  updated_at: '',
+}
+
 const PREVIEW = {
   tool_name: 'create_experiment',
   valid: true,

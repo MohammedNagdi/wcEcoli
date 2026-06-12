@@ -159,25 +159,34 @@ def enrich_tools_for_session(session: Session | None, tools: list[dict[str, Any]
         from sqlmodel import select as _select
 
         from app.db.models import Condition as _Condition
+        from app.db.models import MediaRecipe as _MediaRecipe
         from app.db.models import Variant as _Variant
 
         variant_names = [v.name for v in session.exec(_select(_Variant)).all() if v.name]
         condition_names = [c.name for c in session.exec(_select(_Condition)).all() if c.name]
+        media_ids = [m.media_id for m in session.exec(_select(_MediaRecipe)).all() if m.media_id]
     except Exception:
         return tools
     for tool in tools:
-        if tool["name"] != "create_experiment":
-            continue
-        props = tool["input_schema"].setdefault("properties", {})
-        if variant_names and "variant_type" in props:
-            props["variant_type"]["enum"] = variant_names
-        hints = []
-        if variant_names:
-            hints.append(f"Valid variant_type values: {', '.join(variant_names)}.")
-        if condition_names:
-            hints.append(f"Valid condition values include: {', '.join(condition_names[:12])}.")
-        if hints:
-            tool["description"] = f"{tool['description']} " + " ".join(hints)
+        if tool["name"] == "create_experiment":
+            props = tool["input_schema"].setdefault("properties", {})
+            if variant_names and "variant_type" in props:
+                props["variant_type"]["enum"] = variant_names
+            hints = []
+            if variant_names:
+                hints.append(f"Valid variant_type values: {', '.join(variant_names)}.")
+            if condition_names:
+                hints.append(f"Valid condition values include: {', '.join(condition_names[:12])}.")
+            if hints:
+                tool["description"] = f"{tool['description']} " + " ".join(hints)
+        elif tool["name"] == "save_condition":
+            hints = []
+            if media_ids:
+                hints.append(f"Valid `nutrients` media-recipe ids include: {', '.join(media_ids[:12])}.")
+            if condition_names:
+                hints.append(f"Existing conditions to clone via base_condition: {', '.join(condition_names[:12])}.")
+            if hints:
+                tool["description"] = f"{tool['description']} " + " ".join(hints)
     return tools
 
 
@@ -230,9 +239,15 @@ _STABLE_SYSTEM_PROMPT = (
     "  * 'What reactions involve X', 'what does gene/enzyme Y catalyze', 'is reaction R reversible', 'how many "
     "reactions are there' -> `model_structure` (static metabolic structure). For values over time, propose a "
     "simulation and inspect the result — do not invent dynamic numbers.\n"
-    "- `create_experiment` and `run_simulation` have side effects. When you call them, the platform shows the "
-    "user a confirmation card and does NOT execute the action. Never claim you created, queued, ran, or changed "
-    "anything — say you have prepared it for review.\n"
+    "- `create_experiment`, `run_simulation`, and `save_condition` have side effects. When you call them, the "
+    "platform shows the user a confirmation card and does NOT execute the action. Never claim you created, queued, "
+    "ran, saved, or changed anything — say you have prepared it for review.\n"
+    "  * To create or edit a growth condition / recipe and apply it (e.g. 'save this as a condition', 'make a "
+    "high-glucose version of basal') -> `save_condition`. First read existing conditions/recipes with "
+    "`list_conditions`; pass `nutrients` as a real media-recipe id, and clone with `base_condition` when the user "
+    "asks for a variant of an existing condition. It writes a reviewable Conditions Builder draft, not a "
+    "published file — the user publishes from the Builder. To discuss without changing anything, just answer; do "
+    "not call `save_condition` unless the user wants to actually create/edit one.\n"
     "- To build a knockout experiment: call `inspect_gene` for the target to get its knockout index, then call "
     "`create_experiment` with variant_type from the tool's allowed values (it is `gene_knockout` for knockouts) "
     "and variant_index = the gene's knockout index. Do NOT invent variant_type values like 'mutation' or "

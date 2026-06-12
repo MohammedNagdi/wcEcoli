@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
@@ -7,6 +9,7 @@ from app.db.models import (
     AssistantProvenance,
     AssistantProviderConfig,
     AssistantToolCall,
+    BuilderSectionDraft,
     Condition,
     Experiment,
     Gene,
@@ -877,6 +880,89 @@ def test_create_experiment_execution_requires_approved_matching_confirmation_and
 
         experiments = session.exec(select(Experiment)).all()
         assert len(experiments) == 1
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_save_condition_drafts_after_confirmation_and_clones_base():
+    engine, session = _build_session()
+    try:
+        session.add(MediaRecipe(media_id="minimal_glucose", base_media="MIX0"))
+        session.add(Condition(name="basal", nutrients="minimal_glucose", doubling_time=44.0,
+                              active_tfs="[]", inactive_tfs="[]", genotype_perturbations="{}"))
+        session.commit()
+
+        # Clone basal, override doubling time + add an active TF.
+        args = {
+            "name": "high_glucose",
+            "base_condition": "basal",
+            "doubling_time": 30,
+            "active_tfs": ["CRP"],
+        }
+        preview = preview_tool(session, "save_condition", AssistantToolPreviewRequest(arguments=args))
+        assert preview.valid is True
+        assert preview.side_effect is True
+        assert preview.normalized_arguments["nutrients"] == "minimal_glucose"  # inherited from base
+        assert preview.normalized_arguments["doubling_time"] == 30.0
+        assert preview.normalized_arguments["active_tfs"] == ["CRP"]
+
+        # No confirmation yet -> not executed.
+        blocked = execute_tool(session, "save_condition", AssistantToolExecutionRequest(arguments=args))
+        assert blocked.executed is False
+        assert blocked.status == "confirmation_required"
+        assert session.exec(select(BuilderSectionDraft)).all() == []
+
+        confirmation = create_confirmation(
+            session, ConfirmationCreate(action="save_condition", payload=preview.normalized_arguments)
+        )
+        resolve_confirmation(session, confirmation, ConfirmationResolve(status="approved"))
+        executed = execute_tool(
+            session, "save_condition",
+            AssistantToolExecutionRequest(arguments=args, confirmation_id=confirmation.id),
+        )
+        assert executed.executed is True
+        assert executed.result["action"] == "created_condition_draft"
+
+        drafts = session.exec(select(BuilderSectionDraft)).all()
+        assert len(drafts) == 1
+        draft = drafts[0]
+        assert draft.section == "condition" and draft.status == "draft" and draft.name == "high_glucose"
+        payload = json.loads(draft.payload)
+        assert payload["draft"]["nutrients"] == "minimal_glucose"
+        assert payload["draft"]["doubling_time"] == "30.0"
+        assert payload["draft"]["active_tfs"] == '["CRP"]'
+
+        # Replaying the same approved confirmation does not create a second draft.
+        replay = execute_tool(
+            session, "save_condition",
+            AssistantToolExecutionRequest(arguments=args, confirmation_id=confirmation.id),
+        )
+        assert replay.executed is False
+        assert len(session.exec(select(BuilderSectionDraft)).all()) == 1
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_save_condition_preview_flags_missing_nutrients_and_unknown_base():
+    engine, session = _build_session()
+    try:
+        # Unknown base condition is a hard error; missing nutrients (no base to inherit) too.
+        preview = preview_tool(
+            session, "save_condition",
+            AssistantToolPreviewRequest(arguments={"name": "x", "base_condition": "nope"}),
+        )
+        assert preview.valid is False
+        assert any("nope" in e for e in preview.errors)
+
+        # Valid name + nutrients but the recipe isn't published yet -> warning, still valid (draftable).
+        ok = preview_tool(
+            session, "save_condition",
+            AssistantToolPreviewRequest(arguments={"name": "y", "nutrients": "unpublished_recipe"}),
+        )
+        assert ok.valid is True
+        assert any("unpublished_recipe" in w for w in ok.warnings)
     finally:
         session.close()
         engine.dispose()
