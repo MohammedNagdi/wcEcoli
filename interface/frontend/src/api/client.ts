@@ -581,6 +581,17 @@ export async function deleteAssistantConversation(conversationId: number): Promi
   return fetchJSON(`/assistant/conversations/${conversationId}`, { method: 'DELETE' })
 }
 
+export async function renameAssistantConversation(
+  conversationId: number,
+  title: string,
+): Promise<AssistantConversation> {
+  return fetchJSON(`/assistant/conversations/${conversationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+}
+
 export async function createAssistantMessage(
   conversationId: number,
   data: { content: string; context: AssistantContext }

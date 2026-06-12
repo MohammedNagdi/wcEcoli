@@ -24,6 +24,7 @@ from app.main import get_session
 from app.services.assistant_harness import (
     AssistantConversationCreate,
     AssistantConversationOut,
+    AssistantConversationUpdate,
     AssistantExchangeOut,
     AssistantHarnessStatus,
     AssistantMessageCreate,
@@ -58,6 +59,7 @@ from app.services.assistant_harness import (
     create_confirmation,
     create_conversation,
     delete_conversation,
+    update_conversation,
     delete_provider_config,
     execute_tool,
     get_assistant_harness_status,
@@ -199,6 +201,15 @@ def get_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="Assistant conversation not found.")
     return conversation_to_out(conversation)
+
+
+@router.patch("/conversations/{conversation_id}", response_model=AssistantConversationOut)
+def rename_assistant_conversation(
+    conversation_id: int,
+    data: AssistantConversationUpdate,
+    session: Session = Depends(get_session),
+) -> AssistantConversationOut:
+    return conversation_to_out(update_conversation(session, conversation_id, data))
 
 
 @router.delete("/conversations/{conversation_id}", response_model=dict[str, bool])

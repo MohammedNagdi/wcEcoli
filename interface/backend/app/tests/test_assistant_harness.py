@@ -21,6 +21,7 @@ from app.services.assistant_runtime import generate_assistant_runtime_reply
 from app.services.assistant_harness import (
     AssistantContext,
     AssistantConversationCreate,
+    AssistantConversationUpdate,
     AssistantMessageCreate,
     AssistantProviderConfigUpdate,
     AssistantToolPreviewRequest,
@@ -32,6 +33,7 @@ from app.services.assistant_harness import (
     assistant_working_memory_pack,
     create_confirmation,
     create_conversation,
+    update_conversation,
     execute_tool,
     get_assistant_harness_status,
     get_provider_layer_status,
@@ -1634,6 +1636,28 @@ def test_stream_fence_filter_keeps_non_toolish_braces():
     f = _FenceFilter()
     shown = f.feed('The set {"a": 1, "b": 2} is shown.') + f.flush()
     assert '{"a": 1, "b": 2}' in shown
+
+
+def test_rename_conversation_updates_title():
+    engine, session = _build_session()
+    try:
+        conv = create_conversation(
+            session, AssistantConversationCreate(title="Old name", assistant_surface="central")
+        )
+        updated = update_conversation(session, conv.id, AssistantConversationUpdate(title="  New name  "))
+        assert updated.title == "New name"  # trimmed
+        assert session.get(type(conv), conv.id).title == "New name"  # persisted
+
+        import pytest as _pytest
+        from fastapi import HTTPException as _HTTPException
+
+        with _pytest.raises(_HTTPException):
+            update_conversation(session, conv.id, AssistantConversationUpdate(title="   "))
+        with _pytest.raises(_HTTPException):
+            update_conversation(session, 999999, AssistantConversationUpdate(title="x"))
+    finally:
+        session.close()
+        engine.dispose()
 
 
 def test_lenient_recovery_handles_python_literals():

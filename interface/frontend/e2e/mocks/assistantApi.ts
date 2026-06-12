@@ -157,6 +157,16 @@ export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Prom
   await page.route('**/api/assistant/conversations', (r) =>
     r.request().method() === 'POST' ? r.fulfill({ json: CONVERSATION }) : r.fulfill({ json: [] }),
   )
+  // Rename (PATCH) / get / delete a single conversation. `*` does not cross `/`, so this does not
+  // shadow the `conversations/*/memory|messages` routes.
+  await page.route('**/api/assistant/conversations/*', (r) => {
+    if (r.request().method() === 'PATCH') {
+      const body = (r.request().postDataJSON() ?? {}) as { title?: string }
+      return r.fulfill({ json: { ...CONVERSATION, title: body.title ?? CONVERSATION.title } })
+    }
+    if (r.request().method() === 'DELETE') return r.fulfill({ json: { deleted: true } })
+    return r.fulfill({ json: CONVERSATION })
+  })
   await page.route('**/api/assistant/conversations/*/memory', (r) => r.fulfill({ json: MEMORY }))
   await page.route('**/api/assistant/conversations/*/messages/stream', (r) =>
     r.fulfill({ contentType: 'text/event-stream', body: streamBody }),

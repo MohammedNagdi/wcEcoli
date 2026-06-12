@@ -12,6 +12,7 @@ import {
   getAssistantToolCalls,
   createAssistantConversation,
   deleteAssistantConversation,
+  renameAssistantConversation,
   createAssistantMessage,
   streamAssistantMessage,
   previewAssistantTool,
@@ -89,6 +90,7 @@ export interface AssistantContextValue {
   loadConversationMessages: (conversation: AssistantConversation) => Promise<void>
   startNewChat: () => Promise<void>
   removeConversation: (conversationId: number) => Promise<void>
+  renameConversation: (conversationId: number, title: string) => Promise<void>
   sendMessage: (presetContent?: string) => Promise<void>
   inspectCurrentResult: () => Promise<void>
   runReadOnlyProposal: (proposal: AssistantToolCall) => Promise<void>
@@ -259,6 +261,13 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     if (distanceFromBottom < 120) el.scrollTop = el.scrollHeight
   }, [messages.length, sending, streamingText])
 
+  // Jump straight to the latest message when switching/opening a conversation (ignore the
+  // near-bottom gate above, which is only for keeping pace during a live stream).
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [activeConversation?.id])
+
   async function loadConversationMessages(conversation: AssistantConversation) {
     setError(null)
     setActiveConversation(conversation)
@@ -347,6 +356,19 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         setInspectPreview(null)
         setInspectExecution(null)
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function renameConversation(conversationId: number, title: string) {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    setError(null)
+    try {
+      const updated = await renameAssistantConversation(conversationId, trimmed)
+      setConversations((current) => current.map((c) => (c.id === conversationId ? updated : c)))
+      if (activeConversation?.id === conversationId) setActiveConversation(updated)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -567,6 +589,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     loadConversationMessages,
     startNewChat,
     removeConversation,
+    renameConversation,
     sendMessage,
     inspectCurrentResult,
     runReadOnlyProposal,

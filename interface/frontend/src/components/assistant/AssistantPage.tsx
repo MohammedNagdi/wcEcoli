@@ -1377,11 +1377,33 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
     inspectPreview, inspectExecution, loading, sending, inspecting, error,
     streamingText, streamingTool, resolvedNote, memory, compactionNotice, bottomRef, scrollRef,
     clearMemory, stopStreaming, loadConversationMessages, startNewChat,
-    removeConversation, sendMessage, inspectCurrentResult, runReadOnlyProposal,
+    removeConversation, renameConversation, sendMessage, inspectCurrentResult, runReadOnlyProposal,
     handleProposalResolved,
   } = useAssistant()
   const facts = useMemo(() => contextFacts(context), [context])
   const [showConversations, setShowConversations] = useState(true)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const [showScrollDown, setShowScrollDown] = useState(false)
+
+  function onMessagesScroll() {
+    const el = scrollRef.current
+    if (!el) return
+    setShowScrollDown(el.scrollHeight - el.scrollTop - el.clientHeight > 200)
+  }
+  function scrollToLatest() {
+    const el = scrollRef.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }
+
+  function beginRename(id: number, title: string) {
+    setEditingId(id)
+    setEditingTitle(title)
+  }
+  async function commitRename() {
+    if (editingId != null) await renameConversation(editingId, editingTitle)
+    setEditingId(null)
+  }
 
   return (
     <section className="h-full min-h-0">
@@ -1421,31 +1443,60 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                     : 'border-gray-100 bg-white/70 text-gray-600 hover:bg-white'
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => loadConversationMessages(conversation)}
-                  className="min-w-0 flex-1 text-left"
-                >
-                  <div className="truncate font-medium">{conversation.title}</div>
-                  <div className="mt-1 text-gray-500">{conversation.status.replace(/_/g, ' ')}</div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeConversation(conversation.id)}
-                  disabled={sending}
-                  className="inline-flex min-h-[24px] min-w-[24px] items-center justify-center rounded text-gray-500 opacity-70 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 group-hover:opacity-100"
-                  title="Delete chat"
-                  aria-label={`Delete ${conversation.title}`}
-                >
-                  x
-                </button>
+                {editingId === conversation.id ? (
+                  <input
+                    autoFocus
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); void commitRename() }
+                      else if (e.key === 'Escape') { e.preventDefault(); setEditingId(null) }
+                    }}
+                    className="min-w-0 flex-1 rounded border border-brand-300 bg-white px-1.5 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                    aria-label="Conversation name"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => loadConversationMessages(conversation)}
+                    onDoubleClick={() => beginRename(conversation.id, conversation.title)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="truncate font-medium">{conversation.title}</div>
+                    <div className="mt-1 text-gray-500">{conversation.status.replace(/_/g, ' ')}</div>
+                  </button>
+                )}
+                {editingId !== conversation.id && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => beginRename(conversation.id, conversation.title)}
+                      className="inline-flex min-h-[24px] min-w-[24px] items-center justify-center rounded text-gray-500 opacity-70 hover:bg-gray-200 hover:text-gray-800 group-hover:opacity-100"
+                      title="Rename chat"
+                      aria-label={`Rename ${conversation.title}`}
+                    >
+                      <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M13 4l3 3M4 16l1-4 8-8 3 3-8 8-4 1z" /></svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeConversation(conversation.id)}
+                      disabled={sending}
+                      className="inline-flex min-h-[24px] min-w-[24px] items-center justify-center rounded text-gray-500 opacity-70 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 group-hover:opacity-100"
+                      title="Delete chat"
+                      aria-label={`Delete ${conversation.title}`}
+                    >
+                      x
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
         </aside>
         )}
 
-        <div className={`flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm`}>
+        <div className={`relative flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm`}>
           <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
               {!showConversations && (
@@ -1469,7 +1520,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             <span className="shrink-0 text-[11px] text-gray-500">read-only · actions need confirmation</span>
           </div>
 
-          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5">
+          <div ref={scrollRef} onScroll={onMessagesScroll} className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5">
             {(inspectPreview || inspectExecution) && (
               <ToolReviewPanel
                 title="Read-only result inspection"
@@ -1570,6 +1621,19 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             )}
             <div ref={bottomRef} />
           </div>
+
+          {showScrollDown && (
+            <button
+              type="button"
+              onClick={scrollToLatest}
+              data-testid="assistant-scroll-down"
+              className="absolute bottom-24 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-md transition hover:bg-gray-50 hover:text-gray-900"
+              title="Scroll to latest"
+              aria-label="Scroll to latest message"
+            >
+              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M10 4v12m0 0l-5-5m5 5l5-5" /></svg>
+            </button>
+          )}
 
           <div className="border-t border-gray-100 bg-white p-3">
             {error && <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</div>}

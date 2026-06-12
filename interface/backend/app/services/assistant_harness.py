@@ -277,6 +277,10 @@ class AssistantConversationCreate(BaseModel):
     context: AssistantContext = Field(default_factory=AssistantContext)
 
 
+class AssistantConversationUpdate(BaseModel):
+    title: str
+
+
 class AssistantConversationOut(BaseModel):
     id: int
     title: str
@@ -3379,6 +3383,23 @@ def create_conversation(session: Session, data: AssistantConversationCreate) -> 
         created_at=timestamp,
         updated_at=timestamp,
     )
+    session.add(conversation)
+    session.commit()
+    session.refresh(conversation)
+    return conversation
+
+
+def update_conversation(
+    session: Session, conversation_id: int, data: AssistantConversationUpdate
+) -> AssistantConversation:
+    conversation = session.get(AssistantConversation, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Assistant conversation not found.")
+    title = data.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Conversation title cannot be empty.")
+    conversation.title = title[:200]
+    conversation.updated_at = now_iso()
     session.add(conversation)
     session.commit()
     session.refresh(conversation)

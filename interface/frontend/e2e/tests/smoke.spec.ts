@@ -77,6 +77,21 @@ test.describe('Assistant smoke', () => {
     await expect(msg.locator('em')).toHaveCount(0)
   })
 
+  test('renames a conversation inline', async ({ page }) => {
+    await mockAssistantApi(page, { reply: 'ok' })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('hello')
+    await page.getByTestId('assistant-send').click()
+    await expect(page.getByTestId('message-assistant')).toBeVisible()
+
+    // The conversation now shows in the left panel — rename it inline.
+    await page.getByRole('button', { name: /^Rename / }).first().click()
+    const editor = page.getByLabel('Conversation name')
+    await editor.fill('My renamed chat')
+    await editor.press('Enter')
+    await expect(page.getByText('My renamed chat').first()).toBeVisible()
+  })
+
   test('renders a GFM table', async ({ page }) => {
     await mockAssistantApi(page, {
       reply: 'Comparison:\n\n| Gene | KO index |\n|------|----------|\n| dnaA | 42 |\n| crp | 84 |',
