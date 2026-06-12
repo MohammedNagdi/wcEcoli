@@ -57,7 +57,7 @@ RUNTIME_PROVIDER_SPECS = {
         kind="anthropic",
         secret_setting="anthropic_api_key",
         default_base_url="https://api.anthropic.com/v1",
-        default_model="claude-sonnet-4-5",
+        default_model="claude-opus-4-8",
     ),
     "openrouter": RuntimeProviderSpec(
         provider_id="openrouter",
@@ -131,6 +131,12 @@ def _active_provider_config(session: Session | None) -> AssistantProviderConfig 
     ).first()
 
 
+def _config_secret(config: AssistantProviderConfig) -> str:
+    from app.services.assistant_secrets import reveal
+
+    return reveal(config.secret_value or "", bool(getattr(config, "secret_encrypted", False))).strip()
+
+
 def _select_provider(session: Session | None = None) -> ResolvedRuntimeProvider | None:
     active_config = _active_provider_config(session)
     if active_config:
@@ -138,7 +144,7 @@ def _select_provider(session: Session | None = None) -> ResolvedRuntimeProvider 
         if spec:
             return ResolvedRuntimeProvider(
                 spec=spec,
-                secret_value=active_config.secret_value.strip(),
+                secret_value=_config_secret(active_config),
                 endpoint_url=active_config.endpoint_url.strip(),
                 model=active_config.model.strip(),
                 source="local_config",
@@ -158,7 +164,7 @@ def _select_provider(session: Session | None = None) -> ResolvedRuntimeProvider 
             if config and spec and _resolved_provider_configured(
                 ResolvedRuntimeProvider(
                     spec=spec,
-                    secret_value=config.secret_value.strip(),
+                    secret_value=_config_secret(config),
                     endpoint_url=config.endpoint_url.strip(),
                     model=config.model.strip(),
                     source="local_config",
@@ -166,7 +172,7 @@ def _select_provider(session: Session | None = None) -> ResolvedRuntimeProvider 
             ):
                 return ResolvedRuntimeProvider(
                     spec=spec,
-                    secret_value=config.secret_value.strip(),
+                    secret_value=_config_secret(config),
                     endpoint_url=config.endpoint_url.strip(),
                     model=config.model.strip(),
                     source="local_config",

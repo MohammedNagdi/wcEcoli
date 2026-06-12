@@ -12,7 +12,7 @@ import json
 import re
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -31,8 +31,10 @@ from app.db.models import (
     Condition,
     Experiment,
     Gene,
+    MediaRecipe,
     SimulationJob,
     SimulationResult,
+    TFEdge,
     Timeline,
     Variant,
 )
@@ -212,6 +214,21 @@ class OllamaModelListOut(BaseModel):
     error: str = ""
 
 
+PermissionTier = Literal["read_only", "draft", "queue", "publish_destructive"]
+
+# Policy as data: which tiers require explicit user confirmation, and a human label.
+PERMISSION_POLICY: dict[str, dict[str, Any]] = {
+    "read_only": {"requires_confirmation": False, "label": "Read-only — runs on click, no data changes."},
+    "draft": {"requires_confirmation": True, "label": "Creates a draft — needs confirmation."},
+    "queue": {"requires_confirmation": True, "label": "Queues compute — needs confirmation."},
+    "publish_destructive": {"requires_confirmation": True, "label": "Publishes/overwrites — needs confirmation."},
+}
+
+
+def tier_requires_confirmation(tier: str) -> bool:
+    return PERMISSION_POLICY.get(tier, PERMISSION_POLICY["publish_destructive"])["requires_confirmation"]
+
+
 class AssistantToolSpec(BaseModel):
     name: str
     label: str
@@ -219,6 +236,7 @@ class AssistantToolSpec(BaseModel):
     status: str
     requires_confirmation: bool
     side_effect: bool
+    permission_tier: PermissionTier = "read_only"
     argument_schema: dict[str, Any] = Field(default_factory=dict)
     result_schema: dict[str, Any] = Field(default_factory=dict)
 
@@ -233,6 +251,7 @@ class AssistantHarnessStatus(BaseModel):
     side_effect_execution_enabled: bool
     db_persistence_enabled: bool
     confirmation_required_for: list[str]
+    permission_policy: dict[str, Any] = Field(default_factory=dict)
     context_contract: list[str]
     visible_artifacts: list[str]
     tool_registry: list[AssistantToolSpec]
@@ -361,6 +380,7 @@ class ConfirmationOut(BaseModel):
     status: ConfirmationStatus
     payload: dict[str, Any]
     note: str
+    expires_at: str = ""
     created_at: str
     resolved_at: str
 
@@ -598,7 +618,10 @@ def upsert_provider_config(
         )
     record.label = data.label.strip() or definition.label
     if data.api_key.strip():
-        record.secret_value = data.api_key.strip()
+        from app.services.assistant_secrets import encrypt_secret
+
+        record.secret_value = encrypt_secret(data.api_key.strip())
+        record.secret_encrypted = True
     record.endpoint_url = data.endpoint_url.strip()
     record.model = data.model.strip()
     record.updated_at = timestamp
@@ -673,6 +696,7 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             status="confirmation_execution_enabled",
             requires_confirmation=True,
             side_effect=True,
+            permission_tier="draft",
             argument_schema={
                 "name": "string",
                 "description": "string",
@@ -694,6 +718,7 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             status="confirmation_execution_enabled",
             requires_confirmation=True,
             side_effect=True,
+            permission_tier="queue",
             argument_schema={"experiment_id": "integer", "seed": "integer", "generations": "integer"},
             result_schema={"job_id": "integer", "status": "pending"},
         ),
@@ -704,6 +729,7 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             status="registered_disabled",
             requires_confirmation=True,
             side_effect=True,
+            permission_tier="publish_destructive",
             argument_schema={"section": "string", "draft_id": "integer"},
             result_schema={"published_name": "string", "status": "published"},
         ),
@@ -727,7 +753,214 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             argument_schema={"gene": "string"},
             result_schema={"gene": "object", "links": "array"},
         ),
+        AssistantToolSpec(
+            name="gene_catalog",
+            label="Gene catalog summary",
+            description=(
+                "Count and summarize the genes supported in the platform. Optionally filter by functional category "
+                "or a symbol/name search. Use this for questions like 'how many genes are supported' or 'which "
+                "knockout-ready genes exist'. Returns totals and a matching subset, not per-gene mechanistic detail."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"category": "string", "search": "string", "limit": "integer"},
+            result_schema={"totals": "object", "genes": "array"},
+        ),
+        AssistantToolSpec(
+            name="inspect_tf_network",
+            label="Inspect TF regulation network",
+            description=(
+                "Read the transcription-factor regulation neighborhood of a gene from the curated TF edge table: "
+                "upstream regulators and downstream targets with log2 fold-change and activation/repression direction. "
+                "Backs the Network page and the Workspace TF mini-network."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"gene": "string", "limit": "integer"},
+            result_schema={"regulators": "array", "targets": "array"},
+        ),
+        AssistantToolSpec(
+            name="list_conditions",
+            label="List growth conditions",
+            description=(
+                "Summarize the growth conditions, media recipes, and timelines available in the Conditions Builder: "
+                "nutrients, active/inactive transcription factors, doubling time, and counts. Optional name search."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"search": "string", "limit": "integer"},
+            result_schema={"totals": "object", "conditions": "array"},
+        ),
+        AssistantToolSpec(
+            name="list_experiments",
+            label="List experiments",
+            description=(
+                "Summarize experiments in the Experiments page: counts by status, batch groupings, and a recent "
+                "subset. Optional filter by status or batch_id. Read-only; does not create or queue anything."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"status": "string", "batch_id": "string", "limit": "integer"},
+            result_schema={"totals": "object", "experiments": "array"},
+        ),
+        AssistantToolSpec(
+            name="inspect_experiment",
+            label="Inspect experiment",
+            description=(
+                "Read one experiment's definition (variant, condition, timeline, sim params, gene target) plus a "
+                "summary of its simulation jobs and result metrics. Use before proposing to run or compare it."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"experiment_id": "integer"},
+            result_schema={"experiment": "object", "jobs": "array"},
+        ),
+        AssistantToolSpec(
+            name="platform_guide",
+            label="Platform & page guide",
+            description=(
+                "Return authoritative descriptions of the platform's pages and the tools available on each: what "
+                "the page is for, what data it shows, and which assistant tools apply. Use this for 'what does this "
+                "page do', 'explain each page', or 'where do I do X' instead of guessing. Optional `page` arg "
+                "(route or name) narrows to one page."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"page": "string"},
+            result_schema={"pages": "array"},
+        ),
+        AssistantToolSpec(
+            name="inspect_molecule_trajectories",
+            label="Inspect result trajectories",
+            description=(
+                "Report the per-molecule trajectory scope of a SINGLE completed job for the Molecule Explorer: how "
+                "many lineage trajectories (generations x seeds, including daughter cells) belong to THIS job, and "
+                "which molecule IDs map to an optional focus gene. Use this to explain trajectory counts correctly "
+                "instead of conflating all results."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"job_id": "integer", "gene": "string"},
+            result_schema={"trajectory_scope": "object", "molecules": "array"},
+        ),
     ]
+
+
+# Read-only tools the agent loop may auto-execute (no confirmation, no side effect).
+READ_ONLY_TOOLS = (
+    "inspect_result",
+    "inspect_gene",
+    "gene_catalog",
+    "inspect_tf_network",
+    "list_conditions",
+    "list_experiments",
+    "inspect_experiment",
+    "inspect_molecule_trajectories",
+    "platform_guide",
+)
+
+
+# Authoritative, curated page guide. Keeps the model from inventing page descriptions.
+PLATFORM_PAGES = [
+    {
+        "name": "Workspace",
+        "route": "/",
+        "purpose": "Home/explore surface for inspecting a single gene and its model context.",
+        "data": "Gene metadata, model-state IDs, local regulation and pathway context.",
+        "assistant_tools": ["inspect_gene", "inspect_tf_network", "gene_catalog"],
+    },
+    {
+        "name": "Gene catalog",
+        "route": "/genes",
+        "purpose": "Browse and search every gene supported by the platform.",
+        "data": "Genes table: symbol, EcoCyc id, category, knockout index, mechanistic flag, protein monomer.",
+        "assistant_tools": ["gene_catalog", "inspect_gene"],
+    },
+    {
+        "name": "Network",
+        "route": "/network",
+        "purpose": "Transcription-factor regulation network: who regulates whom.",
+        "data": "Curated TF edges with log2 fold-change and activation/repression direction.",
+        "assistant_tools": ["inspect_tf_network"],
+    },
+    {
+        "name": "Genome Map",
+        "route": "/genome",
+        "purpose": "Circular/linear genome view of gene positions and strands.",
+        "data": "Gene left/right coordinates and strand from the Genes table.",
+        "assistant_tools": ["inspect_gene", "gene_catalog"],
+    },
+    {
+        "name": "Conditions Builder",
+        "route": "/environment-builder",
+        "purpose": "Define and review growth conditions, media recipes, and timelines.",
+        "data": "Conditions (nutrients, active/inactive TFs, doubling time), media recipes, timelines.",
+        "assistant_tools": ["list_conditions"],
+    },
+    {
+        "name": "Experiments",
+        "route": "/experiments",
+        "purpose": "List, group, and open experiments and their runs.",
+        "data": "Experiments by status/variant/batch, with linked simulation jobs and results.",
+        "assistant_tools": ["list_experiments", "inspect_experiment"],
+    },
+    {
+        "name": "Design Experiment",
+        "route": "/experiments/new",
+        "purpose": "Author one experiment: variant, condition, timeline, sim params, gene target.",
+        "data": "Variant catalog, conditions, timelines.",
+        "assistant_tools": ["inspect_experiment", "create_experiment (confirmation-gated)"],
+    },
+    {
+        "name": "Batch Builder",
+        "route": "/experiments/batch",
+        "purpose": "Author many experiments at once as a batch.",
+        "data": "Variant/condition/timeline combinations grouped under a batch id.",
+        "assistant_tools": ["list_experiments", "create_experiment (confirmation-gated)"],
+    },
+    {
+        "name": "Results",
+        "route": "/results",
+        "purpose": "Browse completed simulation results and open one for detail.",
+        "data": "Simulation jobs and summary metrics (division time, mass, growth rate, doubling time).",
+        "assistant_tools": ["inspect_result", "list_experiments"],
+    },
+    {
+        "name": "Result detail & Molecule Explorer",
+        "route": "/results/:jobId",
+        "purpose": "Figures and per-molecule trajectories for one result; Molecule Explorer plots state variables.",
+        "data": "Per-job phenotype figures and per-molecule timeseries (scoped to this job's lineages only).",
+        "assistant_tools": ["inspect_result", "inspect_molecule_trajectories"],
+    },
+    {
+        "name": "ML",
+        "route": "/ml",
+        "purpose": "Machine-learning surface over simulation outputs.",
+        "data": "Derived feature/training views over result data.",
+        "assistant_tools": [],
+    },
+    {
+        "name": "Genome Design",
+        "route": "/design",
+        "purpose": "Genome design surface.",
+        "data": "Design artifacts and gene targets.",
+        "assistant_tools": ["inspect_gene", "gene_catalog"],
+    },
+    {
+        "name": "Assistant",
+        "route": "/assistant",
+        "purpose": "This chat. Ask questions, inspect facts via tools, review confirmation-gated actions.",
+        "data": "Conversation history, page context, tool results, proposals.",
+        "assistant_tools": ["all read-only tools"],
+    },
+]
 
 
 def get_assistant_harness_status(session: Session | None = None) -> AssistantHarnessStatus:
@@ -738,10 +971,11 @@ def get_assistant_harness_status(session: Session | None = None) -> AssistantHar
         provider_configured=provider_configured,
         tool_execution_enabled=True,
         tool_preview_enabled=True,
-        execution_enabled_tools=["inspect_result", "inspect_gene", "create_experiment", "run_simulation"],
+        execution_enabled_tools=[*READ_ONLY_TOOLS, "create_experiment", "run_simulation"],
         side_effect_execution_enabled=True,
         db_persistence_enabled=True,
         confirmation_required_for=CONFIRMATION_REQUIRED_ACTIONS,
+        permission_policy=PERMISSION_POLICY,
         context_contract=CONTEXT_CONTRACT,
         visible_artifacts=VISIBLE_ARTIFACTS,
         tool_registry=get_tool_registry(),
@@ -813,6 +1047,19 @@ def _object_arg(args: dict[str, Any], key: str, errors: list[str]) -> dict[str, 
     value = args.get(key, {})
     if value is None:
         return {}
+    # Accept a JSON-encoded object too, so normalized args (where this is stored as a JSON string)
+    # round-trip through preview without spuriously failing on re-validation.
+    if isinstance(value, str):
+        if value.strip() == "":
+            return {}
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+        errors.append(f"Argument '{key}' must be an object.")
+        return {}
     if not isinstance(value, dict):
         errors.append(f"Argument '{key}' must be an object.")
         return {}
@@ -861,13 +1108,22 @@ def _preview_create_experiment(session: Session, args: dict[str, Any]) -> tuple[
     name = _string_arg(args, "name", errors, required=False)
     description = _string_arg(args, "description", errors, required=False)
     variant_type = _string_arg(args, "variant_type", errors)
-    variant_index = _int_arg(args, "variant_index", errors, minimum=0)
+    variant_index = _int_arg(args, "variant_index", errors, required=False, minimum=0)
     condition = _string_arg(args, "condition", errors)
     timeline = _string_arg(args, "timeline", errors, required=False)
     sim_params = _object_arg(args, "sim_params", errors)
     gene_symbol = _string_arg(args, "gene_symbol", errors, required=False)
     gene_symbols = _string_list_arg(args, "gene_symbols", errors)
     include_wildtype = _bool_arg(args, "include_wildtype", errors)
+
+    # Auto-resolve the knockout index from the gene so the model doesn't have to look it up first
+    # (the common reason a valid-looking create_experiment was silently dropped as invalid).
+    if variant_index is None and gene_symbol and variant_type == "gene_knockout":
+        resolved_gene = _lookup_gene_by_symbol(session, gene_symbol)
+        if resolved_gene and resolved_gene.ko_index and resolved_gene.ko_index > 0:
+            variant_index = resolved_gene.ko_index
+    if variant_index is None:
+        errors.append("Missing 'variant_index' — provide it, or give a gene_symbol so it can be resolved.")
 
     if variant_type:
         variant = session.exec(select(Variant).where(Variant.name == variant_type)).first()
@@ -1037,31 +1293,117 @@ def _preview_inspect_gene(session: Session, args: dict[str, Any]) -> tuple[dict[
     return normalized, preview, warnings, errors
 
 
+def _clamp_limit(args: dict[str, Any], default: int, maximum: int) -> int:
+    raw = args.get("limit")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(maximum, value))
+
+
+def _preview_gene_catalog(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    category = _string_arg(args, "category", required=False, errors=[]) or ""
+    search = _string_arg(args, "search", required=False, errors=[]) or ""
+    limit = _clamp_limit(args, default=15, maximum=50)
+    normalized = {"category": category.strip(), "search": search.strip(), "limit": limit}
+    preview = {
+        "summary": "Summarize the Genes table (counts, categories, knockout-ready and mechanistic genes).",
+        "filters": {"category": normalized["category"], "search": normalized["search"]},
+    }
+    return normalized, preview, [], []
+
+
+def _preview_inspect_tf_network(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    gene_symbol = _string_arg(args, "gene", required=True, errors=errors)
+    limit = _clamp_limit(args, default=20, maximum=100)
+    gene = _lookup_gene_by_symbol(session, gene_symbol) if gene_symbol else None
+    normalized = {"gene": (gene.symbol if gene else (gene_symbol or "").strip()), "limit": limit}
+    if gene_symbol and not gene:
+        errors.append(f"Gene '{gene_symbol}' is not in the local Genes table.")
+    preview = {"summary": f"Read TF regulators and targets for {normalized['gene'] or 'a gene'}."}
+    return normalized, preview, [], errors
+
+
+def _preview_list_conditions(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    search = _string_arg(args, "search", required=False, errors=[]) or ""
+    limit = _clamp_limit(args, default=20, maximum=100)
+    normalized = {"search": search.strip(), "limit": limit}
+    preview = {"summary": "Summarize Conditions Builder conditions, media recipes, and timelines."}
+    return normalized, preview, [], []
+
+
+def _preview_list_experiments(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    status = _string_arg(args, "status", required=False, errors=[]) or ""
+    batch_id = _string_arg(args, "batch_id", required=False, errors=[]) or ""
+    limit = _clamp_limit(args, default=15, maximum=50)
+    normalized = {"status": status.strip(), "batch_id": batch_id.strip(), "limit": limit}
+    preview = {"summary": "Summarize experiments by status and batch."}
+    return normalized, preview, [], []
+
+
+def _preview_inspect_experiment(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    experiment_id = _int_arg(args, "experiment_id", required=True, errors=errors)
+    normalized = {"experiment_id": experiment_id}
+    if experiment_id is not None and not session.get(Experiment, experiment_id):
+        errors.append(f"Experiment {experiment_id} not found.")
+    preview = {"summary": f"Read experiment {experiment_id} definition, jobs, and result metrics."}
+    return normalized, preview, [], errors
+
+
+def _preview_inspect_molecule_trajectories(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    job_id = _int_arg(args, "job_id", required=True, errors=errors)
+    gene = _string_arg(args, "gene", required=False, errors=[]) or ""
+    normalized = {"job_id": job_id, "gene": gene.strip()}
+    if job_id is not None and not session.get(SimulationJob, job_id):
+        errors.append(f"Simulation job {job_id} not found.")
+    preview = {"summary": f"Report the per-job trajectory scope for job {job_id} (this job's lineages only)."}
+    return normalized, preview, [], errors
+
+
+def _preview_platform_guide(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    page = _string_arg(args, "page", required=False, errors=[]) or ""
+    normalized = {"page": page.strip()}
+    preview = {"summary": f"Describe {'the ' + page.strip() + ' page' if page.strip() else 'all platform pages'}."}
+    return normalized, preview, [], []
+
+
+_PREVIEW_DISPATCH = {
+    "create_experiment": _preview_create_experiment,
+    "run_simulation": _preview_run_simulation,
+    "publish_environment_builder_artifact": _preview_publish_builder_artifact,
+    "inspect_result": _preview_inspect_result,
+    "inspect_gene": _preview_inspect_gene,
+    "gene_catalog": _preview_gene_catalog,
+    "inspect_tf_network": _preview_inspect_tf_network,
+    "list_conditions": _preview_list_conditions,
+    "list_experiments": _preview_list_experiments,
+    "inspect_experiment": _preview_inspect_experiment,
+    "inspect_molecule_trajectories": _preview_inspect_molecule_trajectories,
+    "platform_guide": _preview_platform_guide,
+}
+
+
 def preview_tool(
     session: Session,
     tool_name: str,
     request: AssistantToolPreviewRequest,
 ) -> AssistantToolPreviewOut:
     spec = get_tool_spec(tool_name)
-    if tool_name == "create_experiment":
-        normalized, preview, warnings, errors = _preview_create_experiment(session, request.arguments)
-    elif tool_name == "run_simulation":
-        normalized, preview, warnings, errors = _preview_run_simulation(session, request.arguments)
-    elif tool_name == "publish_environment_builder_artifact":
-        normalized, preview, warnings, errors = _preview_publish_builder_artifact(session, request.arguments)
-    elif tool_name == "inspect_result":
-        normalized, preview, warnings, errors = _preview_inspect_result(session, request.arguments)
-    elif tool_name == "inspect_gene":
-        normalized, preview, warnings, errors = _preview_inspect_gene(session, request.arguments)
-    else:
+    preview_fn = _PREVIEW_DISPATCH.get(tool_name)
+    if preview_fn is None:
         raise HTTPException(status_code=404, detail=f"Unknown assistant tool '{tool_name}'.")
+    normalized, preview, warnings, errors = preview_fn(session, request.arguments)
 
     return AssistantToolPreviewOut(
         tool_name=tool_name,
         valid=not errors,
         requires_confirmation=spec.requires_confirmation,
         side_effect=spec.side_effect,
-        execution_enabled=tool_name in {"inspect_result", "inspect_gene", "create_experiment", "run_simulation"},
+        execution_enabled=tool_name in READ_ONLY_TOOLS or tool_name in {"create_experiment", "run_simulation"},
         normalized_arguments=normalized,
         preview=preview,
         warnings=warnings,
@@ -1234,33 +1576,158 @@ def assistant_conversation_context_pack(
     *,
     conversation_id: int,
     current_message_id: int | None = None,
-    limit: int = 8,
+    limit: int = 24,
+    char_budget: int | None = None,
+    per_message_cap: int = 1600,
 ) -> dict[str, Any]:
+    """Recent turns under a token-ish budget, with a digest of anything older that was dropped.
+
+    Keeps as many recent user/assistant turns as fit ``char_budget`` (≈ char/4 tokens) instead of a
+    blind message count, so long chats stop silently losing context. Older turns that don't fit are
+    summarized into ``earlier_context`` (count + how the conversation started) so references survive.
+    """
+    # Budget is token-denominated (chars ≈ tokens * 4). Exact per-call counting is provider-specific
+    # and network-bound, so an estimate is used for the budgeting decision.
+    if char_budget is None:
+        char_budget = max(2000, int(settings.assistant_context_token_budget or 3500) * 4)
+
     records = session.exec(
         select(AssistantMessage)
         .where(AssistantMessage.conversation_id == conversation_id)
         .order_by(AssistantMessage.id.desc())
     ).all()
-    recent = [
+
+    # A model-written rolling summary (role="summary") compacts everything up to covered_up_to.
+    summary_message = next((record for record in records if record.role == "summary"), None)
+    covered_up_to = 0
+    summary_text = ""
+    if summary_message:
+        summary_text = summary_message.content
+        covered_up_to = int(from_json(summary_message.context_json, {}).get("covered_up_to_message_id") or 0)
+
+    eligible = [
         record
         for record in records
-        if record.id != current_message_id and record.role in {"user", "assistant"}
-    ][:limit]
+        if record.id != current_message_id
+        and record.role in {"user", "assistant"}
+        and (record.id or 0) > covered_up_to
+    ]
+
+    recent: list[AssistantMessage] = []
+    used = 0
+    for record in eligible:  # newest first
+        cost = min(len(record.content), per_message_cap)
+        if recent and (len(recent) >= limit or used + cost > char_budget):
+            break
+        recent.append(record)
+        used += cost
+    omitted = eligible[len(recent):]
     recent.reverse()
+
+    earlier_context = None
+    if summary_text:
+        note = f"Summary of the earlier conversation (compacted): {summary_text}"
+        if omitted:
+            note += f" Plus {len(omitted)} more recent message(s) trimmed for budget."
+        earlier_context = {
+            "summary": summary_text,
+            "covered_message_id": covered_up_to,
+            "omitted_message_count": len(omitted),
+            "note": note,
+        }
+    elif omitted:
+        first_user = next((record.content for record in reversed(eligible) if record.role == "user"), "")
+        compact_first = " ".join(first_user.split())[:300]
+        earlier_context = {
+            "omitted_message_count": len(omitted),
+            "note": (
+                f"{len(omitted)} earlier message(s) are not shown verbatim to stay within the context budget. "
+                + (f"The conversation began with: \"{compact_first}\". " if compact_first else "")
+                + "Re-fetch any specific facts through tools rather than relying on omitted turns."
+            ),
+        }
+
     return {
         "message_count": len(recent),
         "messages": [
             {
                 "role": record.role,
-                "content": record.content[:1600],
+                "content": record.content[:per_message_cap],
                 "status": record.status,
             }
             for record in recent
         ],
+        "earlier_context": earlier_context,
+        "estimated_tokens": used // 4,
         "usage": (
             "Recent conversation turns are provided so references like 'those genes' or 'the three suggestions' "
             "can be resolved without asking the user to repeat themselves."
         ),
+    }
+
+
+def get_conversation_summary(session: Session, conversation_id: int) -> AssistantMessage | None:
+    return session.exec(
+        select(AssistantMessage)
+        .where(AssistantMessage.conversation_id == conversation_id)
+        .where(AssistantMessage.role == "summary")
+    ).first()
+
+
+def upsert_conversation_summary(
+    session: Session,
+    conversation_id: int,
+    summary_text: str,
+    covered_up_to_message_id: int,
+) -> AssistantMessage:
+    record = get_conversation_summary(session, conversation_id)
+    timestamp = now_iso()
+    meta = to_json({"covered_up_to_message_id": int(covered_up_to_message_id)})
+    if record:
+        record.content = summary_text
+        record.context_json = meta
+        record.status = "compacted"
+    else:
+        record = AssistantMessage(
+            conversation_id=conversation_id,
+            role="summary",
+            content=summary_text,
+            context_json=meta,
+            status="compacted",
+            created_at=timestamp,
+        )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def clear_conversation_summary(session: Session, conversation_id: int) -> bool:
+    record = get_conversation_summary(session, conversation_id)
+    if not record:
+        return False
+    session.delete(record)
+    session.commit()
+    return True
+
+
+def get_conversation_memory(
+    session: Session,
+    conversation_id: int,
+    context: AssistantContext | None = None,
+) -> dict[str, Any]:
+    """User-facing memory snapshot for the memory panel: rolling summary + structured working memory."""
+    summary = get_conversation_summary(session, conversation_id)
+    working = assistant_working_memory_pack(
+        session, conversation_id=conversation_id, context=context or AssistantContext()
+    )
+    return {
+        "conversation_id": conversation_id,
+        "summary": summary.content if summary else "",
+        "covered_up_to_message_id": int(from_json(summary.context_json, {}).get("covered_up_to_message_id") or 0) if summary else 0,
+        "remembered_genes": working.get("remembered_genes", []),
+        "pending_confirmations": working.get("pending_confirmations", []),
+        "recent_unresolved_questions": working.get("recent_unresolved_questions", []),
     }
 
 
@@ -1483,12 +1950,22 @@ def record_contextual_proposals(
     conversation: AssistantConversation,
     assistant_message: AssistantMessage,
     context: AssistantContext,
+    skip_keys: set[tuple[str, str]] | None = None,
 ) -> list[AssistantToolCall]:
-    """Record non-executing proposal cards derived from validated page context."""
+    """Record non-executing proposal cards derived from validated page context.
+
+    ``skip_keys`` holds ``(tool_name, arguments_json)`` pairs already proposed this turn (e.g. by the
+    model's own tool calls) so the contextual layer does not create a duplicate card.
+    """
 
     proposals: list[AssistantToolCall] = []
+    seen = set(skip_keys or set())
 
     def add_proposal(**kwargs: Any) -> None:
+        key = (kwargs["tool_name"], to_json(kwargs.get("arguments", {})))
+        if key in seen:
+            return
+        seen.add(key)
         proposals.append(
             _record_assistant_proposal(
                 session,
@@ -1548,6 +2025,46 @@ def record_contextual_proposals(
             proposal_kind="side_effect_preview",
         )
 
+    return proposals
+
+
+def record_agent_side_effect_proposals(
+    session: Session,
+    *,
+    conversation: AssistantConversation,
+    assistant_message: AssistantMessage,
+    pending: list[Any],
+) -> list[AssistantToolCall]:
+    """Turn side-effecting tool calls the model requested into confirmation-gated cards.
+
+    ``pending`` items expose ``tool_name``, ``normalized_arguments`` and ``preview`` attributes
+    (the ``PendingSideEffect`` records produced by the agent loop). The model already proposed
+    the action via a native tool call; here we materialize the reviewable card the user confirms.
+    """
+
+    proposals: list[AssistantToolCall] = []
+    for item in pending:
+        tool_name = getattr(item, "tool_name", "")
+        arguments = getattr(item, "normalized_arguments", {}) or {}
+        preview = getattr(item, "preview", {}) or {}
+        try:
+            spec = get_tool_spec(tool_name)
+        except HTTPException:
+            continue
+        description = preview.get("summary") if isinstance(preview, dict) else None
+        proposals.append(
+            _record_assistant_proposal(
+                session,
+                conversation=conversation,
+                assistant_message=assistant_message,
+                tool_name=tool_name,
+                arguments=arguments,
+                title=spec.label,
+                description=description or spec.description,
+                proposal_kind="side_effect_preview",
+                source="model_tool_call",
+            )
+        )
     return proposals
 
 
@@ -1692,10 +2209,22 @@ def _confirmation_allows_execution(
         errors.append(f"Confirmation {confirmation_id} is for '{confirmation.action}', not '{tool_name}'.")
     if confirmation.status != "approved":
         errors.append(f"Confirmation {confirmation_id} is {confirmation.status}, not approved.")
+    if _confirmation_expired(confirmation):
+        errors.append(f"Confirmation {confirmation_id} has expired; please confirm the action again.")
     confirmed_payload = from_json(confirmation.payload_json, {})
     if confirmed_payload != normalized_arguments:
         errors.append("Confirmation payload does not match normalized tool arguments.")
     return confirmation, errors
+
+
+def _confirmation_expired(confirmation: AssistantConfirmation) -> bool:
+    expires_at = getattr(confirmation, "expires_at", "") or ""
+    if not expires_at:
+        return False
+    try:
+        return datetime.now(timezone.utc) > datetime.fromisoformat(expires_at)
+    except ValueError:
+        return False
 
 
 def _execute_inspect_result(
@@ -1787,6 +2316,261 @@ def _execute_inspect_gene(
     }
 
 
+def _execute_gene_catalog(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    category = (normalized_arguments.get("category") or "").strip().lower()
+    search = (normalized_arguments.get("search") or "").strip().lower()
+    limit = int(normalized_arguments.get("limit") or 15)
+    genes = session.exec(select(Gene)).all()
+
+    by_category: dict[str, int] = {}
+    knockout_ready = 0
+    mechanistic = 0
+    with_protein = 0
+    for gene in genes:
+        key = gene.category or "other"
+        by_category[key] = by_category.get(key, 0) + 1
+        if gene.ko_index and gene.ko_index > 0:
+            knockout_ready += 1
+        if gene.is_mechanistic:
+            mechanistic += 1
+        if gene.monomer_id:
+            with_protein += 1
+
+    def matches(gene: Gene) -> bool:
+        if category and (gene.category or "other").lower() != category:
+            return False
+        if search:
+            haystack = " ".join(
+                [gene.symbol or "", gene.ecoli_id or "", gene.monomer_name or "", gene.monomer_id or ""]
+            ).lower()
+            if search not in haystack:
+                return False
+        return True
+
+    matched = [gene for gene in genes if matches(gene)]
+    return {
+        "totals": {
+            "genes": len(genes),
+            "knockout_ready": knockout_ready,
+            "mechanistic": mechanistic,
+            "with_protein": with_protein,
+            "categories": len(by_category),
+        },
+        "category_breakdown": dict(sorted(by_category.items(), key=lambda item: -item[1])),
+        "filters": {"category": category, "search": search},
+        "matched_count": len(matched),
+        "genes": [_gene_summary(gene) for gene in matched[:limit]],
+        "note": "Counts are over the local Genes table. Knockout-ready genes have ko_index > 0.",
+        "links": [{"label": "Gene catalog", "path": "/genes"}],
+    }
+
+
+def _execute_inspect_tf_network(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    gene_symbol = str(normalized_arguments.get("gene") or "")
+    gene = _lookup_gene_by_symbol(session, gene_symbol)
+    if not gene:
+        raise HTTPException(status_code=404, detail=f"Gene '{gene_symbol}' not found.")
+    limit = int(normalized_arguments.get("limit") or 20)
+    downstream = session.exec(select(TFEdge).where(TFEdge.tf_symbol == gene.symbol)).all()
+    upstream = session.exec(select(TFEdge).where(TFEdge.target_symbol == gene.symbol)).all()
+    return {
+        "gene": gene.symbol,
+        "is_transcription_factor": len(downstream) > 0,
+        "summary": {"regulator_count": len(upstream), "target_count": len(downstream)},
+        "regulators": [
+            {"regulator": edge.tf_symbol, "log2fc": edge.log2fc_mean, "regulation": edge.regulation_direct or ""}
+            for edge in upstream[:limit]
+        ],
+        "targets": [
+            {"target": edge.target_symbol, "log2fc": edge.log2fc_mean, "regulation": edge.regulation_direct or ""}
+            for edge in downstream[:limit]
+        ],
+        "links": [
+            {"label": f"TF network for {gene.symbol}", "path": f"/network?gene={gene.symbol}"},
+            {"label": f"Workspace context for {gene.symbol}", "path": f"/?gene={gene.symbol}"},
+        ],
+    }
+
+
+def _execute_list_conditions(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    search = (normalized_arguments.get("search") or "").strip().lower()
+    limit = int(normalized_arguments.get("limit") or 20)
+    conditions = session.exec(select(Condition)).all()
+    media = session.exec(select(MediaRecipe)).all()
+    timelines = session.exec(select(Timeline)).all()
+
+    def matches(condition: Condition) -> bool:
+        if not search:
+            return True
+        return search in (condition.name or "").lower() or search in (condition.nutrients or "").lower()
+
+    matched = [condition for condition in conditions if matches(condition)]
+    return {
+        "totals": {"conditions": len(conditions), "media_recipes": len(media), "timelines": len(timelines)},
+        "matched_count": len(matched),
+        "conditions": [
+            {
+                "name": condition.name,
+                "nutrients": condition.nutrients,
+                "active_tfs": condition.active_tfs,
+                "inactive_tfs": condition.inactive_tfs,
+                "doubling_time": condition.doubling_time,
+            }
+            for condition in matched[:limit]
+        ],
+        "media_recipes": [recipe.media_id for recipe in media[:limit]],
+        "timelines": [timeline.name for timeline in timelines[:limit]],
+        "links": [{"label": "Conditions Builder", "path": "/environment-builder"}],
+    }
+
+
+def _execute_list_experiments(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    status_filter = (normalized_arguments.get("status") or "").strip().lower()
+    batch_id = (normalized_arguments.get("batch_id") or "").strip()
+    limit = int(normalized_arguments.get("limit") or 15)
+    experiments = session.exec(select(Experiment).order_by(Experiment.id.desc())).all()
+
+    by_status: dict[str, int] = {}
+    by_variant: dict[str, int] = {}
+    batches: set[str] = set()
+    for experiment in experiments:
+        by_status[experiment.status or "draft"] = by_status.get(experiment.status or "draft", 0) + 1
+        by_variant[experiment.variant_type or "unknown"] = by_variant.get(experiment.variant_type or "unknown", 0) + 1
+        if experiment.batch_id:
+            batches.add(experiment.batch_id)
+
+    def matches(experiment: Experiment) -> bool:
+        if status_filter and (experiment.status or "draft").lower() != status_filter:
+            return False
+        if batch_id and experiment.batch_id != batch_id:
+            return False
+        return True
+
+    matched = [experiment for experiment in experiments if matches(experiment)]
+    return {
+        "totals": {"experiments": len(experiments), "batches": len(batches)},
+        "by_status": by_status,
+        "by_variant": by_variant,
+        "matched_count": len(matched),
+        "experiments": [
+            {
+                "id": experiment.id,
+                "name": experiment.name,
+                "variant_type": experiment.variant_type,
+                "condition": experiment.condition,
+                "gene_symbol": experiment.gene_symbol,
+                "status": experiment.status,
+                "batch_id": experiment.batch_id,
+            }
+            for experiment in matched[:limit]
+        ],
+        "links": [
+            {"label": "Experiments", "path": "/experiments"},
+            {"label": "Design experiment", "path": "/experiments/new"},
+            {"label": "Batch builder", "path": "/experiments/batch"},
+        ],
+    }
+
+
+def _execute_inspect_experiment(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    experiment_id = normalized_arguments.get("experiment_id")
+    experiment = session.get(Experiment, experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found.")
+    jobs = session.exec(
+        select(SimulationJob).where(SimulationJob.experiment_id == experiment.id).order_by(SimulationJob.id)
+    ).all()
+    results = session.exec(
+        select(SimulationResult).where(SimulationResult.experiment_id == experiment.id)
+    ).all()
+    return {
+        "experiment": {
+            "id": experiment.id,
+            "name": experiment.name,
+            "description": experiment.description,
+            "variant_type": experiment.variant_type,
+            "variant_index": experiment.variant_index,
+            "condition": experiment.condition,
+            "timeline": experiment.timeline,
+            "gene_symbol": experiment.gene_symbol,
+            "status": experiment.status,
+            "batch_id": experiment.batch_id,
+            "sim_params": from_json(experiment.sim_params, {}),
+        },
+        "jobs": [
+            {"id": job.id, "status": job.status, "seed": job.seed, "generations": job.generations, "condition": job.condition}
+            for job in jobs
+        ],
+        "result_summary": {
+            "result_count": len(results),
+            "divided": sum(1 for result in results if result.divided),
+        },
+        "links": [{"label": f"Experiment {experiment.id}", "path": f"/experiments?experiment={experiment.id}"}],
+    }
+
+
+def _execute_platform_guide(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    page = (normalized_arguments.get("page") or "").strip().lower()
+    if page:
+        pages = [
+            entry
+            for entry in PLATFORM_PAGES
+            if page in entry["name"].lower() or page in entry["route"].lower()
+        ]
+    else:
+        pages = list(PLATFORM_PAGES)
+    return {
+        "pages": pages,
+        "page_count": len(pages),
+        "note": (
+            "Authoritative platform page descriptions. The assistant cannot browse pages itself, but these are the "
+            "real pages, their data, and the read-only tools that back them."
+        ),
+    }
+
+
+def _execute_inspect_molecule_trajectories(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    job_id = normalized_arguments.get("job_id")
+    job = session.get(SimulationJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Simulation job {job_id} not found.")
+    gene_symbol = str(normalized_arguments.get("gene") or "")
+    results = session.exec(
+        select(SimulationResult).where(SimulationResult.job_id == job.id)
+    ).all()
+    seeds = sorted({result.seed for result in results})
+    generations = sorted({result.generation for result in results})
+
+    molecule_ids: list[dict[str, Any]] = []
+    gene = _lookup_gene_by_symbol(session, gene_symbol) if gene_symbol else None
+    if gene:
+        if gene.monomer_id:
+            molecule_ids.append({"id": gene.monomer_id, "molecule_type": "protein", "role": "monomer"})
+        for rna_id in from_json(gene.rna_ids, []) or []:
+            if isinstance(rna_id, str):
+                molecule_ids.append({"id": rna_id, "molecule_type": "mRNA_cistron", "role": "mrna"})
+
+    return {
+        "job": {"id": job.id, "status": job.status, "condition": job.condition, "seed": job.seed, "generations": job.generations},
+        "trajectory_scope": {
+            "result_rows_for_this_job": len(results),
+            "seeds": seeds,
+            "generation_indices": generations,
+            "note": (
+                "Each plotted trajectory is one cell lineage (seed x generation, including daughter cells) belonging "
+                "to THIS job only. The Molecule Explorer is scoped to a single job; it does not aggregate other "
+                "results. A high trajectory count comes from this job's own multigenerational lineage fan-out, not "
+                "from other runs."
+            ),
+        },
+        "focus_gene": gene.symbol if gene else "",
+        "molecules": molecule_ids,
+        "links": [
+            {"label": f"Molecule explorer for job {job.id}", "path": f"/results/{job.id}?view=model-outputs"},
+        ],
+    }
+
+
 def _execute_create_experiment(
     session: Session,
     normalized_arguments: dict[str, Any],
@@ -1869,9 +2653,70 @@ def _mark_confirmation_used(
     confirmation.note = f"{confirmation.note}\n{note}".strip() if confirmation.note else note
     confirmation.resolved_at = now_iso()
     session.add(confirmation)
+    _resolve_proposed_tool_call(session, confirmation.tool_call_id, "executed")
     session.commit()
     session.refresh(confirmation)
     return confirmation
+
+
+def _resolve_proposed_tool_call(session: Session, tool_call_id: int | None, status: str) -> None:
+    """Move the originating 'proposed' card out of the awaiting-review list once it is acted on."""
+    if tool_call_id is None:
+        return
+    record = session.get(AssistantToolCall, tool_call_id)
+    if record and record.status in {"proposed", "pending_confirmation"}:
+        record.status = status
+        record.updated_at = now_iso()
+        session.add(record)
+
+
+def dismiss_tool_call(session: Session, tool_call_id: int, status: str = "rejected") -> AssistantToolCall | None:
+    """Public, idempotent terminal-state setter for a proposed card (used by the UI on resolve)."""
+    record = session.get(AssistantToolCall, tool_call_id)
+    if not record:
+        return None
+    if record.status in {"proposed", "pending_confirmation"}:
+        record.status = status if status in {"executed", "rejected", "cancelled", "superseded"} else "rejected"
+        record.updated_at = now_iso()
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+    return record
+
+
+def supersede_open_proposals(session: Session, conversation_id: int | None) -> int:
+    """Retire any still-open proposals in a conversation so a new turn's cards replace, not stack.
+
+    Without this, every `status='proposed'` refetch (e.g. after navigating away and back) resurrects
+    the entire accumulated pile of past proposals.
+    """
+    if conversation_id is None:
+        return 0
+    open_records = session.exec(
+        select(AssistantToolCall)
+        .where(AssistantToolCall.conversation_id == conversation_id)
+        .where(AssistantToolCall.status == "proposed")
+    ).all()
+    for record in open_records:
+        record.status = "superseded"
+        record.updated_at = now_iso()
+        session.add(record)
+    if open_records:
+        session.commit()
+    return len(open_records)
+
+
+_READ_ONLY_EXECUTORS = {
+    "inspect_result": _execute_inspect_result,
+    "inspect_gene": _execute_inspect_gene,
+    "gene_catalog": _execute_gene_catalog,
+    "inspect_tf_network": _execute_inspect_tf_network,
+    "list_conditions": _execute_list_conditions,
+    "list_experiments": _execute_list_experiments,
+    "inspect_experiment": _execute_inspect_experiment,
+    "inspect_molecule_trajectories": _execute_inspect_molecule_trajectories,
+    "platform_guide": _execute_platform_guide,
+}
 
 
 def execute_tool(
@@ -2017,14 +2862,11 @@ def execute_tool(
             errors=[adapter_error],
         )
 
-    if tool_name not in {"inspect_result", "inspect_gene"}:
+    executor = _READ_ONLY_EXECUTORS.get(tool_name)
+    if executor is None:
         raise HTTPException(status_code=404, detail=f"No execution adapter registered for '{tool_name}'.")
 
-    result = (
-        _execute_inspect_result(session, preview.normalized_arguments)
-        if tool_name == "inspect_result"
-        else _execute_inspect_gene(session, preview.normalized_arguments)
-    )
+    result = executor(session, preview.normalized_arguments)
     tool_call = _record_tool_call(
         session,
         conversation_id=request.conversation_id,
@@ -2089,6 +2931,7 @@ def confirmation_to_out(record: AssistantConfirmation) -> ConfirmationOut:
         status=record.status,  # type: ignore[arg-type]
         payload=from_json(record.payload_json, {}),
         note=record.note,
+        expires_at=getattr(record, "expires_at", "") or "",
         created_at=record.created_at,
         resolved_at=record.resolved_at,
     )
@@ -2205,13 +3048,19 @@ def record_provenance(
 def create_confirmation(session: Session, data: ConfirmationCreate) -> AssistantConfirmation:
     if data.action not in CONFIRMATION_REQUIRED_ACTIONS:
         raise HTTPException(status_code=422, detail=f"Unknown confirmation action '{data.action}'.")
+    import secrets as _secrets
+
     timestamp = now_iso()
+    ttl = max(30, int(settings.assistant_confirmation_ttl_sec or 900))
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl)).isoformat()
     confirmation = AssistantConfirmation(
         conversation_id=data.conversation_id,
         tool_call_id=data.tool_call_id,
         action=data.action,
         status="pending",
         payload_json=to_json(data.payload),
+        nonce=_secrets.token_hex(8),
+        expires_at=expires_at,
         created_at=timestamp,
         resolved_at="",
     )
@@ -2232,6 +3081,8 @@ def resolve_confirmation(
     confirmation.note = data.note.strip()
     confirmation.resolved_at = now_iso()
     session.add(confirmation)
+    if data.status in {"rejected", "cancelled"}:
+        _resolve_proposed_tool_call(session, confirmation.tool_call_id, data.status)
     session.commit()
     session.refresh(confirmation)
     return confirmation

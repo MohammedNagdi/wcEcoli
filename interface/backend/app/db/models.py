@@ -149,6 +149,8 @@ class AssistantConfirmation(SQLModel, table=True):
     status: str = "pending"                      # pending | approved | rejected | cancelled | used
     payload_json: str = "{}"                     # action payload shown to the user
     note: str = ""
+    nonce: str = ""                              # random token bound to this confirmation (anti-replay)
+    expires_at: str = ""                         # ISO timestamp after which approval is invalid
     created_at: str = ""                         # ISO timestamp
     resolved_at: str = ""                        # ISO timestamp
 
@@ -173,7 +175,8 @@ class AssistantProviderConfig(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     provider_id: str = Field(index=True)          # openai | anthropic | ollama | ...
     label: str = ""
-    secret_value: str = ""                        # local-only; never returned by API
+    secret_value: str = ""                        # local-only; never returned by API; encrypted at rest
+    secret_encrypted: bool = False                # whether secret_value is ciphertext
     endpoint_url: str = ""
     model: str = ""
     is_active: bool = False

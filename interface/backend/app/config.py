@@ -30,6 +30,22 @@ class Settings(BaseSettings):
     assistant_provider: str = ""                 # optional default provider id, e.g. openai
     assistant_model: str = ""                    # optional default chat model
     assistant_request_timeout_sec: int = 30
+    # Local runtimes (Ollama / LM Studio / vLLM) must load large weights on the first call
+    # and reason more with tools attached; give them a much higher per-call ceiling.
+    assistant_local_timeout_sec: int = 300
+    # Keep a local model resident between the agent loop's turns to avoid cold reloads.
+    assistant_ollama_keep_alive: str = "30m"
+    # Cap on observe->act->observe iterations per user turn.
+    assistant_max_agent_turns: int = 6
+    # Context compaction: keep this many recent turns verbatim; summarize older ones once at least
+    # `compact_threshold` uncompacted older turns accumulate. Optional model override for the summary.
+    assistant_keep_recent_turns: int = 12
+    assistant_compact_threshold: int = 6
+    assistant_summary_model: str = ""
+    # Approx token budget for verbatim recent history in a turn (chars ≈ tokens * 4).
+    assistant_context_token_budget: int = 3500
+    # How long an approved confirmation stays valid before it must be re-confirmed.
+    assistant_confirmation_ttl_sec: int = 900
 
     # Derived paths for key data files
     @property

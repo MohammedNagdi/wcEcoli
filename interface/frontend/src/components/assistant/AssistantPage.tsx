@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
@@ -6,6 +6,11 @@ import {
   createAssistantConfirmation,
   createAssistantConversation,
   createAssistantMessage,
+  streamAssistantMessage,
+  warmAssistantProvider,
+  getAssistantMemory,
+  clearAssistantMemory,
+  dismissAssistantToolCall,
   deleteAssistantConversation,
   executeAssistantTool,
   getAssistantProviderConfigs,
@@ -27,6 +32,7 @@ import type {
   AssistantToolSpec,
   AssistantConversation,
   AssistantContext,
+  AssistantExchange,
   AssistantMessage,
   AssistantConfirmation,
   AssistantProvenance,
@@ -35,6 +41,7 @@ import type {
   PlatformStatus,
   ProviderStatus,
 } from '../../types'
+import type { AssistantMemory } from '../../api/client'
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'ready' | 'blocked' | 'planned' }) {
   const classes = {
@@ -480,8 +487,8 @@ function numberListField(value: unknown): number[] {
 function ReviewRow({ label, value, mono = false }: { label: string; value: ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-3 border-b border-gray-100 py-2 last:border-b-0">
-      <dt className="text-gray-500">{label}</dt>
-      <dd className={`text-right font-medium text-gray-900 ${mono ? 'font-mono' : ''}`}>{value}</dd>
+      <dt className="shrink-0 text-gray-500">{label}</dt>
+      <dd className={`min-w-0 break-words [overflow-wrap:anywhere] text-right font-medium text-gray-900 ${mono ? 'font-mono' : ''}`}>{value}</dd>
     </div>
   )
 }
@@ -490,10 +497,12 @@ function ToolReviewPanel({
   title,
   preview,
   execution,
+  embedded = false,
 }: {
   title: string
   preview: AssistantToolPreview | null
   execution: AssistantToolExecution | null
+  embedded?: boolean
 }) {
   if (!preview && !execution) return null
   const previewData = asRecord(preview?.preview)
@@ -512,15 +521,17 @@ function ToolReviewPanel({
     : []
 
   return (
-    <div className="rounded-md border border-gray-200 bg-white p-4 text-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div className="font-semibold text-gray-900">{title}</div>
-        {preview && (
-          <StatusPill tone={preview.valid ? 'ready' : 'blocked'}>
-            {preview.valid ? 'valid preview' : 'needs attention'}
-          </StatusPill>
-        )}
-      </div>
+    <div className={embedded ? 'text-sm' : 'overflow-hidden rounded-md border border-gray-200 bg-white p-4 text-sm'}>
+      {!embedded && (
+        <div className="flex items-center justify-between gap-3">
+          <div className="font-semibold text-gray-900">{title}</div>
+          {preview && (
+            <StatusPill tone={preview.valid ? 'ready' : 'blocked'}>
+              {preview.valid ? 'valid preview' : 'needs attention'}
+            </StatusPill>
+          )}
+        </div>
+      )}
       {preview && (
         <div className="mt-3">
           <p className="text-sm leading-6 text-gray-600">
@@ -893,6 +904,23 @@ function suggestedActions(context: AssistantContext): Array<{
   ]
 }
 
+function starterPrompts(context: AssistantContext): string[] {
+  const prompts: string[] = []
+  if (context.selected_gene) {
+    prompts.push(`Tell me about ${context.selected_gene} and its regulators`)
+    prompts.push(`Draft a ${context.selected_gene} knockout experiment`)
+  }
+  if (context.selected_job != null) {
+    prompts.push('Inspect the current result and summarize growth')
+  }
+  if (context.selected_experiment != null) {
+    prompts.push('Summarize this experiment and its runs')
+  }
+  prompts.push('How many genes are supported?')
+  prompts.push('Explain what each page does')
+  return prompts.slice(0, 4)
+}
+
 function FactBadge({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-gray-100 bg-white px-3 py-2">
@@ -963,12 +991,14 @@ function AssistantProposalCard({
   conversationId,
   busy,
   onRunReadOnly,
+  onResolved,
 }: {
   proposal: AssistantToolCall
   context: AssistantContext
   conversationId: number | null
   busy: boolean
   onRunReadOnly: (proposal: AssistantToolCall) => void
+  onResolved: (proposalId: number, outcome: 'executed' | 'rejected') => void
 }) {
   const [preview, setPreview] = useState<AssistantToolPreview | null>(null)
   const [execution, setExecution] = useState<AssistantToolExecution | null>(null)
@@ -1005,17 +1035,7 @@ function AssistantProposalCard({
 
   async function rejectProposal() {
     if (!preview?.valid || !isSideEffect) {
-      setConfirmation({
-        id: 0,
-        conversation_id: conversationId,
-        tool_call_id: proposal.id,
-        action: proposal.tool_name,
-        status: 'rejected',
-        payload: {},
-        note: 'Rejected locally before a valid preview was available.',
-        created_at: '',
-        resolved_at: '',
-      })
+      onResolved(proposal.id, 'rejected')
       return
     }
     setCardBusy('reject')
@@ -1027,11 +1047,11 @@ function AssistantProposalCard({
         conversation_id: conversationId,
         tool_call_id: proposal.id,
       })
-      const rejected = await resolveAssistantConfirmation(pending.id, {
+      await resolveAssistantConfirmation(pending.id, {
         status: 'rejected',
         note: 'Rejected from assistant proposal card.',
       })
-      setConfirmation(rejected)
+      onResolved(proposal.id, 'rejected')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1062,6 +1082,9 @@ function AssistantProposalCard({
         confirmation_id: approved.id,
       })
       setExecution(result)
+      if (result.executed) {
+        onResolved(proposal.id, 'executed')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1072,15 +1095,15 @@ function AssistantProposalCard({
   return (
     <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-gray-900">{title}</div>
-          <div className="mt-1 text-xs leading-5 text-gray-500">{description}</div>
+        <div className="min-w-0">
+          <div className="break-words text-sm font-semibold text-gray-900">{title}</div>
+          <div className="mt-1 break-words text-xs leading-5 text-gray-500">{description}</div>
         </div>
         <StatusPill tone={proposalKind(proposal)}>
           {proposal.result.side_effect ? 'needs confirmation' : 'read-only'}
         </StatusPill>
       </div>
-      {facts.length > 0 && (
+      {facts.length > 0 && !preview && (
         <dl className="mt-3 grid gap-2 rounded-md border border-gray-100 bg-white p-3 text-xs sm:grid-cols-2">
           {facts.map((fact) => (
             <div key={`${proposal.id}-${fact.label}`} className="min-w-0">
@@ -1130,8 +1153,8 @@ function AssistantProposalCard({
         )}
       </div>
       {preview && (
-        <div className="mt-3">
-          <ToolReviewPanel title="Proposal preview" preview={preview} execution={execution} />
+        <div className="mt-3 rounded-md border border-gray-100 bg-white p-3">
+          <ToolReviewPanel title="Proposal preview" preview={preview} execution={execution} embedded />
         </div>
       )}
       {isSideEffect && preview && (
@@ -1201,6 +1224,49 @@ function TaskCenteredAssistantPanel({
   const [sending, setSending] = useState(false)
   const [inspecting, setInspecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [streamingText, setStreamingText] = useState<string | null>(null)
+  const [streamingTool, setStreamingTool] = useState<string | null>(null)
+  const [resolvedNote, setResolvedNote] = useState<string | null>(null)
+  const [memory, setMemory] = useState<AssistantMemory | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    const id = activeConversation?.id
+    if (id == null) {
+      setMemory(null)
+      return
+    }
+    let cancelled = false
+    getAssistantMemory(id)
+      .then((data) => {
+        if (!cancelled) setMemory(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [activeConversation?.id, messages.length])
+
+  async function clearMemory() {
+    const id = activeConversation?.id
+    if (id == null) return
+    try {
+      await clearAssistantMemory(id)
+      const data = await getAssistantMemory(id)
+      setMemory(data)
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  function stopStreaming() {
+    abortRef.current?.abort()
+  }
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages.length, sending, streamingText])
 
   const context = useMemo(() => {
     const params = new URLSearchParams(location.search)
@@ -1334,16 +1400,33 @@ function TaskCenteredAssistantPanel({
     return conversation
   }
 
-  async function sendMessage() {
-    const content = input.trim()
+  async function sendMessage(presetContent?: string) {
+    const content = (presetContent ?? input).trim()
     if (!content || sending) return
     setSending(true)
     setError(null)
-    try {
-      const conversation = await ensureConversation(content)
-      setInput('')
-      const exchange = await createAssistantMessage(conversation.id, { content, context })
-      setMessages((current) => [...current, exchange.user_message, exchange.assistant_message])
+    setInput('')
+    // Optimistically render the user's message immediately — no waiting for the round-trip.
+    const tempId = -Date.now()
+    const optimisticUser: AssistantMessage = {
+      id: tempId,
+      conversation_id: activeConversation?.id ?? 0,
+      role: 'user',
+      content,
+      context,
+      status: 'sending',
+      created_at: new Date().toISOString(),
+    }
+    setMessages((current) => [...current, optimisticUser])
+
+    function applyExchange(exchange: AssistantExchange) {
+      setMessages((current) => [
+        ...current.filter(
+          (message) => message.id !== tempId && message.id !== exchange.user_message.id,
+        ),
+        exchange.user_message,
+        exchange.assistant_message,
+      ])
       setProposals(exchange.proposals ?? [])
       setActiveConversation(exchange.conversation)
       onConversationChange(exchange.conversation.id)
@@ -1351,9 +1434,62 @@ function TaskCenteredAssistantPanel({
         exchange.conversation,
         ...current.filter((item) => item.id !== exchange.conversation.id),
       ])
+    }
+
+    try {
+      const conversation = await ensureConversation(content)
+      const controller = new AbortController()
+      abortRef.current = controller
+      let streamed = false
+      try {
+        setStreamingText('')
+        await streamAssistantMessage(
+          conversation.id,
+          { content, context },
+          {
+            onUser: (message) => {
+              streamed = true
+              setMessages((current) =>
+                current.map((item) => (item.id === tempId ? message : item)),
+              )
+            },
+            onDelta: (text) => {
+              streamed = true
+              setStreamingText((prev) => (prev ?? '') + text)
+            },
+            onStatus: (tool) => setStreamingTool(tool),
+            onDone: (payload) => {
+              streamed = true
+              applyExchange(payload as unknown as AssistantExchange)
+            },
+            onError: (message) => setError(message),
+          },
+          controller.signal,
+        )
+      } catch (streamErr) {
+        if (controller.signal.aborted) {
+          // User pressed Stop — keep their message, drop the partial reply, no error.
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === tempId ? { ...message, status: 'stored' } : message,
+            ),
+          )
+          return
+        }
+        // SSE unavailable/failed before producing output — fall back to the buffered endpoint.
+        if (streamed) throw streamErr
+        const exchange = await createAssistantMessage(conversation.id, { content, context })
+        applyExchange(exchange)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      setMessages((current) =>
+        current.map((message) => (message.id === tempId ? { ...message, status: 'failed' } : message)),
+      )
     } finally {
+      abortRef.current = null
+      setStreamingText(null)
+      setStreamingTool(null)
       setSending(false)
     }
   }
@@ -1396,10 +1532,23 @@ function TaskCenteredAssistantPanel({
         conversation_id: activeConversation?.id ?? null,
       })
       setInspectExecution(execution)
+      // Read-only result is now shown in the center panel; clear the card so the rail doesn't pile up.
+      setProposals((current) => current.filter((item) => item.id !== proposal.id))
+      if (proposal.id > 0) dismissAssistantToolCall(proposal.id, 'executed').catch(() => {})
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setInspecting(false)
+    }
+  }
+
+  function handleProposalResolved(proposalId: number, outcome: 'executed' | 'rejected') {
+    setProposals((current) => current.filter((item) => item.id !== proposalId))
+    setResolvedNote(outcome === 'executed' ? 'Action confirmed and executed.' : 'Proposal dismissed.')
+    window.setTimeout(() => setResolvedNote(null), 3500)
+    // Persist the resolution so the card never re-appears after navigating away and back.
+    if (proposalId > 0) {
+      dismissAssistantToolCall(proposalId, outcome).catch(() => {})
     }
   }
 
@@ -1408,33 +1557,18 @@ function TaskCenteredAssistantPanel({
   }
 
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-4">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">Assistant workspace</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-5 text-gray-600">
-            Ask questions, inspect deterministic platform facts, and review proposed next steps. Side-effecting actions still require explicit preview and confirmation.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <StatusPill tone={providerConfigured ? 'ready' : 'blocked'}>
-            {providerConfigured ? 'provider configured' : 'no provider'}
-          </StatusPill>
-          <StatusPill tone="ready">read-only inspection</StatusPill>
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
-        <aside className="rounded-md border border-gray-100 bg-gray-50 p-3">
+    <section>
+      <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+        <aside className="flex h-[calc(100vh-180px)] min-h-[560px] flex-col rounded-xl border border-gray-200 bg-gray-50 p-3">
           <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Conversations</div>
           <button
             type="button"
             onClick={startNewChat}
-            className="w-full rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white"
+            className="w-full rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800"
           >
-            New chat
+            + New chat
           </button>
-          <div className="mt-3 max-h-[520px] space-y-2 overflow-auto">
+          <div className="mt-3 flex-1 space-y-2 overflow-y-auto">
             {loading && <div className="text-xs text-gray-500">Loading conversations...</div>}
             {!loading && conversations.length === 0 && (
               <div className="text-xs leading-5 text-gray-500">No saved conversations yet.</div>
@@ -1471,15 +1605,18 @@ function TaskCenteredAssistantPanel({
           </div>
         </aside>
 
-        <div className="flex h-[640px] min-h-[520px] flex-col rounded-md border border-gray-100">
-          <div className="border-b border-gray-100 px-4 py-3">
-            <div className="text-sm font-medium text-gray-900">
-              {activeConversation?.title ?? 'New assistant conversation'}
+        <div className="flex h-[calc(100vh-180px)] min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-gray-900">
+                {activeConversation?.title ?? 'New chat'}
+              </div>
+              <div className="mt-0.5 truncate text-xs leading-5 text-gray-500">{contextSummary(context)}</div>
             </div>
-            <div className="mt-1 text-xs leading-5 text-gray-500">{contextSummary(context)}</div>
+            <span className="shrink-0 text-[11px] text-gray-400">read-only · actions need confirmation</span>
           </div>
 
-          <div className="flex-1 space-y-3 overflow-auto bg-gray-50 px-4 py-4">
+          <div className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5">
             {(inspectPreview || inspectExecution) && (
               <ToolReviewPanel
                 title="Read-only result inspection"
@@ -1487,72 +1624,133 @@ function TaskCenteredAssistantPanel({
                 execution={inspectExecution}
               />
             )}
-            {messages.length === 0 && (
-              <div className="rounded-md border border-dashed border-gray-200 bg-white p-4 text-sm leading-6 text-gray-500">
-                Ask about the current page, a result you are inspecting, or what the platform can safely do next. The assistant can propose actions, but text alone never executes them.
+            {messages.length === 0 && !sending && (
+              <div className="mx-auto mt-10 max-w-md text-center">
+                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 text-brand-600">✦</div>
+                <p className="mt-3 text-sm font-medium text-gray-700">Ask about this page or a result</p>
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  The assistant reads deterministic platform facts and proposes next steps. It never changes data on its own — side-effecting actions appear as confirmation cards.
+                </p>
+                <div className="mt-5 flex flex-col items-stretch gap-2 text-left">
+                  {starterPrompts(context).map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => sendMessage(prompt)}
+                      disabled={!providerConfigured}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`rounded-md border p-3 ${
-                  message.role === 'user'
-                    ? 'ml-auto max-w-[82%] border-brand-100 bg-brand-50'
-                    : 'mr-auto max-w-[88%] border-gray-200 bg-white'
-                }`}
-              >
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    {message.role === 'user' ? 'You' : 'Assistant'}
-                  </span>
-                  <StatusPill tone={messageStatusTone(message.status)}>
-                    {message.status.replace(/_/g, ' ')}
-                  </StatusPill>
+            {messages.map((message) => {
+              const isUser = message.role === 'user'
+              const showStatus = !['stored', 'completed'].includes(message.status)
+              return (
+                <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}>
+                    <div className="mb-1 flex items-center gap-2 px-1">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                        {isUser ? 'You' : 'Assistant'}
+                      </span>
+                      {showStatus && (
+                        <StatusPill tone={messageStatusTone(message.status)}>
+                          {message.status.replace(/_/g, ' ')}
+                        </StatusPill>
+                      )}
+                    </div>
+                    <div
+                      className={`overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+                        isUser
+                          ? 'rounded-br-sm bg-brand-600 text-white'
+                          : 'rounded-bl-sm border border-gray-200 bg-white text-gray-800 shadow-sm'
+                      } ${message.status === 'failed' ? 'opacity-60' : ''}`}
+                    >
+                      {message.content || (message.status === 'failed' ? 'Message could not be sent.' : '')}
+                    </div>
+                  </div>
                 </div>
-                <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">{message.content}</p>
+              )
+            })}
+            {sending && streamingText !== null && streamingText.length > 0 && (
+              <div className="flex justify-start">
+                <div className="max-w-[80%]">
+                  <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Assistant</div>
+                  <div className="overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-2.5 text-sm leading-6 text-gray-800 shadow-sm">
+                    {streamingText}
+                    <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-brand-400 align-middle" />
+                  </div>
+                </div>
               </div>
-            ))}
+            )}
+            {sending && (streamingText === null || streamingText.length === 0) && (
+              <div className="flex justify-start">
+                <div className="max-w-[80%]">
+                  <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Assistant</div>
+                  <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+                    <span className="ml-2 text-xs text-gray-400">
+                      {streamingTool ? `running ${streamingTool}…` : `thinking${runtimeLabel ? ` · ${runtimeLabel}` : ''}`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
           </div>
 
-          <div className="sticky bottom-0 border-t border-gray-100 bg-white p-3 shadow-[0_-8px_18px_rgba(15,23,42,0.04)]">
-            {error && <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</div>}
-            {sending && (
-              <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm leading-5 text-amber-800">
-                Waiting for {runtimeLabel || 'the selected provider'}. Local Ollama models can take more than a minute on the first response or with larger models.
-              </div>
-            )}
-            <label htmlFor="assistant-chat-input" className="sr-only">Assistant message</label>
-            <textarea
-              id="assistant-chat-input"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                  event.preventDefault()
-                  sendMessage()
-                }
-              }}
-              placeholder="Ask what to inspect next, or use a suggested action..."
-              className="h-24 w-full resize-none rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-800"
-            />
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs text-gray-500">Ctrl+Enter sends. Chat cannot perform side effects.</span>
-              <button
-                type="button"
-                onClick={sendMessage}
-                disabled={sending || !input.trim()}
-                className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {sending ? 'Waiting...' : 'Send'}
-              </button>
+          <div className="border-t border-gray-100 bg-white p-3">
+            {error && <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</div>}
+            <div className="flex items-end gap-2 rounded-xl border border-gray-200 bg-white p-2 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200">
+              <label htmlFor="assistant-chat-input" className="sr-only">Assistant message</label>
+              <textarea
+                id="assistant-chat-input"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault()
+                    sendMessage()
+                  }
+                }}
+                rows={2}
+                placeholder="Ask what to inspect next…"
+                className="max-h-40 min-h-[44px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-0"
+              />
+              {sending ? (
+                <button
+                  type="button"
+                  onClick={stopStreaming}
+                  className="mb-0.5 flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                >
+                  <span className="h-2.5 w-2.5 rounded-[2px] bg-gray-700" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => sendMessage()}
+                  disabled={!input.trim()}
+                  className="mb-0.5 shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition disabled:opacity-40"
+                >
+                  Send
+                </button>
+              )}
             </div>
+            <div className="mt-1.5 px-1 text-[11px] text-gray-400">Ctrl+Enter to send · chat cannot perform side effects</div>
           </div>
         </div>
 
-        <aside className="space-y-3 rounded-md border border-gray-100 bg-gray-50 p-3">
-          <div className="rounded-md border border-brand-100 bg-white p-4">
-            <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Current context</div>
+        <aside className="h-[calc(100vh-180px)] min-h-[560px] space-y-3 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="rounded-lg border border-brand-100 bg-white p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Where you are</div>
             <div className="mt-2 text-sm font-medium leading-6 text-gray-900">{contextSummary(context)}</div>
+            <p className="mt-1 text-[11px] leading-4 text-gray-400">The assistant uses this page context to ground its answers.</p>
             <div className="mt-3 grid gap-2">
               {facts.map((fact) => (
                 <FactBadge key={`${fact.label}-${fact.value}`} label={fact.label} value={fact.value} />
@@ -1560,66 +1758,34 @@ function TaskCenteredAssistantPanel({
             </div>
           </div>
 
-          <details className="rounded-md border border-gray-100 bg-white">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <span>Suggested next steps</span>
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">{actionCards.length}</span>
-            </summary>
-            <div className="space-y-2 border-t border-gray-100 p-3">
-              {actionCards.map((action) => (
-                <div key={action.title} className="rounded-md border border-gray-100 bg-gray-50 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">{action.title}</div>
-                      <div className="mt-1 text-xs leading-5 text-gray-500">{action.description}</div>
-                    </div>
-                    <StatusPill tone={action.kind === 'read' ? 'ready' : action.kind === 'link' ? 'neutral' : 'planned'}>
-                      {action.kind === 'read' ? 'platform fact' : action.kind === 'link' ? 'open page' : 'proposal'}
-                    </StatusPill>
-                  </div>
-                  <div className="mt-3">
-                    {action.kind === 'read' && context.selected_job != null ? (
-                      <button
-                        type="button"
-                        onClick={inspectCurrentResult}
-                        disabled={inspecting}
-                        className="rounded-md border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50"
-                      >
-                        {inspecting ? 'Inspecting...' : 'Run read-only inspection'}
-                      </button>
-                    ) : action.path ? (
-                      <Link
-                        to={action.path}
-                        className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Open
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => useSuggestedAction(action.title)}
-                        className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Ask
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+          {context.selected_job != null && (
+            <button
+              type="button"
+              onClick={inspectCurrentResult}
+              disabled={inspecting}
+              className="w-full rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-left text-sm font-medium text-brand-700 transition hover:bg-brand-100 disabled:opacity-50"
+            >
+              {inspecting ? 'Inspecting…' : `Inspect current result (Job #${context.selected_job})`}
+            </button>
+          )}
+
+          {resolvedNote && (
+            <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-700">
+              {resolvedNote}
             </div>
-          </details>
+          )}
 
           {proposals.length > 0 && (
-            <section className="rounded-md border border-blue-100 bg-white">
+            <section className="rounded-lg border border-blue-200 bg-white">
               <div className="flex items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-blue-700">
-                <span>Assistant proposals</span>
+                <span>Actions awaiting your review</span>
                 <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">{proposals.length}</span>
               </div>
               <div className="space-y-2 border-t border-blue-50 p-3">
                 <p className="text-xs leading-5 text-gray-500">
-                  Reviewable platform actions from the latest reply. Assistant text cannot create experiments or queue simulations until you preview and confirm here.
+                  The assistant proposed these. Nothing runs until you preview and confirm — read-only inspections run on click; experiments and simulations ask again before executing.
                 </p>
-                {proposals.map((proposal) => (
+                {proposals.slice(0, 5).map((proposal) => (
                   <AssistantProposalCard
                     key={proposal.id}
                     proposal={proposal}
@@ -1627,20 +1793,59 @@ function TaskCenteredAssistantPanel({
                     conversationId={activeConversation?.id ?? null}
                     busy={inspecting}
                     onRunReadOnly={runReadOnlyProposal}
+                    onResolved={handleProposalResolved}
                   />
                 ))}
+                {proposals.length > 5 && (
+                  <div className="rounded-md border border-dashed border-blue-200 bg-blue-50/40 px-3 py-2 text-xs text-blue-700">
+                    +{proposals.length - 5} more proposed action{proposals.length - 5 === 1 ? '' : 's'} — refine your request to narrow these down.
+                  </div>
+                )}
               </div>
             </section>
           )}
 
-          <details className="rounded-md border border-gray-100 bg-white">
+          {memory && (memory.summary || memory.remembered_genes.length > 0) && (
+            <details className="rounded-lg border border-gray-200 bg-white" open>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <span>What the assistant remembers</span>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    clearMemory()
+                  }}
+                  className="rounded border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              </summary>
+              <div className="space-y-2 border-t border-gray-100 p-3">
+                {memory.summary && (
+                  <p className="break-words text-xs leading-5 text-gray-600">{memory.summary}</p>
+                )}
+                {memory.remembered_genes.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {memory.remembered_genes.map((gene) => (
+                      <span key={gene} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600">{gene}</span>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[11px] leading-4 text-gray-400">
+                  Older turns are compacted into this summary so long chats keep context. Clearing forgets it.
+                </p>
+              </div>
+            </details>
+          )}
+
+          <details className="rounded-lg border border-gray-200 bg-white">
             <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Trust boundary
+              What the labels mean
             </summary>
             <div className="space-y-2 border-t border-gray-100 p-3 text-xs leading-5 text-gray-600">
-              <div><span className="font-semibold text-gray-900">Platform fact:</span> fetched from deterministic app data or a read-only adapter.</div>
-              <div><span className="font-semibold text-gray-900">Assistant interpretation:</span> model-generated explanation that should cite platform facts.</div>
-              <div><span className="font-semibold text-gray-900">Proposed action:</span> never executed from text alone.</div>
+              <div><span className="font-semibold text-gray-900">Platform fact</span> — read straight from the app's data or a read-only tool. Trustworthy.</div>
+              <div><span className="font-semibold text-gray-900">Assistant reply</span> — the model's explanation; it should cite the facts above.</div>
+              <div><span className="font-semibold text-gray-900">Proposed action</span> — a reviewable card. Never runs from chat text alone.</div>
             </div>
           </details>
         </aside>
@@ -1773,7 +1978,7 @@ function AssistantAuditPanel({ activeConversationId }: { activeConversationId: n
                     {confirmation.status.replace(/_/g, ' ')}
                   </StatusPill>
                 </div>
-                <div className="mt-2 font-mono text-gray-500">{compactJson(confirmation.payload)}</div>
+                <div className="mt-2 break-all font-mono text-gray-500">{compactJson(confirmation.payload)}</div>
                 <div className="mt-2 text-gray-400">{formatDateTime(confirmation.created_at)}</div>
               </div>
             ))}
@@ -1802,7 +2007,7 @@ function AssistantAuditPanel({ activeConversationId }: { activeConversationId: n
                     {toolCall.status.replace(/_/g, ' ')}
                   </StatusPill>
                 </div>
-                <div className="mt-2 font-mono text-gray-500">{compactJson(toolCall.arguments)}</div>
+                <div className="mt-2 break-all font-mono text-gray-500">{compactJson(toolCall.arguments)}</div>
                 <div className="mt-2 text-gray-400">{formatDateTime(toolCall.updated_at || toolCall.created_at)}</div>
               </div>
             ))}
@@ -1832,7 +2037,7 @@ function AssistantAuditPanel({ activeConversationId }: { activeConversationId: n
                 <div className="mt-2 text-gray-500">
                   Hash <span className="font-mono">{record.prompt_hash.slice(0, 12)}</span>
                 </div>
-                <div className="mt-2 font-mono text-gray-500">{compactJson(record.response)}</div>
+                <div className="mt-2 break-all font-mono text-gray-500">{compactJson(record.response)}</div>
                 <div className="mt-2 text-gray-400">{formatDateTime(record.created_at)}</div>
               </div>
             ))}
@@ -1891,6 +2096,15 @@ export function AssistantPage() {
 
   const configuredProviders = status?.providers.configured_provider_count ?? 0
   const runtimeReady = Boolean(status?.providers.runtime_ready)
+
+  // Pre-warm a local model (Ollama/LM Studio/vLLM) once it's the active runtime, so the
+  // first question doesn't pay the cold-load cost. Fire-and-forget; hosted providers are a no-op.
+  const activeRuntime = status?.providers.active_runtime_provider_id
+  useEffect(() => {
+    if (!runtimeReady) return
+    if (!['ollama', 'lm_studio', 'vllm'].includes(activeRuntime ?? '')) return
+    warmAssistantProvider().catch(() => {})
+  }, [runtimeReady, activeRuntime])
   const toolCount = status?.assistant.tool_registry.length ?? 0
 
   return (
@@ -1943,31 +2157,21 @@ export function AssistantPage() {
         onConversationChange={setActiveConversationId}
       />
 
-      {runtimeReady && (
-        <details className="rounded-lg border border-gray-200 bg-white shadow-sm">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold text-gray-900">
-          <span>Provider setup</span>
-          <span className="text-xs font-normal text-gray-500">
-            {status?.providers.active_runtime_provider_id} ({status?.providers.active_runtime_model})
-          </span>
-        </summary>
-        <div className="border-t border-gray-100 p-4">
-          <AssistantProviderSetup
-            configs={providerConfigs}
-            runtimeStatus={status}
-            loading={statusLoading}
-            onRefresh={refreshAssistantStatus}
-          />
-        </div>
-      </details>
-      )}
-
       <AdvancedDisclosure title="Provider, runtime, and tool settings">
+        {runtimeReady && (
+          <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
+            <AssistantProviderSetup
+              configs={providerConfigs}
+              runtimeStatus={status}
+              loading={statusLoading}
+              onRefresh={refreshAssistantStatus}
+            />
+          </div>
+        )}
         <div className="grid gap-4 lg:grid-cols-2">
           <Card title="Local-first runtime">
-            <p className="text-sm leading-6 text-gray-600">
-              The platform should start and run locally through Docker without a hosted backend or paid platform account. Optional
-              artifact bootstrap can later download prepared data, seed databases, or precomputed examples.
+            <p className="text-xs leading-5 text-gray-500">
+              Runs locally through Docker — no hosted backend or paid account required.
             </p>
             <div className="mt-4 grid gap-2 text-sm">
               <div className="flex justify-between gap-4">
@@ -1991,11 +2195,10 @@ export function AssistantPage() {
           </Card>
 
           <Card title="BYOK and local model providers">
-            <p className="text-sm leading-6 text-gray-600">
-              The app must remain usable without an LLM. Provider configuration should be explicit, local-first, and separate from
-              the scientific assistant behavior.
+            <p className="text-xs leading-5 text-gray-500">
+              Bring your own API key, or point at a local endpoint. The app stays usable with no LLM.
             </p>
-            <div className="mt-4 rounded-md border border-gray-100 px-3">
+            <div className="mt-3 rounded-md border border-gray-100 px-3">
               {(status?.providers.providers ?? []).map((provider) => (
                 <ProviderRow key={provider.provider_id} provider={provider} />
               ))}
@@ -2020,11 +2223,10 @@ export function AssistantPage() {
           </Card>
 
           <Card title="Typed assistant harness">
-            <p className="text-sm leading-6 text-gray-600">
-              The assistant receives validated page context and returns messages, records, proposals, links, and pending confirmations.
-              It does not receive direct database, filesystem, Docker, shell, or Python access.
+            <p className="text-xs leading-5 text-gray-500">
+              Gets validated page context only — no direct database, filesystem, Docker, shell, or Python access.
             </p>
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap gap-2">
               {(status?.assistant.context_contract ?? ['route', 'selected_gene', 'selected_experiment', 'selected_job']).map((item) => (
                 <StatusPill key={item}>{item}</StatusPill>
               ))}
@@ -2062,11 +2264,10 @@ export function AssistantPage() {
           </Card>
 
           <Card title="Registered tools">
-            <p className="text-sm leading-6 text-gray-600">
-              Tools are typed contracts. Dry-run previews validate arguments and local references. Read-only result inspection can
-              execute now; side effects require explicit confirmation.
+            <p className="text-xs leading-5 text-gray-500">
+              Typed contracts with dry-run previews. Read-only tools run on click; side effects need confirmation.
             </p>
-            <div className="mt-4 rounded-md border border-gray-100 px-3">
+            <div className="mt-3 rounded-md border border-gray-100 px-3">
               {(status?.assistant.tool_registry ?? []).map((tool) => (
                 <ToolRow key={tool.name} tool={tool} />
               ))}

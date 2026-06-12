@@ -592,6 +592,114 @@ export async function createAssistantMessage(
   })
 }
 
+export async function dismissAssistantToolCall(
+  toolCallId: number,
+  status: 'executed' | 'rejected' = 'rejected',
+): Promise<AssistantToolCall> {
+  return fetchJSON(`/assistant/tool-calls/${toolCallId}/dismiss?status=${status}`, { method: 'POST' })
+}
+
+export interface AssistantMemory {
+  conversation_id: number
+  summary: string
+  covered_up_to_message_id: number
+  remembered_genes: string[]
+  pending_confirmations: { id: number; action: string; status: string }[]
+  recent_unresolved_questions: string[]
+}
+
+export async function getAssistantMemory(conversationId: number): Promise<AssistantMemory> {
+  return fetchJSON(`/assistant/conversations/${conversationId}/memory`)
+}
+
+export async function clearAssistantMemory(conversationId: number): Promise<{ cleared: boolean }> {
+  return fetchJSON(`/assistant/conversations/${conversationId}/memory`, { method: 'DELETE' })
+}
+
+export async function warmAssistantProvider(): Promise<{
+  warmed: boolean
+  reason?: string
+  provider_id?: string
+  model?: string
+  error?: string
+}> {
+  return fetchJSON('/assistant/providers/warm', { method: 'POST' })
+}
+
+export interface AssistantStreamHandlers {
+  onUser?: (message: AssistantMessage) => void
+  onDelta?: (text: string) => void
+  onStatus?: (tool: string) => void
+  onDone?: (payload: {
+    conversation: AssistantConversation
+    user_message: AssistantMessage
+    assistant_message: AssistantMessage
+    proposals: AssistantToolCall[]
+  }) => void
+  onError?: (message: string) => void
+}
+
+/**
+ * Stream an assistant turn over SSE. Calls handlers as token deltas, tool-status,
+ * and the terminal done event arrive. Resolves when the stream closes.
+ */
+export async function streamAssistantMessage(
+  conversationId: number,
+  data: { content: string; context: AssistantContext },
+  handlers: AssistantStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${BASE}/assistant/conversations/${conversationId}/messages/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    throw new Error(`API error ${res.status}: ${await res.text().catch(() => '')}`)
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let boundary: number
+    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      const dataLine = chunk.split('\n').find((line) => line.startsWith('data:'))
+      if (!dataLine) continue
+      let event: { type?: string; [k: string]: unknown }
+      try {
+        event = JSON.parse(dataLine.slice(5).trim())
+      } catch {
+        continue
+      }
+      switch (event.type) {
+        case 'user':
+          handlers.onUser?.(event.message as AssistantMessage)
+          break
+        case 'delta':
+          handlers.onDelta?.(event.text as string)
+          break
+        case 'status':
+          handlers.onStatus?.(event.tool as string)
+          break
+        case 'done':
+          handlers.onDone?.(event as never)
+          break
+        case 'error':
+          handlers.onError?.(event.message as string)
+          break
+        default:
+          break
+      }
+    }
+  }
+}
+
 export async function createAssistantConfirmation(data: {
   action: string
   payload: Record<string, unknown>

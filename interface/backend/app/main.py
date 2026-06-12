@@ -133,6 +133,27 @@ def _run_migrations(engine):
                 )
                 conn.commit()
 
+        # Migration 7: Assistant confirmation nonce + expiry (replay/staleness protection).
+        cur.execute("PRAGMA table_info(assistant_confirmations)")
+        conf_cols = {row[1] for row in cur.fetchall()}
+        if conf_cols:  # table exists
+            if "nonce" not in conf_cols:
+                logger.info("Migration: adding 'nonce' column to assistant_confirmations")
+                cur.execute("ALTER TABLE assistant_confirmations ADD COLUMN nonce TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+            if "expires_at" not in conf_cols:
+                logger.info("Migration: adding 'expires_at' column to assistant_confirmations")
+                cur.execute("ALTER TABLE assistant_confirmations ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+
+        # Migration 8: Assistant provider secret encryption flag.
+        cur.execute("PRAGMA table_info(assistant_provider_configs)")
+        prov_cols = {row[1] for row in cur.fetchall()}
+        if prov_cols and "secret_encrypted" not in prov_cols:
+            logger.info("Migration: adding 'secret_encrypted' column to assistant_provider_configs")
+            cur.execute("ALTER TABLE assistant_provider_configs ADD COLUMN secret_encrypted INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+
     except Exception as exc:
         logger.warning("Migration check failed: %s", exc)
     finally:

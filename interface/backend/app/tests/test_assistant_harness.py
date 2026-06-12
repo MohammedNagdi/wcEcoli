@@ -11,6 +11,7 @@ from app.db.models import (
     Gene,
     SimulationJob,
     SimulationResult,
+    TFEdge,
     Variant,
 )
 from app.services.assistant_runtime import generate_assistant_runtime_reply
@@ -71,7 +72,11 @@ def test_assistant_status_exposes_provider_and_tool_contracts_without_execution(
     assert status.tool_execution_enabled is True
     assert status.tool_preview_enabled is True
     assert status.side_effect_execution_enabled is True
-    assert status.execution_enabled_tools == ["inspect_result", "inspect_gene", "create_experiment", "run_simulation"]
+    assert set(status.execution_enabled_tools) >= {
+        "inspect_result", "inspect_gene", "gene_catalog", "inspect_tf_network",
+        "list_conditions", "list_experiments", "inspect_experiment",
+        "inspect_molecule_trajectories", "create_experiment", "run_simulation",
+    }
     assert status.db_persistence_enabled is True
     assert "route" in status.context_contract
     tool_names = {tool.name for tool in status.tool_registry}
@@ -676,7 +681,12 @@ def test_persisted_provider_config_overrides_environment_selection():
         assert providers.selected_provider_id == "openai"
         assert providers.runtime_ready is True
         assert providers.active_runtime_model == "stored-model"
-        assert session.exec(select(AssistantProviderConfig)).one().secret_value == "stored-key"
+        # Secret is encrypted at rest, not stored in cleartext, but decrypts back to the original.
+        stored = session.exec(select(AssistantProviderConfig)).one()
+        assert stored.secret_value != "stored-key"
+        assert stored.secret_encrypted is True
+        from app.services.assistant_secrets import decrypt_secret
+        assert decrypt_secret(stored.secret_value) == "stored-key"
 
         result = generate_assistant_runtime_reply(
             "Use stored provider.",
@@ -1065,5 +1075,622 @@ def test_run_simulation_execution_requires_approved_matching_confirmation_and_qu
         jobs = session.exec(select(SimulationJob)).all()
         assert len(jobs) == 1
     finally:
+        session.close()
+        engine.dispose()
+
+
+def test_agent_loop_executes_read_only_tool_and_feeds_result_back():
+    """Native tool-use loop: model calls inspect_gene, loop runs it, model answers from the result."""
+    from app.services.assistant_agent import generate_assistant_agent_reply
+
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_transport(url, headers, payload, timeout):
+        calls.append({"payload": payload})
+        if len(calls) == 1:
+            return {
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "inspect_gene", "arguments": '{"gene": "alaA"}'},
+                        }],
+                    },
+                }]
+            }
+        return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "alaA is mechanistic."}}]}
+
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_model = ""
+        settings.openai_api_key = ""
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="alaA", ko_index=7, is_mechanistic=True))
+        session.commit()
+        upsert_provider_config(
+            session,
+            "openai",
+            AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True),
+        )
+
+        result = generate_assistant_agent_reply(
+            "What is alaA?",
+            {"route": "/", "selected_gene": "alaA"},
+            session=session,
+            history=[],
+            conversation_id=None,
+            transport=fake_transport,
+        )
+
+        assert result.status == "completed"
+        assert result.content == "alaA is mechanistic."
+        # The loop made two calls: tool request, then the answer turn.
+        assert len(calls) == 2
+        # First request advertised native tools.
+        assert any(t["function"]["name"] == "inspect_gene" for t in calls[0]["payload"]["tools"])
+        # The read-only tool actually executed and its real result was threaded back.
+        assert [item["tool_name"] for item in result.executed_tools] == ["inspect_gene"]
+        assert result.pending_side_effects == []
+        tool_msg = calls[1]["payload"]["messages"][-1]
+        assert tool_msg["role"] == "tool"
+        assert "EG10001" in tool_msg["content"]
+    finally:
+        _restore_runtime_settings(snapshot)
+        session.close()
+        engine.dispose()
+
+
+def test_gene_catalog_adapter_counts_and_filters():
+    engine, session = _build_session()
+    try:
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", category="replication", ko_index=42, is_mechanistic=True, monomer_id="DNAA-MONOMER"))
+        session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", category="regulation", ko_index=84, monomer_id="CRP-MONOMER"))
+        session.add(Gene(id=3, ecoli_id="EG10003", symbol="fakeA", category="regulation", ko_index=0))
+        session.commit()
+
+        result = execute_tool(
+            session,
+            "gene_catalog",
+            AssistantToolExecutionRequest(arguments={"category": "regulation"}),
+        )
+        assert result.executed is True
+        assert result.result["totals"]["genes"] == 3
+        assert result.result["totals"]["knockout_ready"] == 2
+        assert result.result["totals"]["mechanistic"] == 1
+        assert result.result["matched_count"] == 2
+        assert {g["symbol"] for g in result.result["genes"]} == {"crp", "fakeA"}
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_inspect_tf_network_adapter_returns_regulators_and_targets():
+    engine, session = _build_session()
+    try:
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="crp", ko_index=84))
+        session.add(TFEdge(tf_symbol="crp", target_symbol="lacZ", log2fc_mean=1.5, regulation_direct="+"))
+        session.add(TFEdge(tf_symbol="fis", target_symbol="crp", log2fc_mean=-0.8, regulation_direct="-"))
+        session.commit()
+
+        result = execute_tool(
+            session,
+            "inspect_tf_network",
+            AssistantToolExecutionRequest(arguments={"gene": "crp"}),
+        )
+        assert result.executed is True
+        assert result.result["is_transcription_factor"] is True
+        assert [t["target"] for t in result.result["targets"]] == ["lacZ"]
+        assert [r["regulator"] for r in result.result["regulators"]] == ["fis"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_agent_recovers_text_embedded_tool_call_from_weak_model():
+    """Models that emit a tool call as a fenced JSON block (not structured tool_calls) still execute,
+    and the raw JSON never leaks into the displayed answer."""
+    from app.services.assistant_agent import generate_assistant_agent_reply
+
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_transport(url, headers, payload, timeout):
+        calls.append({"payload": payload})
+        if len(calls) == 1:
+            # Weak model: tool call appears in content, NOT in tool_calls.
+            return {"choices": [{"finish_reason": "stop", "message": {
+                "role": "assistant",
+                "content": "Let me check the genes table.\n```json\n{\"name\": \"gene_catalog\", \"arguments\": {}}\n```",
+            }}]}
+        return {"choices": [{"finish_reason": "stop", "message": {
+            "role": "assistant", "content": "The platform supports 2 genes."}}]}
+
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_model = ""
+        settings.openai_api_key = ""
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
+        session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", ko_index=84))
+        session.commit()
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+
+        result = generate_assistant_agent_reply(
+            "How many genes are supported?",
+            {"route": "/"},
+            session=session,
+            history=[],
+            conversation_id=None,
+            transport=fake_transport,
+        )
+
+        assert result.status == "completed"
+        # The text-embedded call was recovered and executed.
+        assert [item["tool_name"] for item in result.executed_tools] == ["gene_catalog"]
+        # Raw JSON tool call must not leak into the answer.
+        assert '"name"' not in result.content
+        assert "gene_catalog" not in result.content
+        assert result.content == "The platform supports 2 genes."
+        # The recovered call was threaded back as a real tool result.
+        tool_msg = calls[1]["payload"]["messages"][-1]
+        assert tool_msg["role"] == "tool"
+        assert '"genes": 2' in tool_msg["content"] or '"genes":2' in tool_msg["content"]
+    finally:
+        _restore_runtime_settings(snapshot)
+        session.close()
+        engine.dispose()
+
+
+def test_streaming_agent_emits_deltas_and_runs_tool():
+    """SSE path: assemble a streamed tool call, run it, then stream the answer tokens."""
+    from app.services.assistant_stream import stream_assistant_agent_events
+
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    calls: list[int] = []
+
+    def fake_stream_transport(url, headers, payload, timeout):
+        calls.append(1)
+        if len(calls) == 1:
+            return iter([
+                'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"gene_catalog","arguments":""}}]}}]}',
+                'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}',
+                'data: {"choices":[{"finish_reason":"tool_calls","delta":{}}]}',
+                'data: [DONE]',
+            ])
+        return iter([
+            'data: {"choices":[{"delta":{"content":"The platform "}}]}',
+            'data: {"choices":[{"delta":{"content":"supports 2 genes."}}]}',
+            'data: {"choices":[{"finish_reason":"stop","delta":{}}]}',
+            'data: [DONE]',
+        ])
+
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_model = ""
+        settings.openai_api_key = ""
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
+        session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", ko_index=84))
+        session.commit()
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+
+        events = list(stream_assistant_agent_events(
+            "How many genes are supported?",
+            {"route": "/"},
+            session=session,
+            history=[],
+            conversation_id=None,
+            stream_transport=fake_stream_transport,
+        ))
+
+        deltas = "".join(e["text"] for e in events if e.get("type") == "delta")
+        statuses = [e["tool"] for e in events if e.get("type") == "status"]
+        result = next(e["result"] for e in events if e.get("type") == "result")
+
+        assert deltas == "The platform supports 2 genes."
+        assert statuses == ["gene_catalog"]
+        assert result["status"] == "completed"
+        assert result["content"] == "The platform supports 2 genes."
+        assert [item["tool_name"] for item in result["executed_tools"]] == ["gene_catalog"]
+    finally:
+        _restore_runtime_settings(snapshot)
+        session.close()
+        engine.dispose()
+
+
+def test_compaction_summarizes_old_turns_and_pack_surfaces_it():
+    """Model-based compaction folds old turns into a rolling summary; the pack then surfaces it
+    and excludes the covered messages from the verbatim window."""
+    from app.services.assistant_agent import compact_conversation
+    from app.services.assistant_harness import AssistantConversationCreate, get_conversation_summary
+
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_keep_recent_turns": settings.assistant_keep_recent_turns,
+        "assistant_compact_threshold": settings.assistant_compact_threshold,
+    }
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_keep_recent_turns = 4
+        settings.assistant_compact_threshold = 3
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+
+        conversation = create_conversation(session, AssistantConversationCreate(title="c"))
+        ctx = AssistantContext()
+        for i in range(12):
+            store_message(session, conversation, "user", f"user turn {i} about dnaA", ctx)
+            store_message(session, conversation, "assistant", f"assistant reply {i}", ctx)
+
+        def fake_transport(url, headers, payload, timeout):
+            # It used a cheap summary model and was given the old transcript.
+            assert payload["model"] == "gpt-4.1-mini"
+            return {"choices": [{"message": {"content": "User is studying dnaA across several turns."}}]}
+
+        result = compact_conversation(session, conversation.id or 0, transport=fake_transport)
+        assert result["compacted"] is True
+        assert result["summarized"] > 0
+
+        summary = get_conversation_summary(session, conversation.id or 0)
+        assert summary is not None
+        assert "dnaA" in summary.content
+
+        pack = assistant_conversation_context_pack(session, conversation_id=conversation.id or 0)
+        assert pack["earlier_context"]["summary"] == "User is studying dnaA across several turns."
+        # Covered (old) messages are no longer in the verbatim window.
+        assert pack["message_count"] <= settings.assistant_keep_recent_turns + 1
+    finally:
+        for key, value in snapshot.items():
+            setattr(settings, key, value)
+        session.close()
+        engine.dispose()
+
+
+def test_context_pack_budgets_long_history_and_digests_the_rest():
+    engine, session = _build_session()
+    try:
+        from app.services.assistant_harness import AssistantConversationCreate
+
+        conversation = create_conversation(session, AssistantConversationCreate(title="long"))
+        ctx = AssistantContext()
+        store_message(session, conversation, "user", "First question about dnaA growth.", ctx)
+        # Many long turns that blow past the char budget.
+        for i in range(20):
+            store_message(session, conversation, "assistant", ("X" * 1500) + f" turn {i}", ctx)
+        current = store_message(session, conversation, "user", "And now?", ctx)
+
+        pack = assistant_conversation_context_pack(
+            session, conversation_id=conversation.id or 0, current_message_id=current.id, char_budget=6000,
+        )
+        assert pack["message_count"] < 21  # budget trimmed the history
+        assert pack["earlier_context"] is not None
+        assert pack["earlier_context"]["omitted_message_count"] > 0
+        assert "dnaA" in pack["earlier_context"]["note"]  # the opening turn is preserved in the digest
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_resolving_a_proposal_clears_it_from_the_awaiting_list():
+    """Approving (execute) or rejecting a side-effect proposal must move its card out of 'proposed'."""
+    from app.services.assistant_harness import _record_tool_call
+
+    engine, session = _build_session()
+    try:
+        session.add(Condition(name="basal", nutrients="minimal"))
+        session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="alaA", ko_index=7))
+        session.commit()
+
+        args = {
+            "name": "alaA knockout", "description": "", "variant_type": "gene_knockout",
+            "variant_index": 7, "condition": "basal", "timeline": "", "sim_params": {},
+            "gene_symbol": "alaA", "gene_symbols": [], "include_wildtype": False,
+        }
+        normalized = preview_tool(session, "create_experiment", AssistantToolPreviewRequest(arguments=args)).normalized_arguments
+
+        # Approve + execute path.
+        proposal = _record_tool_call(session, conversation_id=None, tool_name="create_experiment",
+                                     status="proposed", arguments=normalized, result={"title": "draft"})
+        confirmation = create_confirmation(session, ConfirmationCreate(
+            action="create_experiment", payload=normalized, tool_call_id=proposal.id))
+        resolve_confirmation(session, confirmation, ConfirmationResolve(status="approved"))
+        outcome = execute_tool(session, "create_experiment", AssistantToolExecutionRequest(
+            arguments=args, confirmation_id=confirmation.id))
+        assert outcome.executed is True
+        assert session.get(AssistantToolCall, proposal.id).status == "executed"
+
+        # Reject path.
+        proposal2 = _record_tool_call(session, conversation_id=None, tool_name="create_experiment",
+                                      status="proposed", arguments=normalized, result={"title": "draft"})
+        confirmation2 = create_confirmation(session, ConfirmationCreate(
+            action="create_experiment", payload=normalized, tool_call_id=proposal2.id))
+        resolve_confirmation(session, confirmation2, ConfirmationResolve(status="rejected"))
+        assert session.get(AssistantToolCall, proposal2.id).status == "rejected"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_create_experiment_auto_resolves_variant_index_from_gene():
+    """The model often omits variant_index; for a gene_knockout it is filled from the gene's ko_index
+    so the proposal is valid (and surfaced) instead of being dropped."""
+    engine, session = _build_session()
+    try:
+        session.add(Condition(name="glc_20mM", nutrients="minimal + glucose"))
+        session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
+        session.add(Gene(id=1, ecoli_id="EG11001", symbol="thiS", ko_index=931))
+        session.commit()
+
+        preview = preview_tool(session, "create_experiment", AssistantToolPreviewRequest(arguments={
+            "variant_type": "gene_knockout", "condition": "glc_20mM", "gene_symbol": "thiS",
+            "include_wildtype": False,  # variant_index intentionally omitted
+        }))
+        assert preview.valid is True
+        assert preview.normalized_arguments["variant_index"] == 931
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_reconcile_claim_contradicts_false_success():
+    from app.services.assistant_agent import _reconcile_claim
+
+    # Claims success but produced no card and had an invalid attempt -> correction appended.
+    out = _reconcile_claim("I have prepared this experiment for review.", pending=[], issues=["create_experiment: Missing 'variant_index'"])
+    assert "no action card was actually created" in out.lower()
+    assert "variant_index" in out
+    # A real pending action is left untouched.
+    from app.services.assistant_agent import PendingSideEffect
+    kept = _reconcile_claim("I've prepared it.", pending=[PendingSideEffect(tool_name="create_experiment")], issues=[])
+    assert kept == "I've prepared it."
+    # A plain answer with no claim is untouched.
+    assert _reconcile_claim("There are 4749 genes.", pending=[], issues=[]) == "There are 4749 genes."
+
+
+def test_permission_tiers_are_assigned_and_policy_exposed():
+    from app.services.assistant_harness import PERMISSION_POLICY, get_tool_registry
+
+    tiers = {spec.name: spec.permission_tier for spec in get_tool_registry()}
+    assert tiers["inspect_gene"] == "read_only"
+    assert tiers["create_experiment"] == "draft"
+    assert tiers["run_simulation"] == "queue"
+    assert tiers["publish_environment_builder_artifact"] == "publish_destructive"
+    assert PERMISSION_POLICY["read_only"]["requires_confirmation"] is False
+    assert PERMISSION_POLICY["queue"]["requires_confirmation"] is True
+    assert get_assistant_harness_status().permission_policy == PERMISSION_POLICY
+
+
+def test_secret_at_rest_round_trips_and_tamper_is_detected():
+    from app.services.assistant_secrets import decrypt_secret, encrypt_secret
+
+    token = encrypt_secret("sk-test-123")
+    assert token.startswith("enc:v1:")
+    assert "sk-test-123" not in token
+    assert decrypt_secret(token) == "sk-test-123"
+    assert decrypt_secret("") == ""
+    assert decrypt_secret("legacy-plaintext") == "legacy-plaintext"  # tolerates pre-encryption values
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        decrypt_secret(token[:-4] + "AAAA")  # corrupted tag
+
+
+def test_expired_confirmation_blocks_execution():
+    engine, session = _build_session()
+    try:
+        session.add(Condition(name="basal", nutrients="minimal"))
+        session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="alaA", ko_index=7))
+        session.commit()
+
+        args = {"variant_type": "gene_knockout", "variant_index": 7, "condition": "basal", "gene_symbol": "alaA", "sim_params": {}}
+        normalized = preview_tool(session, "create_experiment", AssistantToolPreviewRequest(arguments=args)).normalized_arguments
+        confirmation = create_confirmation(session, ConfirmationCreate(action="create_experiment", payload=normalized))
+        resolve_confirmation(session, confirmation, ConfirmationResolve(status="approved"))
+        # Force expiry into the past.
+        confirmation.expires_at = "2000-01-01T00:00:00+00:00"
+        session.add(confirmation)
+        session.commit()
+
+        outcome = execute_tool(session, "create_experiment",
+                               AssistantToolExecutionRequest(arguments=args, confirmation_id=confirmation.id))
+        assert outcome.executed is False
+        assert any("expired" in err.lower() for err in outcome.errors)
+        assert session.exec(select(Experiment)).all() == []
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_create_experiment_normalized_args_re_preview_as_valid():
+    """A proposal stores normalized args (sim_params as a JSON string); re-previewing them — which the
+    confirm flow does — must stay valid instead of failing 'sim_params must be an object'."""
+    engine, session = _build_session()
+    try:
+        session.add(Condition(name="glc_20mM", nutrients="minimal + glucose"))
+        session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="yaaA", ko_index=3))
+        session.commit()
+
+        args = {
+            "variant_type": "gene_knockout", "variant_index": 3, "condition": "glc_20mM",
+            "gene_symbol": "yaaA", "sim_params": {"generations": 1},
+        }
+        first = preview_tool(session, "create_experiment", AssistantToolPreviewRequest(arguments=args))
+        assert first.valid is True
+        assert isinstance(first.normalized_arguments["sim_params"], str)  # stored as JSON string
+
+        # Re-preview the *normalized* args (what the proposal card / confirm flow replays).
+        second = preview_tool(session, "create_experiment",
+                              AssistantToolPreviewRequest(arguments=first.normalized_arguments))
+        assert second.valid is True
+        assert second.errors == []
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_supersede_open_proposals_retires_prior_cards():
+    from app.services.assistant_harness import _record_tool_call, supersede_open_proposals
+
+    engine, session = _build_session()
+    try:
+        a = _record_tool_call(session, conversation_id=7, tool_name="create_experiment",
+                              status="proposed", arguments={}, result={})
+        b = _record_tool_call(session, conversation_id=7, tool_name="inspect_gene",
+                              status="proposed", arguments={}, result={})
+        other = _record_tool_call(session, conversation_id=99, tool_name="inspect_gene",
+                                  status="proposed", arguments={}, result={})
+        retired = supersede_open_proposals(session, 7)
+        assert retired == 2
+        assert session.get(AssistantToolCall, a.id).status == "superseded"
+        assert session.get(AssistantToolCall, b.id).status == "superseded"
+        assert session.get(AssistantToolCall, other.id).status == "proposed"  # other conversation untouched
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_invalid_side_effect_is_not_surfaced_as_a_card():
+    """A create_experiment with a bogus variant_type must not become a confirmation card."""
+    from app.services.assistant_agent import _run_tool_call, NormalizedToolCall, PendingSideEffect
+
+    engine, session = _build_session()
+    try:
+        session.add(Condition(name="basal", nutrients="minimal"))
+        session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="alaA", ko_index=7))
+        session.commit()
+
+        pending: list[PendingSideEffect] = []
+        executed: list = []
+        call = NormalizedToolCall(id="c1", name="create_experiment", input={
+            "variant_type": "mutation", "variant_index": 1, "condition": "basal", "gene_symbol": "alaA",
+        })
+        result = _run_tool_call(
+            session, call=call, context=AssistantContext(), conversation_id=None, pending=pending, executed=executed,
+        )
+        assert pending == []  # invalid → no card
+        assert "invalid_arguments" in result["content"]
+        assert session.exec(select(Experiment)).all() == []
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_stream_fence_filter_suppresses_code_blocks():
+    from app.services.assistant_stream import _FenceFilter
+
+    f = _FenceFilter()
+    # Feed in awkward chunks that split the fence markers and the JSON.
+    shown = ""
+    for chunk in ["Here is the plan. ", "```js", "on\n{\"name\": \"x\"}", "\n``", "` Done."]:
+        shown += f.feed(chunk)
+    shown += f.flush()
+    assert "name" not in shown
+    assert "Here is the plan." in shown
+    assert "Done." in shown
+
+
+def test_platform_guide_adapter_describes_pages():
+    engine, session = _build_session()
+    try:
+        full = execute_tool(session, "platform_guide", AssistantToolExecutionRequest(arguments={}))
+        assert full.executed is True
+        assert full.result["page_count"] >= 10
+        one = execute_tool(session, "platform_guide", AssistantToolExecutionRequest(arguments={"page": "network"}))
+        assert one.executed is True
+        assert [p["name"] for p in one.result["pages"]] == ["Network"]
+        assert one.result["pages"][0]["route"] == "/network"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_agent_loop_surfaces_side_effect_tool_without_executing():
+    """create_experiment is never auto-run: it is surfaced as a pending confirmation card."""
+    from app.services.assistant_agent import generate_assistant_agent_reply
+
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_transport(url, headers, payload, timeout):
+        calls.append({"payload": payload})
+        if len(calls) == 1:
+            return {
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "create_experiment",
+                                "arguments": '{"variant_type": "gene_knockout", "variant_index": 7, "condition": "basal", "gene_symbol": "alaA"}',
+                            },
+                        }],
+                    },
+                }]
+            }
+        return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Prepared a draft for your review."}}]}
+
+    try:
+        settings.assistant_provider = ""
+        settings.assistant_model = ""
+        settings.openai_api_key = ""
+        session.add(Condition(name="basal", nutrients="minimal"))
+        session.add(Variant(name="gene_knockout", docstring="", filename="gene_knockout.py"))
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="alaA", ko_index=7))
+        session.commit()
+        upsert_provider_config(
+            session,
+            "openai",
+            AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True),
+        )
+
+        result = generate_assistant_agent_reply(
+            "Knock out alaA.",
+            {"route": "/", "selected_gene": "alaA"},
+            session=session,
+            history=[],
+            conversation_id=None,
+            transport=fake_transport,
+        )
+
+        assert result.status == "completed"
+        # No side effect executed; experiment table is untouched.
+        assert session.exec(select(Experiment)).all() == []
+        assert result.executed_tools == []
+        assert [p.tool_name for p in result.pending_side_effects] == ["create_experiment"]
+        # The model was told the action is pending, not done.
+        tool_msg = calls[1]["payload"]["messages"][-1]
+        assert tool_msg["role"] == "tool"
+        assert "pending_user_confirmation" in tool_msg["content"]
+    finally:
+        _restore_runtime_settings(snapshot)
         session.close()
         engine.dispose()
