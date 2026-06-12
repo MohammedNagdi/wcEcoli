@@ -472,18 +472,23 @@ def create_message_stream(
                 skip_keys={(record.tool_name, record.arguments_json) for record in proposals},
             )
         )
+        # Compact before `done` (only when it actually fires) so the UI can show an in-chat
+        # "summarized earlier turns" marker. The reply text already streamed via deltas, so the
+        # only perceptible cost is on the infrequent turns where a summary is actually written.
+        compacted = False
+        try:
+            compaction = compact_conversation(session, persisted_conversation_id)
+            compacted = bool(compaction.get("compacted"))
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
         yield _sse({
             "type": "done",
             "conversation": conversation_to_out(conversation_after).model_dump(),
             "user_message": message_to_out(user_message).model_dump(),
             "assistant_message": message_to_out(assistant_message).model_dump(),
             "proposals": [tool_call_to_out(record).model_dump() for record in proposals],
+            "compacted": compacted,
         })
-        # Compact after the answer is delivered so the user perceives no extra latency.
-        try:
-            compact_conversation(session, persisted_conversation_id)
-        except Exception:  # noqa: BLE001 — best-effort
-            pass
 
     return StreamingResponse(
         event_generator(),

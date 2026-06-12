@@ -1612,6 +1612,46 @@ def test_stream_fence_filter_suppresses_code_blocks():
     assert "Done." in shown
 
 
+def test_stream_fence_filter_suppresses_bare_json_object():
+    """llama3.1 emits tool calls as a *bare* (un-fenced) top-level object; hide it live but keep prose."""
+    from app.services.assistant_stream import _FenceFilter
+
+    f = _FenceFilter()
+    shown = ""
+    for chunk in ['Sure, preparing it. ', '{"name": "create_experiment", "para', 'meters": {"x": 1}}', ' All set.']:
+        shown += f.feed(chunk)
+    shown += f.flush()
+    assert "create_experiment" not in shown
+    assert '"name"' not in shown
+    assert "Sure, preparing it." in shown
+    assert "All set." in shown
+
+
+def test_stream_fence_filter_keeps_non_toolish_braces():
+    """A bare object that is NOT a tool call (no name/arguments key) is released verbatim."""
+    from app.services.assistant_stream import _FenceFilter
+
+    f = _FenceFilter()
+    shown = f.feed('The set {"a": 1, "b": 2} is shown.') + f.flush()
+    assert '{"a": 1, "b": 2}' in shown
+
+
+def test_lenient_recovery_handles_python_literals():
+    """Weak models emit Python literals (True/False/None) in JSON tool calls — recover anyway."""
+    from app.services.assistant_agent import _extract_text_tool_calls
+
+    text = (
+        'Preparing it. {"name": "create_experiment", "parameters": '
+        '{"gene_symbol": "manY", "include_wildtype": False, "variant_type": "gene_knockout", "variant_index": None}}'
+    )
+    cleaned, calls = _extract_text_tool_calls(text, {"create_experiment"}, prefix="call")
+    assert [c.name for c in calls] == ["create_experiment"]
+    assert calls[0].input["include_wildtype"] is False
+    assert calls[0].input["variant_index"] is None
+    assert "{" not in cleaned  # raw JSON stripped from the visible answer
+    assert "Preparing it." in cleaned
+
+
 def test_model_structure_adapter_reads_reconstruction():
     import tempfile
     from pathlib import Path as _Path

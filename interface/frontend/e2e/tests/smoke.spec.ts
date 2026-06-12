@@ -59,6 +59,24 @@ test.describe('Assistant smoke', () => {
     await expect(msg).not.toContainText('### Genes')
   })
 
+  test('does not mangle snake_case identifiers as italics', async ({ page }) => {
+    await mockAssistantApi(page, {
+      reply: 'Call create_experiment with variant_index and include_wildtype set correctly.',
+    })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('how do I make a knockout')
+    await page.getByTestId('assistant-send').click()
+
+    const msg = page.getByTestId('message-assistant')
+    await expect(msg).toBeVisible()
+    // Underscores must survive (GFM treats intraword `_` as literal), so the identifiers read intact
+    // and nothing between them gets italicized away.
+    await expect(msg).toContainText('create_experiment')
+    await expect(msg).toContainText('variant_index')
+    await expect(msg).toContainText('include_wildtype')
+    await expect(msg.locator('em')).toHaveCount(0)
+  })
+
   test('renders a GFM table', async ({ page }) => {
     await mockAssistantApi(page, {
       reply: 'Comparison:\n\n| Gene | KO index |\n|------|----------|\n| dnaA | 42 |\n| crp | 84 |',

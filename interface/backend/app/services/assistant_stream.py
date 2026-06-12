@@ -54,12 +54,19 @@ from app.services.assistant_agent import (
 
 
 class _FenceFilter:
-    """Suppress fenced code blocks from the *live* delta stream.
+    """Suppress raw tool-call JSON from the *live* delta stream.
 
-    Weak models still paste tool calls as ```json {...}``` blocks. The final persisted message
-    already strips those, but mid-stream the user would see raw JSON scroll by. This buffers across
-    chunk boundaries and drops anything inside triple-backtick fences from what is shown live.
+    Weak models paste tool calls either as ```json {...}``` fences *or* as a bare top-level
+    `{"name": ...}` object (llama3.1 does the latter). The final persisted message already strips
+    both, but mid-stream the user would see raw JSON scroll by. This buffers across chunk
+    boundaries and hides:
+      * anything inside triple-backtick fences, and
+      * a bare top-level brace object whose first key looks like a tool call
+        (``name``/``tool``/``tool_name``/``parameters``/``arguments``) — held until it balances,
+        then dropped if tool-like, otherwise released verbatim.
     """
+
+    _TOOLISH = ('"name"', '"tool"', '"tool_name"', '"parameters"', '"arguments"')
 
     def __init__(self) -> None:
         self.buffer = ""
@@ -68,27 +75,78 @@ class _FenceFilter:
     def feed(self, text: str) -> str:
         self.buffer += text
         out: list[str] = []
-        while True:
-            marker = self.buffer.find("```")
-            if marker == -1:
-                if self.in_fence:
+        while self.buffer:
+            if self.in_fence:
+                marker = self.buffer.find("```")
+                if marker == -1:
                     return "".join(out)
-                # Hold back the last 2 chars in case a fence marker is split across chunks.
+                self.in_fence = False
+                self.buffer = self.buffer[marker + 3 :]
+                continue
+
+            fence = self.buffer.find("```")
+            brace = self.buffer.find("{")
+            # No structural marker: emit, holding back a 2-char tail for a split ``` fence.
+            if fence == -1 and brace == -1:
                 if len(self.buffer) > 2:
                     out.append(self.buffer[:-2])
                     self.buffer = self.buffer[-2:]
                 return "".join(out)
-            segment = self.buffer[:marker]
-            if not self.in_fence:
-                out.append(segment)
-            self.in_fence = not self.in_fence
-            self.buffer = self.buffer[marker + 3 :]
+            # Whichever marker comes first decides the next mode.
+            if fence != -1 and (brace == -1 or fence <= brace):
+                out.append(self.buffer[:fence])
+                self.in_fence = True
+                self.buffer = self.buffer[fence + 3 :]
+                continue
+            # A bare '{' comes first. Decide whether it opens a tool-call object.
+            out.append(self.buffer[:brace])
+            rest = self.buffer[brace:]
+            decision = self._decide_brace_object(rest)
+            if decision == "incomplete":
+                self.buffer = rest  # hold the whole object until it balances
+                return "".join(out)
+            consumed, drop = decision
+            if not drop:
+                out.append(rest[:consumed])
+            self.buffer = rest[consumed:]
+        return "".join(out)
+
+    def _decide_brace_object(self, rest: str):
+        """Scan a bare object starting at rest[0]=='{'. Returns (consumed, drop) or 'incomplete'."""
+        depth = 0
+        in_str = False
+        escaped = False
+        for index, char in enumerate(rest):
+            if in_str:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_str = False
+                continue
+            if char == '"':
+                in_str = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    obj = rest[: index + 1]
+                    head = "".join(obj[1:80].split())  # first chars, whitespace-stripped
+                    drop = any(key in head for key in self._TOOLISH)
+                    return index + 1, drop
+        return "incomplete"
 
     def flush(self) -> str:
         if self.in_fence:
             return ""
+        # An unterminated bare object that never balanced: drop it if tool-like, else release.
         tail = self.buffer
         self.buffer = ""
+        stripped = tail.lstrip()
+        if stripped.startswith("{") and any(key in "".join(stripped.split())[:80] for key in self._TOOLISH):
+            return ""
         return tail
 
 

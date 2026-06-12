@@ -58,7 +58,7 @@ export function RuntimeSettingsCard() {
         Tune the agent loop, context window, timeouts, and compaction. Saved values override the environment and
         apply immediately.
       </p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {NUMBER_FIELDS.map((f) => (
           <label key={f.key} className="block">
             <span className="text-xs font-medium text-gray-700">{f.label}</span>

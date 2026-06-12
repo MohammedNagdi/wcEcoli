@@ -241,6 +241,9 @@ _STABLE_SYSTEM_PROMPT = (
     "not reuse a gene mentioned earlier unless the user refers to it.\n"
     "- Make tool calls via the tool interface only. NEVER paste a tool call as a JSON code block in your reply, "
     "and do not show raw arguments — the platform renders the confirmation card for you.\n"
+    "- Tool results may include a `links` field — internal UI navigation targets. Never mention 'the links "
+    "section' or any raw field name to the user. Instead phrase navigation naturally (e.g. 'open the Results "
+    "page for this job' or 'see the Network view'); say nothing about links if they add nothing.\n"
     "- Prefer calling a tool over describing model IDs or counts from memory. If no tool fits, say so plainly "
     "instead of inventing arguments."
 )
@@ -391,6 +394,26 @@ def _call_provider(
     return response, AgentStep(text, tool_calls, str(choice.get("finish_reason") or ""), raw_assistant)
 
 
+def _lenient_json_loads(chunk: str) -> Any:
+    """json.loads, but tolerate the Python-literal quirks weak models emit.
+
+    Local models (e.g. llama3.1 via Ollama) frequently write tool calls with Python
+    literals — `True`/`False`/`None` and single quotes — which are not valid JSON. Without
+    this repair, recovery fails and the raw JSON leaks into the chat. Returns None on failure.
+    """
+    try:
+        return json.loads(chunk)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    repaired = re.sub(r"\bTrue\b", "true", chunk)
+    repaired = re.sub(r"\bFalse\b", "false", repaired)
+    repaired = re.sub(r"\bNone\b", "null", repaired)
+    try:
+        return json.loads(repaired)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 def _iter_json_objects(text: str):
     """Yield (start, end, substring) for each top-level balanced-brace object in text."""
     depth = 0
@@ -421,10 +444,7 @@ def _extract_text_tool_calls(
     calls: list[NormalizedToolCall] = []
     cut_spans: list[tuple[int, int]] = []
     for start, end, chunk in _iter_json_objects(text):
-        try:
-            obj = json.loads(chunk)
-        except (json.JSONDecodeError, ValueError):
-            continue
+        obj = _lenient_json_loads(chunk)
         if not isinstance(obj, dict):
             continue
         name = obj.get("name") or obj.get("tool") or obj.get("tool_name")
@@ -436,10 +456,7 @@ def _extract_text_tool_calls(
         if args is None:
             args = obj.get("input")
         if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except (json.JSONDecodeError, ValueError):
-                args = {}
+            args = _lenient_json_loads(args)
         if not isinstance(args, dict):
             args = {}
         calls.append(NormalizedToolCall(id=f"{prefix}_text_{len(calls)}", name=name, input=args))

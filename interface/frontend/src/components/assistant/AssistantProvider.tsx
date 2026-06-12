@@ -77,7 +77,11 @@ export interface AssistantContextValue {
   streamingTool: string | null
   resolvedNote: string | null
   memory: AssistantMemory | null
+  /** Set briefly when a turn folded earlier history into the rolling summary (in-chat marker). */
+  compactionNotice: boolean
   bottomRef: RefObject<HTMLDivElement>
+  /** The scrollable message list element — auto-scroll targets this, not the window. */
+  scrollRef: RefObject<HTMLDivElement>
 
   // Actions
   clearMemory: () => Promise<void>
@@ -207,7 +211,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [streamingTool, setStreamingTool] = useState<string | null>(null)
   const [resolvedNote, setResolvedNote] = useState<string | null>(null)
   const [memory, setMemory] = useState<AssistantMemory | null>(null)
+  const [compactionNotice, setCompactionNotice] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -242,8 +248,15 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     abortRef.current?.abort()
   }
 
+  // Keep the message list pinned to the bottom *only* by scrolling the list element itself, and
+  // only when the user is already near the bottom. Using scrollIntoView here scrolled every
+  // scrollable ancestor (including the window), which yanked the whole page on each streamed token
+  // and fought the user's own scrolling. Setting scrollTop on the container avoids both.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    const el = scrollRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom < 120) el.scrollTop = el.scrollHeight
   }, [messages.length, sending, streamingText])
 
   async function loadConversationMessages(conversation: AssistantConversation) {
@@ -353,6 +366,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     if (!content || sending) return
     setSending(true)
     setError(null)
+    setCompactionNotice(false)
     setInput('')
     const tempId = -Date.now()
     const optimisticUser: AssistantMessage = {
@@ -400,6 +414,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
             onDone: (payload) => {
               streamed = true
               applyExchange(payload as unknown as AssistantExchange)
+              setCompactionNotice(Boolean((payload as { compacted?: boolean }).compacted))
             },
             onError: (message) => setError(message),
           },
@@ -544,7 +559,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     streamingTool,
     resolvedNote,
     memory,
+    compactionNotice,
     bottomRef,
+    scrollRef,
     clearMemory,
     stopStreaming,
     loadConversationMessages,

@@ -495,10 +495,20 @@ function mdInline(text: string): ReactNode[] {
   MD_INLINE.lastIndex = 0
   while ((m = MD_INLINE.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index))
-    if (m[2] !== undefined || m[3] !== undefined) {
-      out.push(<strong key={key++}>{m[2] ?? m[3]}</strong>)
-    } else if (m[4] !== undefined || m[5] !== undefined) {
-      out.push(<em key={key++}>{m[4] ?? m[5]}</em>)
+    // Underscore emphasis (`_x_`, `__x__`) must ignore intraword underscores, or snake_case
+    // identifiers like create_experiment / variant_index get pair-matched and mangled. Asterisk
+    // emphasis has no such rule. (Boundary chars only — avoids lookbehind for WebKit.)
+    const before = m.index > 0 ? text[m.index - 1] : ''
+    const after = MD_INLINE.lastIndex < text.length ? text[MD_INLINE.lastIndex] : ''
+    const intraword = /\w/.test(before) || /\w/.test(after)
+    if (m[2] !== undefined) {
+      out.push(<strong key={key++}>{m[2]}</strong>)
+    } else if (m[3] !== undefined) {
+      intraword ? out.push(m[0]) : out.push(<strong key={key++}>{m[3]}</strong>)
+    } else if (m[4] !== undefined) {
+      out.push(<em key={key++}>{m[4]}</em>)
+    } else if (m[5] !== undefined) {
+      intraword ? out.push(m[0]) : out.push(<em key={key++}>{m[5]}</em>)
     } else if (m[6] !== undefined) {
       out.push(<code key={key++} className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[12px]">{m[6]}</code>)
     } else if (m[7] !== undefined) {
@@ -1362,7 +1372,7 @@ export function TaskCenteredAssistantPanel() {
     providerConfigured, runtimeLabel, context,
     conversations, activeConversation, messages, proposals, input, setInput,
     inspectPreview, inspectExecution, loading, sending, inspecting, error,
-    streamingText, streamingTool, resolvedNote, memory, bottomRef,
+    streamingText, streamingTool, resolvedNote, memory, compactionNotice, bottomRef, scrollRef,
     clearMemory, stopStreaming, loadConversationMessages, startNewChat,
     removeConversation, sendMessage, inspectCurrentResult, runReadOnlyProposal,
     handleProposalResolved,
@@ -1429,7 +1439,7 @@ export function TaskCenteredAssistantPanel() {
             <span className="shrink-0 text-[11px] text-gray-500">read-only · actions need confirmation</span>
           </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5">
+          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5">
             {(inspectPreview || inspectExecution) && (
               <ToolReviewPanel
                 title="Read-only result inspection"
@@ -1519,6 +1529,13 @@ export function TaskCenteredAssistantPanel() {
                     </span>
                   </div>
                 </div>
+              </div>
+            )}
+            {compactionNotice && !sending && (
+              <div className="flex items-center gap-2 py-1" data-testid="assistant-compaction-notice">
+                <span className="h-px flex-1 bg-gray-200" />
+                <span className="shrink-0 text-[11px] text-gray-500">⤵ Summarized earlier turns to stay focused</span>
+                <span className="h-px flex-1 bg-gray-200" />
               </div>
             )}
             <div ref={bottomRef} />
@@ -1940,7 +1957,7 @@ export function AssistantPage() {
             />
           </div>
         )}
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
           <RuntimeSettingsCard />
           <ConnectionTestCard />
         </div>
