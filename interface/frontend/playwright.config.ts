@@ -24,6 +24,7 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
   // Dedicated port + no reuse so e2e always serves THIS working tree, never a stray dev/Docker
   // server that may be on :5173.

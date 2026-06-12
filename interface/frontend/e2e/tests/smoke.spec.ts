@@ -44,6 +44,34 @@ test.describe('Assistant smoke', () => {
     await expect(card).toHaveCount(0)
   })
 
+  test('renders markdown (bold/headers/lists), not raw characters', async ({ page }) => {
+    await mockAssistantApi(page, { reply: '### Genes\n\n- **dnaA** is replication initiator\n- crp is a regulator' })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('Tell me about dnaA')
+    await page.getByTestId('assistant-send').click()
+
+    const msg = page.getByTestId('message-assistant')
+    await expect(msg).toBeVisible()
+    // Bold is a real <strong>, list is a real <li>; the raw markdown chars are gone.
+    await expect(msg.locator('strong', { hasText: 'dnaA' })).toBeVisible()
+    await expect(msg.locator('li')).toHaveCount(2)
+    await expect(msg).not.toContainText('**dnaA**')
+    await expect(msg).not.toContainText('### Genes')
+  })
+
+  test('surfaces a provider error clearly', async ({ page }) => {
+    await mockAssistantApi(page, {
+      reply: 'Ollama call failed. Check the endpoint is reachable. No side effects were executed.',
+      assistantStatus: 'provider_call_failed',
+    })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('hi')
+    await page.getByTestId('assistant-send').click()
+
+    await expect(page.getByTestId('message-assistant')).toContainText('Ollama call failed')
+    await expect(page.getByText('provider error')).toBeVisible() // friendly status badge
+  })
+
   test('docked panel: summon from another page, chat, Esc to close', async ({ page }) => {
     // Quiet other pages' own data calls. Anchor to the API origin so we don't intercept the app's
     // own /src/api/* module scripts.

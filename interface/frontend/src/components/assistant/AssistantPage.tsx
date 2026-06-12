@@ -1036,7 +1036,7 @@ function starterPrompts(context: AssistantContext): string[] {
 function FactBadge({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-gray-100 bg-white px-3 py-2">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</div>
       <div className="mt-1 truncate text-sm font-medium text-gray-900">{value}</div>
     </div>
   )
@@ -1219,7 +1219,7 @@ function AssistantProposalCard({
         <dl className="mt-3 grid gap-2 rounded-md border border-gray-100 bg-white p-3 text-xs sm:grid-cols-2">
           {facts.map((fact) => (
             <div key={`${proposal.id}-${fact.label}`} className="min-w-0">
-              <dt className="font-semibold uppercase tracking-wide text-gray-400">{fact.label}</dt>
+              <dt className="font-semibold uppercase tracking-wide text-gray-500">{fact.label}</dt>
               <dd className={`mt-1 truncate text-gray-800 ${fact.mono ? 'font-mono' : ''}`}>{fact.value}</dd>
             </div>
           ))}
@@ -1334,7 +1334,7 @@ export function TaskCenteredAssistantPanel() {
     <section>
       <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
         <aside className="flex h-[calc(100vh-180px)] min-h-[560px] flex-col rounded-xl border border-gray-200 bg-gray-50 p-3">
-          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Conversations</div>
+          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Conversations</div>
           <button
             type="button"
             onClick={startNewChat}
@@ -1362,13 +1362,13 @@ export function TaskCenteredAssistantPanel() {
                   className="min-w-0 flex-1 text-left"
                 >
                   <div className="truncate font-medium">{conversation.title}</div>
-                  <div className="mt-1 text-gray-400">{conversation.status.replace(/_/g, ' ')}</div>
+                  <div className="mt-1 text-gray-500">{conversation.status.replace(/_/g, ' ')}</div>
                 </button>
                 <button
                   type="button"
                   onClick={() => removeConversation(conversation.id)}
                   disabled={sending}
-                  className="rounded px-1.5 py-0.5 text-gray-400 opacity-70 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 group-hover:opacity-100"
+                  className="inline-flex min-h-[24px] min-w-[24px] items-center justify-center rounded text-gray-500 opacity-70 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 group-hover:opacity-100"
                   title="Delete chat"
                   aria-label={`Delete ${conversation.title}`}
                 >
@@ -1387,7 +1387,7 @@ export function TaskCenteredAssistantPanel() {
               </div>
               <div className="mt-0.5 truncate text-xs leading-5 text-gray-500">{contextSummary(context)}</div>
             </div>
-            <span className="shrink-0 text-[11px] text-gray-400">read-only · actions need confirmation</span>
+            <span className="shrink-0 text-[11px] text-gray-500">read-only · actions need confirmation</span>
           </div>
 
           <div className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5">
@@ -1427,7 +1427,7 @@ export function TaskCenteredAssistantPanel() {
                 <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}>
                     <div className="mb-1 flex items-center gap-2 px-1">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                         {isUser ? 'You' : 'Assistant'}
                       </span>
                       {showStatus && (
@@ -1459,7 +1459,7 @@ export function TaskCenteredAssistantPanel() {
             {sending && streamingText !== null && streamingText.length > 0 && (
               <div className="flex justify-start">
                 <div className="max-w-[80%]">
-                  <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Assistant</div>
+                  <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Assistant</div>
                   <div className="overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-2.5 text-sm leading-6 text-gray-800 shadow-sm">
                     {streamingText}
                     <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-brand-400 align-middle" />
@@ -1470,12 +1470,12 @@ export function TaskCenteredAssistantPanel() {
             {sending && (streamingText === null || streamingText.length === 0) && (
               <div className="flex justify-start">
                 <div className="max-w-[80%]">
-                  <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Assistant</div>
+                  <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Assistant</div>
                   <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-3 shadow-sm">
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
-                    <span className="ml-2 text-xs text-gray-400">
+                    <span className="ml-2 text-xs text-gray-500">
                       {streamingTool ? `running ${streamingTool}…` : `thinking${runtimeLabel ? ` · ${runtimeLabel}` : ''}`}
                     </span>
                   </div>
@@ -1526,7 +1526,7 @@ export function TaskCenteredAssistantPanel() {
                 </button>
               )}
             </div>
-            <div className="mt-1.5 px-1 text-[11px] text-gray-400">Ctrl+Enter to send · chat cannot perform side effects</div>
+            <div className="mt-1.5 px-1 text-[11px] text-gray-500">Ctrl+Enter to send · chat cannot perform side effects</div>
           </div>
         </div>
 
@@ -1534,7 +1534,7 @@ export function TaskCenteredAssistantPanel() {
           <div className="rounded-lg border border-brand-100 bg-white p-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Where you are</div>
             <div className="mt-2 text-sm font-medium leading-6 text-gray-900">{contextSummary(context)}</div>
-            <p className="mt-1 text-[11px] leading-4 text-gray-400">The assistant uses this page context to ground its answers.</p>
+            <p className="mt-1 text-[11px] leading-4 text-gray-500">The assistant uses this page context to ground its answers.</p>
             <div className="mt-3 grid gap-2">
               {facts.map((fact) => (
                 <FactBadge key={`${fact.label}-${fact.value}`} label={fact.label} value={fact.value} />
@@ -1615,7 +1615,7 @@ export function TaskCenteredAssistantPanel() {
                     ))}
                   </div>
                 )}
-                <p className="text-[11px] leading-4 text-gray-400">
+                <p className="text-[11px] leading-4 text-gray-500">
                   Older turns are compacted into this summary so long chats keep context. Clearing forgets it.
                 </p>
               </div>
@@ -1764,7 +1764,7 @@ function AssistantAuditPanel({ activeConversationId }: { activeConversationId: n
                   </StatusPill>
                 </div>
                 <div className="mt-2 break-all font-mono text-gray-500">{compactJson(confirmation.payload)}</div>
-                <div className="mt-2 text-gray-400">{formatDateTime(confirmation.created_at)}</div>
+                <div className="mt-2 text-gray-500">{formatDateTime(confirmation.created_at)}</div>
               </div>
             ))}
           </div>
@@ -1793,7 +1793,7 @@ function AssistantAuditPanel({ activeConversationId }: { activeConversationId: n
                   </StatusPill>
                 </div>
                 <div className="mt-2 break-all font-mono text-gray-500">{compactJson(toolCall.arguments)}</div>
-                <div className="mt-2 text-gray-400">{formatDateTime(toolCall.updated_at || toolCall.created_at)}</div>
+                <div className="mt-2 text-gray-500">{formatDateTime(toolCall.updated_at || toolCall.created_at)}</div>
               </div>
             ))}
           </div>
@@ -1823,7 +1823,7 @@ function AssistantAuditPanel({ activeConversationId }: { activeConversationId: n
                   Hash <span className="font-mono">{record.prompt_hash.slice(0, 12)}</span>
                 </div>
                 <div className="mt-2 break-all font-mono text-gray-500">{compactJson(record.response)}</div>
-                <div className="mt-2 text-gray-400">{formatDateTime(record.created_at)}</div>
+                <div className="mt-2 text-gray-500">{formatDateTime(record.created_at)}</div>
               </div>
             ))}
           </div>

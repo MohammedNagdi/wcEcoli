@@ -24,6 +24,7 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@playwright/test": "^1.60.0",
     "@types/cytoscape": "^3.21.0",
     "@types/react": "^18.3.0",

@@ -115,13 +115,15 @@ interface MockOptions {
   reply?: string
   /** proposals returned on the terminal `done` event */
   proposals?: unknown[]
+  /** status to stamp on the assistant message (e.g. 'provider_call_failed') */
+  assistantStatus?: string
 }
 
 export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Promise<void> {
   const reply = opts.reply ?? 'Hello there.'
   const proposals = opts.proposals ?? []
   const userMsg = { id: 1, conversation_id: 1, role: 'user', content: 'hi', context: CTX, status: 'stored', created_at: '' }
-  const asstMsg = { id: 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: 'completed', created_at: '' }
+  const asstMsg = { id: 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: opts.assistantStatus ?? 'completed', created_at: '' }
 
   const streamBody = sse([
     { type: 'meta', provider_id: 'openai', model: 'gpt-4.1-mini' },

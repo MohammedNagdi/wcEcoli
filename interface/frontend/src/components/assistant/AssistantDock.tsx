@@ -73,12 +73,12 @@ export function AssistantDock() {
             <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2.5">
               <div className="text-sm font-semibold text-gray-900">Assistant</div>
               <div className="flex items-center gap-2">
-                <span className="hidden text-[11px] text-gray-400 sm:inline">Esc to close · Ctrl+J to toggle</span>
+                <span className="hidden text-[11px] text-gray-500 sm:inline">Esc to close · Ctrl+J to toggle</span>
                 <button
                   type="button"
                   data-testid="assistant-dock-close"
                   onClick={closeAssistant}
-                  className="rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100"
+                  className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md text-sm text-gray-600 hover:bg-gray-100"
                   aria-label="Close assistant (Esc)"
                 >
                   ✕

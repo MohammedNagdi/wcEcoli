@@ -49,7 +49,7 @@ export function RuntimeSettingsCard() {
   if (error && !draft) {
     return <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</div>
   }
-  if (!draft) return <div className="text-xs text-gray-400">Loading runtime settings…</div>
+  if (!draft) return <div className="text-xs text-gray-500">Loading runtime settings…</div>
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -68,7 +68,7 @@ export function RuntimeSettingsCard() {
               onChange={(e) => set(f.key, Number(e.target.value) as never)}
               className="mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none"
             />
-            <span className="mt-0.5 block text-[11px] leading-4 text-gray-400">{f.hint}</span>
+            <span className="mt-0.5 block text-[11px] leading-4 text-gray-500">{f.hint}</span>
           </label>
         ))}
         <label className="block">
@@ -79,7 +79,7 @@ export function RuntimeSettingsCard() {
             onChange={(e) => set('ollama_keep_alive', e.target.value)}
             className="mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none"
           />
-          <span className="mt-0.5 block text-[11px] leading-4 text-gray-400">Keep a local model resident, e.g. 30m.</span>
+          <span className="mt-0.5 block text-[11px] leading-4 text-gray-500">Keep a local model resident, e.g. 30m.</span>
         </label>
         <label className="block">
           <span className="text-xs font-medium text-gray-700">Summary model (override)</span>
@@ -90,7 +90,7 @@ export function RuntimeSettingsCard() {
             placeholder="default per provider"
             className="mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none"
           />
-          <span className="mt-0.5 block text-[11px] leading-4 text-gray-400">Cheap model for compaction; blank = per-provider default.</span>
+          <span className="mt-0.5 block text-[11px] leading-4 text-gray-500">Cheap model for compaction; blank = per-provider default.</span>
         </label>
       </div>
       <div className="mt-4 flex items-center gap-3">
@@ -146,7 +146,7 @@ export function ConnectionTestCard() {
         </button>
         {result && <span className="text-xs text-gray-600">{result}</span>}
       </div>
-      <p className="mt-3 text-[11px] leading-4 text-gray-400">
+      <p className="mt-3 text-[11px] leading-4 text-gray-500">
         Provider API keys are encrypted at rest and never returned by the API.
       </p>
     </div>
