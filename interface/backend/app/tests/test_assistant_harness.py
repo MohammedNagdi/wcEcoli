@@ -1609,6 +1609,48 @@ def test_stream_fence_filter_suppresses_code_blocks():
     assert "Done." in shown
 
 
+def test_model_structure_adapter_reads_reconstruction():
+    import tempfile
+    from pathlib import Path as _Path
+
+    engine, session = _build_session()
+    snapshot = {"reconstruction_path": settings.reconstruction_path}
+    tmp = tempfile.mkdtemp()
+    try:
+        session.add(Gene(id=1, ecoli_id="EG10001", symbol="pfkA", ko_index=1, monomer_id="PFKA-MONOMER"))
+        session.commit()
+
+        flat = _Path(tmp) / "ecoli" / "flat"
+        flat.mkdir(parents=True)
+        (flat / "metabolic_reactions.tsv").write_text(
+            "# comment line\n"
+            '"id"\t"stoichiometry"\t"direction"\t"catalyzed_by"\n'
+            '"PFK-RXN"\t{"ATP[c]": -1, "FRUCTOSE-6P[c]": -1, "ADP[c]": 1, "FRUCTOSE-16-DIPHOSPHATE[c]": 1}\t"L2R"\t["PFKA-MONOMER"]\n'
+            '"TPI-RXN"\t{"DIHYDROXYACETONE-PHOSPHATE[c]": -1, "GAP[c]": 1}\t"BOTH"\t["TPI-MONOMER"]\n',
+            encoding="utf-8",
+        )
+        settings.reconstruction_path = _Path(tmp)
+
+        # By enzyme (gene symbol -> monomer -> catalysed reactions)
+        by_gene = execute_tool(session, "model_structure", AssistantToolExecutionRequest(arguments={"query": "pfkA"}))
+        assert by_gene.executed is True
+        assert by_gene.result["available"] is True
+        assert [r["id"] for r in by_gene.result["reactions"]] == ["PFK-RXN"]
+        assert by_gene.result["reactions"][0]["reversible"] is False
+        totals = by_gene.result["network_totals"]
+        assert totals["base_reactions"] == 2
+        assert totals["reversible"] == 1 and totals["one_way"] == 1
+        assert totals["fba_expanded_flux_estimate"] == 1 * 2 + 1  # reversible*2 + one_way
+
+        # By metabolite
+        by_met = execute_tool(session, "model_structure", AssistantToolExecutionRequest(arguments={"query": "GAP"}))
+        assert "TPI-RXN" in [r["id"] for r in by_met.result["reactions"]]
+    finally:
+        settings.reconstruction_path = snapshot["reconstruction_path"]
+        session.close()
+        engine.dispose()
+
+
 def test_explain_modeling_adapter_topics_and_guardrail():
     engine, session = _build_session()
     try:

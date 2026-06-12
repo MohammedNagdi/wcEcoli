@@ -68,6 +68,20 @@ function outputSeriesTotal(types: MoleculeTypeInfo[]) {
   return types.reduce((sum, type) => sum + type.count, 0)
 }
 
+// Reaction/exchange/metabolite-delta are FBA optimization outputs; the rest are dynamic state-variable
+// counts. Splitting them makes the (large, correct) total legible instead of alarming.
+const FBA_OUTPUT_TYPES = new Set(['reaction_flux', 'exchange_flux', 'metabolite_delta'])
+
+function seriesBreakdown(types: MoleculeTypeInfo[]) {
+  let fba = 0
+  let state = 0
+  for (const t of types) {
+    if (FBA_OUTPUT_TYPES.has(t.molecule_type)) fba += t.count
+    else state += t.count
+  }
+  return { fba, state, total: fba + state }
+}
+
 const ROLE_LABELS: Record<string, string> = {
   focus: 'Focus gene',
   downstream_target: 'Downstream target',
@@ -670,6 +684,24 @@ export function MoleculeExplorer({
     }
   }, [jobId, browseType, browseSearch, explorerOpen])
 
+  async function loadMoreBrowse() {
+    if (!browseType || browseLoading) return
+    setBrowseLoading(true)
+    try {
+      const res = await getMoleculeIds(jobId, browseType, {
+        search: browseSearch.trim() || undefined,
+        limit: BROWSE_LIMIT,
+        offset: browseIds.length,
+      })
+      setBrowseIds((prev) => [...prev, ...res.ids])
+      setBrowseCount(res.count)
+    } catch (err) {
+      setBrowseError(err instanceof Error ? err.message : 'Failed to load more output IDs')
+    } finally {
+      setBrowseLoading(false)
+    }
+  }
+
   const doSearch = useCallback(
     (q: string) => {
       if (q.length < 2) {
@@ -747,7 +779,8 @@ export function MoleculeExplorer({
 
   if (types.length === 0) return null
 
-  const totalCount = outputSeriesTotal(types).toLocaleString()
+  const breakdown = seriesBreakdown(types)
+  const totalCount = breakdown.total.toLocaleString()
   const searchPlaceholder = 'Search a gene, protein/metabolite name, reaction, or output ID...'
   const resultGroups = Object.entries(searchResults).filter(([, ids]) => ids.length > 0)
   const selectedBrowseType = types.find((type) => type.molecule_type === browseType)
@@ -769,7 +802,13 @@ export function MoleculeExplorer({
               <HelpTip text="Advanced output-series search. Search by gene symbol, EcoCyc ID, protein, metabolite, reaction, or raw output ID. Counts below are plottable simulation output series, not unique biological molecules." position="bottom" />
             </h3>
             <p className="text-xs text-gray-400 mt-0.5">
-              Browse {totalCount} plottable output series across RNAs, proteins, fluxes, metabolites, and amino-acid pools.
+              {totalCount} plottable output series for this cell —{' '}
+              <span className="text-gray-500">{breakdown.state.toLocaleString()} state-variable counts</span>{' '}+{' '}
+              <span className="text-gray-500">{breakdown.fba.toLocaleString()} FBA flux/delta terms</span>.
+              <HelpTip
+                text="Per-cell count of distinct plottable series — not a total across seeds, generations, or other runs (it's the same for every result). It exceeds the number of distinct biological molecules because mRNA is offered at both transcription-unit and gene/cistron level, and reversible reactions appear as forward+reverse fluxes. Plotting one molecule returns one trajectory per cell lineage (seeds × generations)."
+                position="bottom"
+              />
             </p>
           </div>
           <button
@@ -886,8 +925,8 @@ export function MoleculeExplorer({
                     ) : (
                       <>
                         <div className="mb-2 text-xs text-gray-400">
-                          {browseCount.toLocaleString()} matching output series
-                          {browseCount > BROWSE_LIMIT ? `, first ${BROWSE_LIMIT} shown` : ''}
+                          Showing {browseIds.length.toLocaleString()} of {browseCount.toLocaleString()} output series
+                          {browseSearch.trim() ? ' (filtered)' : ''}. Search by gene symbol or name above to narrow.
                         </div>
                         <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto">
                           {browseIds.map((id) => {
@@ -917,6 +956,16 @@ export function MoleculeExplorer({
                             <span className="text-xs text-gray-400">No output IDs match this filter.</span>
                           )}
                         </div>
+                        {browseIds.length < browseCount && (
+                          <button
+                            type="button"
+                            onClick={loadMoreBrowse}
+                            disabled={browseLoading}
+                            className="mt-2 rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            {browseLoading ? 'Loading…' : `Load ${Math.min(BROWSE_LIMIT, browseCount - browseIds.length)} more`}
+                          </button>
+                        )}
                       </>
                     )}
                   </div>

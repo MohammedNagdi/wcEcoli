@@ -821,6 +821,23 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             result_schema={"experiment": "object", "jobs": "array"},
         ),
         AssistantToolSpec(
+            name="model_structure",
+            label="Query model structure",
+            description=(
+                "Look up the STATIC metabolic model structure (not dynamics): reactions by id, reactions that a "
+                "gene's enzyme catalyzes, or reactions involving a metabolite — with stoichiometry, reversibility, "
+                "and catalysts, plus whole-network totals (reactions, reversible split, FBA-expanded flux count). "
+                "Use for 'what reactions involve X', 'what does enzyme/gene Y catalyze', 'is reaction R reversible', "
+                "'how many reactions are there'. For dynamic values (fluxes/counts over time) run a simulation and "
+                "inspect the result instead — structure here is condition-independent."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"query": "string", "kind": "string", "limit": "integer"},
+            result_schema={"reactions": "array", "network_totals": "object"},
+        ),
+        AssistantToolSpec(
             name="explain_modeling",
             label="Explain the model & FBA",
             description=(
@@ -882,6 +899,7 @@ READ_ONLY_TOOLS = (
     "inspect_molecule_trajectories",
     "platform_guide",
     "explain_modeling",
+    "model_structure",
 )
 
 
@@ -1490,6 +1508,118 @@ def _resolve_modeling_topic(raw: str) -> str | None:
     return None
 
 
+def _metabolic_reactions_path() -> Path:
+    return settings.reconstruction_path / "ecoli" / "flat" / "metabolic_reactions.tsv"
+
+
+def _enzyme_ids_for_gene_symbol(session: Session, symbol: str) -> set[str]:
+    gene = _lookup_gene_by_symbol(session, symbol)
+    if not gene:
+        return set()
+    ids: set[str] = set()
+    if gene.monomer_id:
+        ids.add(gene.monomer_id)
+    for complex_id in from_json(gene.complex_ids, []) or []:
+        if isinstance(complex_id, str):
+            ids.add(complex_id)
+    return ids
+
+
+def _execute_model_structure(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    import csv
+
+    query = str(normalized_arguments.get("query") or "").strip()
+    limit = int(normalized_arguments.get("limit") or 12)
+    path = _metabolic_reactions_path()
+    if not path.exists():
+        return {
+            "available": False,
+            "query": query,
+            "note": (
+                "The reconstruction files are not mounted in this environment, so live structural lookup is "
+                "unavailable. Conceptually: the FBA reaction count (~9,612) is the reversible-split expansion of "
+                "~6,770 base metabolic reactions. Use the Network page for regulation."
+            ),
+        }
+
+    enzyme_ids = _enzyme_ids_for_gene_symbol(session, query) if query else set()
+    q_lower = query.lower()
+
+    reversible = one_way = 0
+    matches: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for row in csv.reader(handle, delimiter="\t"):
+                if len(row) < 3:
+                    continue
+                reaction_id = row[0].strip().strip('"')
+                if not reaction_id or reaction_id == "id" or reaction_id.startswith("#"):
+                    continue
+                try:
+                    stoich = json.loads(row[1])
+                    catalysts = json.loads(row[3]) if len(row) > 3 else []
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(stoich, dict):
+                    continue
+                direction = (row[2].strip().strip('"') if len(row) > 2 else "")
+                is_reversible = direction == "BOTH"
+                if is_reversible:
+                    reversible += 1
+                else:
+                    one_way += 1
+
+                if query and len(matches) < limit:
+                    catalyst_list = [c for c in catalysts if isinstance(c, str)]
+                    metabolite_ids = list(stoich.keys())
+                    hit = (
+                        q_lower in reaction_id.lower()
+                        or any(eid in catalyst_list for eid in enzyme_ids)
+                        or any(q_lower in m.lower() for m in metabolite_ids)
+                    )
+                    if hit:
+                        matches.append({
+                            "id": reaction_id,
+                            "direction": direction,
+                            "reversible": is_reversible,
+                            "catalysts": catalyst_list[:8],
+                            "reactants": [m for m, c in stoich.items() if isinstance(c, (int, float)) and c < 0][:12],
+                            "products": [m for m, c in stoich.items() if isinstance(c, (int, float)) and c > 0][:12],
+                        })
+    except OSError as exc:
+        return {"available": False, "query": query, "note": f"Could not read reconstruction: {exc}"}
+
+    total = reversible + one_way
+    return {
+        "available": True,
+        "query": query,
+        "resolved_enzyme_ids": sorted(enzyme_ids),
+        "match_count": len(matches),
+        "reactions": matches,
+        "network_totals": {
+            "base_reactions": total,
+            "reversible": reversible,
+            "one_way": one_way,
+            "fba_expanded_flux_estimate": reversible * 2 + one_way,
+            "note": (
+                "FBA splits each reversible reaction into forward+reverse non-negative fluxes; the live FBA flux "
+                "count also adds transport/exchange/maintenance reactions, so it is slightly higher than this estimate."
+            ),
+        },
+        "guardrail": "This is static structure (condition-independent). For values over time, run a simulation and inspect the result.",
+    }
+
+
+def _preview_model_structure(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    query = _string_arg(args, "query", required=True, errors=errors)
+    kind = _string_arg(args, "kind", required=False, errors=[]) or ""
+    limit = _clamp_limit(args, default=12, maximum=50)
+    normalized = {"query": query, "kind": kind.strip(), "limit": limit}
+    preview = {"summary": f"Look up model structure for '{query}'." if query else "Look up model structure."}
+    return normalized, preview, [], errors
+
+
 def _preview_explain_modeling(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
     topic = _string_arg(args, "topic", required=False, errors=[]) or ""
     resolved = _resolve_modeling_topic(topic)
@@ -1519,6 +1649,7 @@ _PREVIEW_DISPATCH = {
     "inspect_molecule_trajectories": _preview_inspect_molecule_trajectories,
     "platform_guide": _preview_platform_guide,
     "explain_modeling": _preview_explain_modeling,
+    "model_structure": _preview_model_structure,
 }
 
 
@@ -2871,6 +3002,7 @@ _READ_ONLY_EXECUTORS = {
     "inspect_molecule_trajectories": _execute_inspect_molecule_trajectories,
     "platform_guide": _execute_platform_guide,
     "explain_modeling": _execute_explain_modeling,
+    "model_structure": _execute_model_structure,
 }
 
 
