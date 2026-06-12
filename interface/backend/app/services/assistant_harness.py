@@ -1101,6 +1101,22 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             result_schema={"trajectory_scope": "object", "molecules": "array"},
         ),
         AssistantToolSpec(
+            name="list_results",
+            label="List results",
+            description=(
+                "List completed (and optionally pending/running) simulation results — each with its job_id, "
+                "experiment, condition, status, and a quick phenotype summary. Use this to FIND a result when the "
+                "user asks you to 'pick a result', 'break down the findings', or compare results but none is "
+                "currently selected: list them, choose a completed one, then inspect_result/compare_results by "
+                "job_id. Optional `status` filter (default completed) and `limit`. Read-only."
+            ),
+            status="execution_enabled",
+            requires_confirmation=False,
+            side_effect=False,
+            argument_schema={"status": "string", "limit": "integer"},
+            result_schema={"totals": "object", "results": "array"},
+        ),
+        AssistantToolSpec(
             name="compare_results",
             label="Compare results",
             description=(
@@ -1145,6 +1161,7 @@ READ_ONLY_TOOLS = (
     "list_experiments",
     "inspect_experiment",
     "inspect_molecule_trajectories",
+    "list_results",
     "compare_results",
     "read_result_series",
     "platform_guide",
@@ -1316,7 +1333,7 @@ PLATFORM_PAGES = [
         "route": "/results",
         "purpose": "Browse completed simulation results and open one for detail.",
         "data": "Simulation jobs and summary metrics (division time, mass, growth rate, doubling time).",
-        "assistant_tools": ["inspect_result", "list_experiments", "compare_results"],
+        "assistant_tools": ["list_results", "inspect_result", "list_experiments", "compare_results"],
     },
     {
         "name": "Result detail & Molecule Explorer",
@@ -1968,6 +1985,15 @@ def _int_list_arg(args: dict[str, Any], key: str) -> list[int]:
     return out
 
 
+def _preview_list_results(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    errors: list[str] = []
+    status = _string_arg(args, "status", errors, required=False)
+    limit = _int_arg(args, "limit", required=False, errors=errors, minimum=1)
+    normalized = {"status": status, "limit": limit or 20}
+    preview = {"summary": f"List {status or 'completed'} simulation results."}
+    return normalized, preview, [], errors
+
+
 def _preview_compare_results(session: Session, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
     errors: list[str] = []
     job_ids = _int_list_arg(args, "job_ids")
@@ -2150,6 +2176,7 @@ _PREVIEW_DISPATCH = {
     "list_experiments": _preview_list_experiments,
     "inspect_experiment": _preview_inspect_experiment,
     "inspect_molecule_trajectories": _preview_inspect_molecule_trajectories,
+    "list_results": _preview_list_results,
     "compare_results": _preview_compare_results,
     "read_result_series": _preview_read_result_series,
     "platform_guide": _preview_platform_guide,
@@ -3431,6 +3458,47 @@ def _aggregate_job_metrics(results: list[SimulationResult]) -> dict[str, Any]:
     }
 
 
+def _execute_list_results(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
+    status_filter = (normalized_arguments.get("status") or "").strip().lower()
+    limit = int(normalized_arguments.get("limit") or 20)
+    jobs = session.exec(select(SimulationJob).order_by(SimulationJob.id.desc())).all()
+
+    by_status: dict[str, int] = {}
+    for job in jobs:
+        by_status[job.status or "unknown"] = by_status.get(job.status or "unknown", 0) + 1
+
+    # Default to completed results (what 'a result' usually means); allow an explicit override.
+    def matches(job: SimulationJob) -> bool:
+        if status_filter:
+            return (job.status or "").lower() == status_filter
+        return (job.status or "").lower() == "done"
+
+    matched = [job for job in jobs if matches(job)]
+    rows: list[dict[str, Any]] = []
+    for job in matched[:limit]:
+        experiment = session.get(Experiment, job.experiment_id)
+        results = session.exec(select(SimulationResult).where(SimulationResult.job_id == job.id)).all()
+        rows.append({
+            "job_id": job.id,
+            "experiment_id": job.experiment_id,
+            "experiment_name": experiment.name if experiment else "",
+            "gene_symbol": (experiment.gene_symbol if experiment else "") or "",
+            "variant_type": experiment.variant_type if experiment else job.variant_type,
+            "condition": job.condition,
+            "status": job.status,
+            "result_rows": len(results),
+            "metrics": _aggregate_job_metrics(results),
+        })
+    return {
+        "totals": {"jobs": len(jobs), "by_status": by_status, "completed": by_status.get("done", 0)},
+        "filter": {"status": status_filter or "done"},
+        "matched_count": len(matched),
+        "results": rows,
+        "note": "Each row is one completed result; inspect_result or compare_results with its job_id for detail.",
+        "links": [{"label": "Results", "path": "/results"}],
+    }
+
+
 def _execute_compare_results(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
     job_ids = list(normalized_arguments.get("job_ids") or [])
     experiment_ids = list(normalized_arguments.get("experiment_ids") or [])
@@ -3881,6 +3949,7 @@ _READ_ONLY_EXECUTORS = {
     "list_experiments": _execute_list_experiments,
     "inspect_experiment": _execute_inspect_experiment,
     "inspect_molecule_trajectories": _execute_inspect_molecule_trajectories,
+    "list_results": _execute_list_results,
     "compare_results": _execute_compare_results,
     "read_result_series": _execute_read_result_series,
     "platform_guide": _execute_platform_guide,

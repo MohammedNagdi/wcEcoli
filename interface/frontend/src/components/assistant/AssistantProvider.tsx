@@ -278,6 +278,19 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     if (el) el.scrollTop = el.scrollHeight
   }, [activeConversation?.id])
 
+  // The user just sent a message — always jump to the bottom so the new turn is visible, even if
+  // they had scrolled up to read an earlier answer (the near-bottom gate would otherwise block it).
+  const prevSendingRef = useRef(false)
+  useEffect(() => {
+    if (sending && !prevSendingRef.current) {
+      requestAnimationFrame(() => {
+        const el = scrollRef.current
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    }
+    prevSendingRef.current = sending
+  }, [sending])
+
   async function loadConversationMessages(conversation: AssistantConversation) {
     setError(null)
     setActiveConversation(conversation)

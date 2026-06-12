@@ -885,6 +885,32 @@ def test_create_experiment_execution_requires_approved_matching_confirmation_and
         engine.dispose()
 
 
+def test_list_results_finds_completed_jobs():
+    engine, session = _build_session()
+    try:
+        session.add(Experiment(id=1, name="WT run", variant_type="wildtype", condition="basal", status="done", sim_params="{}"))
+        session.add(SimulationJob(id=1, experiment_id=1, status="done", condition="basal", seed=0, generations=1, sim_dir="a"))
+        session.add(SimulationJob(id=2, experiment_id=1, status="running", condition="basal", seed=0, generations=1, sim_dir="b"))
+        session.add(SimulationResult(job_id=1, experiment_id=1, seed=0, generation=0, growth_rate=0.02))
+        session.commit()
+
+        out = execute_tool(session, "list_results", AssistantToolExecutionRequest(arguments={}))
+        assert out.executed is True
+        r = out.result
+        # Default lists only completed results; the running job is excluded.
+        assert r["matched_count"] == 1
+        assert r["results"][0]["job_id"] == 1
+        assert r["results"][0]["experiment_name"] == "WT run"
+        assert r["totals"]["completed"] == 1
+
+        # Explicit status filter surfaces the running job.
+        running = execute_tool(session, "list_results", AssistantToolExecutionRequest(arguments={"status": "running"}))
+        assert running.result["matched_count"] == 1 and running.result["results"][0]["job_id"] == 2
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_compare_results_aggregates_and_ranks():
     engine, session = _build_session()
     try:
@@ -2064,6 +2090,7 @@ READ_ONLY_ADAPTER_CASES = [
     ("inspect_experiment", {"experiment_id": 7}, "experiment"),
     ("inspect_result", {"job_id": 12}, "summary"),
     ("inspect_molecule_trajectories", {"job_id": 12}, "trajectory_scope"),
+    ("list_results", {}, "results"),
     ("compare_results", {"job_ids": [12]}, "comparison"),
     ("read_result_series", {"job_id": 12}, "available_series"),
     ("platform_guide", {}, "pages"),
