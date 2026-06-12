@@ -46,6 +46,8 @@ services:
       - WCECOLI_ROOT=/data
       - SIM_OUTPUT_DIR=/data/out
       - DOCKER_IMAGE=wcecoli-sim:latest
+      - PARCA_CPUS=${PARCA_CPUS:-8}
+      - PARCA_LOCK_TIMEOUT=${PARCA_LOCK_TIMEOUT:-3600}
       - SIM_OUTPUT_VOLUME=interface_sim-output
       - WCECOLI_HOST_RECONSTRUCTION=${PWD}/../reconstruction
       - WCECOLI_HOST_MODELS=${PWD}/../models

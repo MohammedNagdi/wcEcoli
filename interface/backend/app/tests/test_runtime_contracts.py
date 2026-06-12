@@ -201,19 +201,22 @@ class RuntimeContractsTest(unittest.TestCase):
 			SimulationJob(variant_type='multi_gene_knockout', variant_index=0)
 		))
 
-	def test_batch_jobs_share_one_parca_directory(self):
-		experiment = SimpleNamespace(batch_id='batch-123')
-		self.assertEqual(
-			'batch_batch_123_parca',
-			sim_worker._parca_run_id_for_experiment('job-specific-dir', experiment),
-		)
-		self.assertEqual(
-			'job-specific-dir',
-			sim_worker._parca_run_id_for_experiment(
-				'job-specific-dir',
-				SimpleNamespace(batch_id=''),
-			),
-		)
+	def test_all_jobs_share_content_addressed_parca_directory(self):
+		with patch.object(sim_worker, '_parca_cache_key', return_value='a' * 64):
+			self.assertEqual(
+				'parca_cache_' + 'a' * 24,
+				sim_worker._parca_run_id_for_experiment(
+					'job-specific-dir',
+					SimpleNamespace(batch_id='batch-123'),
+				),
+			)
+			self.assertEqual(
+				'parca_cache_' + 'a' * 24,
+				sim_worker._parca_run_id_for_experiment(
+					'another-job-dir',
+					SimpleNamespace(batch_id=''),
+				),
+			)
 
 	def test_shared_batch_parca_kb_is_linked_into_job_directory(self):
 		log_buffer = deque(maxlen=20)
@@ -222,21 +225,21 @@ class RuntimeContractsTest(unittest.TestCase):
 			original_sim_output_dir = sim_worker.settings.sim_output_dir
 			sim_worker.settings.sim_output_dir = Path(tmpdir)
 			try:
-				parca_kb = Path(tmpdir) / 'batch_batch_123_parca' / 'kb'
+				parca_kb = Path(tmpdir) / 'parca_cache_shared' / 'kb'
 				parca_kb.mkdir(parents=True)
 				(parca_kb / 'simData.cPickle').write_text('shared')
 
 				sim_worker._prepare_shared_parca_kb(
 					'20260603_gene_job1',
-					'batch_batch_123_parca',
+					'parca_cache_shared',
 					log_buffer,
 				)
 
 				job_kb = Path(tmpdir) / '20260603_gene_job1' / 'kb'
 				self.assertTrue(job_kb.exists())
-				self.assertTrue(sim_worker._parca_cached('20260603_gene_job1'))
+				self.assertTrue((job_kb / 'simData.cPickle').exists())
 				self.assertIn(
-					'Linked job kb to shared batch ParCa: ../batch_batch_123_parca/kb',
+					'Linked job kb to shared Parca cache: ../parca_cache_shared/kb',
 					list(log_buffer),
 				)
 			finally:
@@ -253,12 +256,35 @@ class RuntimeContractsTest(unittest.TestCase):
 				job_kb.mkdir(parents=True)
 				(job_kb / 'simData.cPickle').write_text('private')
 
-				with self.assertRaisesRegex(RuntimeError, 'private ParCa kb'):
+				with self.assertRaisesRegex(RuntimeError, 'private Parca kb'):
 					sim_worker._prepare_shared_parca_kb(
 						'20260603_gene_job1',
-						'batch_batch_123_parca',
+						'parca_cache_shared',
 						log_buffer,
 					)
+			finally:
+				sim_worker.settings.sim_output_dir = original_sim_output_dir
+
+	def test_parca_cache_requires_manifest_and_all_outputs(self):
+		with TemporaryDirectory() as tmpdir, patch.object(
+			sim_worker, '_parca_cache_key', return_value='cache-key'
+		):
+			original_sim_output_dir = sim_worker.settings.sim_output_dir
+			sim_worker.settings.sim_output_dir = Path(tmpdir)
+			try:
+				run_path = Path(tmpdir) / 'parca_cache_test'
+				kb_path = run_path / 'kb'
+				kb_path.mkdir(parents=True)
+				for filename in sim_worker.PARCA_EXPECTED_FILES:
+					(kb_path / filename).write_text(filename)
+
+				self.assertFalse(sim_worker._parca_cached('parca_cache_test'))
+				(run_path / sim_worker.PARCA_MANIFEST).write_text(
+					'{"complete": true, "cache_key": "cache-key"}'
+				)
+				self.assertTrue(sim_worker._parca_cached('parca_cache_test'))
+				(kb_path / sim_worker.PARCA_EXPECTED_FILES[-1]).unlink()
+				self.assertFalse(sim_worker._parca_cached('parca_cache_test'))
 			finally:
 				sim_worker.settings.sim_output_dir = original_sim_output_dir
 
