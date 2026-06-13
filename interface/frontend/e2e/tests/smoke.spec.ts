@@ -64,6 +64,37 @@ test.describe('Assistant smoke', () => {
     await expect(card).toHaveCount(0)
   })
 
+  test('clears temporary inspection results when starting a new chat', async ({ page }) => {
+    await mockAssistantApi(page, {
+      reply: 'Inspect aaaD.',
+      proposals: [{
+        id: 30,
+        conversation_id: 1,
+        message_id: 2,
+        tool_name: 'inspect_gene',
+        status: 'proposed',
+        arguments: { gene: 'aaaD' },
+        result: {
+          title: 'Inspect aaaD',
+          description: 'Read Genes Table metadata for aaaD.',
+          side_effect: false,
+          requires_confirmation: false,
+          source: 'model_tool_call',
+        },
+        created_at: '',
+        updated_at: '',
+      }],
+    })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('inspect aaaD')
+    await page.getByTestId('assistant-send').click()
+    await page.getByRole('button', { name: 'Run read-only inspection' }).click()
+    await expect(page.getByText('Read-only result inspection')).toBeVisible()
+
+    await page.getByRole('button', { name: '+ New chat' }).click()
+    await expect(page.getByText('Read-only result inspection')).toHaveCount(0)
+  })
+
   test('renders markdown (bold/headers/lists), not raw characters', async ({ page }) => {
     await mockAssistantApi(page, { reply: '### Genes\n\n- **dnaA** is replication initiator\n- crp is a regulator' })
     await page.goto('/assistant')

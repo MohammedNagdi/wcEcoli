@@ -256,6 +256,21 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const selectedModel = activeConversation?.model || draftModel
   const selectedOption = providerModelOptions.find((option) => option.provider_id === selectedProviderId)
   const selectionAvailable = Boolean(selectedOption?.models.includes(selectedModel))
+  const inspectionContextKey = [
+    context.route,
+    context.selected_gene,
+    context.selected_job,
+    context.selected_result,
+    context.selected_experiment,
+    context.selected_condition,
+    context.selected_variant_type,
+    context.selected_builder_section,
+  ].join('|')
+
+  function clearInspection() {
+    setInspectPreview(null)
+    setInspectExecution(null)
+  }
 
   useEffect(() => {
     if (activeConversation?.provider_id || draftProviderId || providerModelOptions.length === 0) return
@@ -268,6 +283,14 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         : option.models[0] ?? '',
     )
   }, [activeConversation?.provider_id, draftProviderId, providerModelOptions, status])
+
+  const previousInspectionContextKey = useRef(inspectionContextKey)
+  useEffect(() => {
+    if (previousInspectionContextKey.current !== inspectionContextKey) {
+      clearInspection()
+      previousInspectionContextKey.current = inspectionContextKey
+    }
+  }, [inspectionContextKey])
 
   useEffect(() => {
     const id = activeConversation?.id
@@ -336,6 +359,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setError(null)
     setCompactionNotice(false)
     setThinkingSegments([])
+    if (activeConversation?.id !== conversation.id) clearInspection()
     setActiveConversation(conversation)
     try {
       const [rows, proposalRows] = await Promise.all([
@@ -402,6 +426,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setError(null)
     setCompactionNotice(false)
     setThinkingSegments([])
+    clearInspection()
     setActiveConversation(null)
     setMessages([])
     setProposals([])
@@ -429,8 +454,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         setActiveConversation(null)
         setMessages([])
         setProposals([])
-        setInspectPreview(null)
-        setInspectExecution(null)
+        clearInspection()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
