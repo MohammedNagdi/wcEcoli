@@ -162,6 +162,19 @@ def _run_migrations(engine):
             cur.execute("ALTER TABLE assistant_provider_configs ADD COLUMN secret_encrypted INTEGER NOT NULL DEFAULT 0")
             conn.commit()
 
+        # Migration 9: Per-conversation assistant provider/model selection.
+        cur.execute("PRAGMA table_info(assistant_conversations)")
+        conversation_cols = {row[1] for row in cur.fetchall()}
+        if conversation_cols:
+            if "provider_id" not in conversation_cols:
+                logger.info("Migration: adding 'provider_id' column to assistant_conversations")
+                cur.execute("ALTER TABLE assistant_conversations ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+            if "model" not in conversation_cols:
+                logger.info("Migration: adding 'model' column to assistant_conversations")
+                cur.execute("ALTER TABLE assistant_conversations ADD COLUMN model TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+
     except Exception as exc:
         logger.warning("Migration check failed: %s", exc)
     finally:

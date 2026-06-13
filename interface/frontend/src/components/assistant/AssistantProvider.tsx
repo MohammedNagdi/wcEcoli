@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom'
 import {
   getPlatformStatus,
   getAssistantProviderConfigs,
+  getAssistantProviderModelOptions,
   warmAssistantProvider,
   getAssistantMemory,
   clearAssistantMemory,
@@ -13,6 +14,7 @@ import {
   createAssistantConversation,
   deleteAssistantConversation,
   renameAssistantConversation,
+  updateAssistantConversation,
   createAssistantMessage,
   streamAssistantMessage,
   previewAssistantTool,
@@ -29,6 +31,7 @@ import type {
   AssistantToolPreview,
   AssistantToolExecution,
   AssistantProviderConfig,
+  AssistantProviderModelOption,
   PlatformStatus,
 } from '../../types'
 
@@ -53,12 +56,16 @@ export interface AssistantContextValue {
   // Platform / provider status
   status: PlatformStatus | null
   providerConfigs: AssistantProviderConfig[]
+  providerModelOptions: AssistantProviderModelOption[]
   statusLoading: boolean
   statusError: string | null
   refreshAssistantStatus: () => Promise<void>
   runtimeReady: boolean
   runtimeLabel: string
   providerConfigured: boolean
+  selectedProviderId: string
+  selectedModel: string
+  selectionAvailable: boolean
 
   // Page context (reactive to the route; pages can register richer context)
   context: AssistantContext
@@ -102,6 +109,7 @@ export interface AssistantContextValue {
   startNewChat: () => Promise<void>
   removeConversation: (conversationId: number) => Promise<void>
   renameConversation: (conversationId: number, title: string) => Promise<void>
+  selectConversationRuntime: (providerId: string, model: string) => Promise<void>
   sendMessage: (presetContent?: string) => Promise<void>
   inspectCurrentResult: () => Promise<void>
   runReadOnlyProposal: (proposal: AssistantToolCall) => Promise<void>
@@ -125,15 +133,19 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   // ── status ──
   const [status, setStatus] = useState<PlatformStatus | null>(null)
   const [providerConfigs, setProviderConfigs] = useState<AssistantProviderConfig[]>([])
+  const [providerModelOptions, setProviderModelOptions] = useState<AssistantProviderModelOption[]>([])
   const [statusLoading, setStatusLoading] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
 
   async function refreshAssistantStatus() {
     setStatusLoading(true)
     try {
-      const [platformStatus, configs] = await Promise.all([getPlatformStatus(), getAssistantProviderConfigs()])
+      const [platformStatus, configs, options] = await Promise.all([
+        getPlatformStatus(), getAssistantProviderConfigs(), getAssistantProviderModelOptions(),
+      ])
       setStatus(platformStatus)
       setProviderConfigs(configs)
+      setProviderModelOptions(options)
       setStatusError(null)
     } catch (err) {
       setStatusError(err instanceof Error ? err.message : String(err))
@@ -145,11 +157,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     setStatusLoading(true)
-    Promise.all([getPlatformStatus(), getAssistantProviderConfigs()])
-      .then(([data, configs]) => {
+    Promise.all([getPlatformStatus(), getAssistantProviderConfigs(), getAssistantProviderModelOptions()])
+      .then(([data, configs, options]) => {
         if (!cancelled) {
           setStatus(data)
           setProviderConfigs(configs)
+          setProviderModelOptions(options)
           setStatusError(null)
         }
       })
@@ -211,6 +224,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   // ── chat state ──
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
   const [activeConversation, setActiveConversation] = useState<AssistantConversation | null>(null)
+  const [draftProviderId, setDraftProviderId] = useState('')
+  const [draftModel, setDraftModel] = useState('')
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   const [proposals, setProposals] = useState<AssistantToolCall[]>([])
   const [input, setInput] = useState('')
@@ -237,6 +252,22 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const abortRef = useRef<AbortController | null>(null)
   const streamingRef = useRef('')
   const thinkingRef = useRef<string[]>([])
+  const selectedProviderId = activeConversation?.provider_id || draftProviderId
+  const selectedModel = activeConversation?.model || draftModel
+  const selectedOption = providerModelOptions.find((option) => option.provider_id === selectedProviderId)
+  const selectionAvailable = Boolean(selectedOption?.models.includes(selectedModel))
+
+  useEffect(() => {
+    if (activeConversation?.provider_id || draftProviderId || providerModelOptions.length === 0) return
+    const defaultProvider = status?.providers.active_runtime_provider_id
+    const option = providerModelOptions.find((item) => item.provider_id === defaultProvider) ?? providerModelOptions[0]
+    setDraftProviderId(option.provider_id)
+    setDraftModel(
+      option.models.includes(status?.providers.active_runtime_model ?? '')
+        ? status?.providers.active_runtime_model ?? ''
+        : option.models[0] ?? '',
+    )
+  }, [activeConversation?.provider_id, draftProviderId, providerModelOptions, status])
 
   useEffect(() => {
     const id = activeConversation?.id
@@ -375,6 +406,14 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setMessages([])
     setProposals([])
     setInput('')
+    const defaultProvider = status?.providers.active_runtime_provider_id
+    const option = providerModelOptions.find((item) => item.provider_id === defaultProvider) ?? providerModelOptions[0]
+    setDraftProviderId(option?.provider_id ?? '')
+    setDraftModel(
+      option?.models.includes(status?.providers.active_runtime_model ?? '')
+        ? status?.providers.active_runtime_model ?? ''
+        : option?.models[0] ?? '',
+    )
   }
 
   async function removeConversation(conversationId: number) {
@@ -411,10 +450,33 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function selectConversationRuntime(providerId: string, model: string) {
+    if (sending) return
+    setError(null)
+    if (!activeConversation) {
+      setDraftProviderId(providerId)
+      setDraftModel(model)
+      return
+    }
+    try {
+      const updated = await updateAssistantConversation(activeConversation.id, { provider_id: providerId, model })
+      setActiveConversation(updated)
+      setConversations((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function ensureConversation(content: string): Promise<AssistantConversation> {
     if (activeConversation) return activeConversation
     const title = content.trim().slice(0, 64) || 'Assistant chat'
-    const conversation = await createAssistantConversation({ title, assistant_surface: 'central', context })
+    const conversation = await createAssistantConversation({
+      title,
+      assistant_surface: 'central',
+      context,
+      provider_id: draftProviderId,
+      model: draftModel,
+    })
     setActiveConversation(conversation)
     setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)])
     return conversation
@@ -422,7 +484,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   async function sendMessage(presetContent?: string) {
     const content = (presetContent ?? input).trim()
-    if (!content || sending) return
+    if (!content || sending || !selectionAvailable) return
     setSending(true)
     setError(null)
     setCompactionNotice(false)
@@ -439,6 +501,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       context,
       status: 'sending',
       created_at: new Date().toISOString(),
+      provider_id: '',
+      model: '',
     }
     setMessages((current) => [...current, optimisticUser])
 
@@ -617,12 +681,18 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     closeAssistant,
     status,
     providerConfigs,
+    providerModelOptions,
     statusLoading,
     statusError,
     refreshAssistantStatus,
     runtimeReady,
-    runtimeLabel,
-    providerConfigured: runtimeReady,
+    runtimeLabel: selectedProviderId
+      ? `${selectedProviderId}${selectedModel ? ` (${selectedModel})` : ''}`
+      : runtimeLabel,
+    providerConfigured: selectionAvailable,
+    selectedProviderId,
+    selectedModel,
+    selectionAvailable,
     context,
     registerContext,
     clearContext,
@@ -655,6 +725,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     startNewChat,
     removeConversation,
     renameConversation,
+    selectConversationRuntime,
     sendMessage,
     inspectCurrentResult,
     runReadOnlyProposal,

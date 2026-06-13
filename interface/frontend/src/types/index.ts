@@ -823,6 +823,20 @@ export interface AssistantProviderConfig {
   requires_endpoint: boolean
   configuration_hint: string
   updated_at: string
+  models: AssistantProviderModel[]
+}
+
+export interface AssistantProviderModel {
+  model_id: string
+  is_builtin: boolean
+}
+
+export interface AssistantProviderModelTest {
+  success: boolean
+  provider_id: string
+  model: string
+  added: boolean
+  error: string
 }
 
 export interface AssistantProviderConfigUpdate {
@@ -901,6 +915,8 @@ export interface AssistantConversation {
   title: string
   assistant_surface: string
   status: string
+  provider_id: string
+  model: string
   created_at: string
   updated_at: string
 }
@@ -913,6 +929,14 @@ export interface AssistantMessage {
   context: AssistantContext
   status: string
   created_at: string
+  provider_id: string
+  model: string
+}
+
+export interface AssistantProviderModelOption {
+  provider_id: string
+  label: string
+  models: string[]
 }
 
 export interface AssistantExchange {

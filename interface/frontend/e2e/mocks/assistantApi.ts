@@ -47,7 +47,10 @@ const STATUS = {
   },
 }
 
-const CONVERSATION = { id: 1, title: 'e2e chat', assistant_surface: 'central', status: 'open', created_at: '', updated_at: '' }
+const CONVERSATION = {
+  id: 1, title: 'e2e chat', assistant_surface: 'central', status: 'open',
+  provider_id: 'openai', model: 'gpt-4.1-mini', created_at: '', updated_at: '',
+}
 const MEMORY = { conversation_id: 1, summary: '', covered_up_to_message_id: 0, remembered_genes: [], pending_confirmations: [], recent_unresolved_questions: [] }
 
 export const CREATE_EXPERIMENT_PROPOSAL = {
@@ -149,8 +152,8 @@ interface MockOptions {
 export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Promise<void> {
   const reply = opts.reply ?? 'Hello there.'
   const proposals = opts.proposals ?? []
-  const userMsg = { id: 1, conversation_id: 1, role: 'user', content: 'hi', context: CTX, status: 'stored', created_at: '' }
-  const asstMsg = { id: 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: opts.assistantStatus ?? 'completed', created_at: '' }
+  const userMsg = { id: 1, conversation_id: 1, role: 'user', content: 'hi', context: CTX, status: 'stored', provider_id: '', model: '', created_at: '' }
+  const asstMsg = { id: 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: opts.assistantStatus ?? 'completed', provider_id: 'openai', model: 'gpt-4.1-mini', created_at: '' }
 
   const streamEvents: unknown[] = [
     { type: 'meta', provider_id: 'openai', model: 'gpt-4.1-mini' },
@@ -177,6 +180,9 @@ export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Prom
   await page.route('**/api/assistant/status', (r) => r.fulfill({ json: STATUS.assistant }))
   await page.route('**/api/assistant/providers', (r) => r.fulfill({ json: STATUS.providers }))
   await page.route('**/api/assistant/provider-configs', (r) => r.fulfill({ json: [] }))
+  await page.route('**/api/assistant/provider-model-options', (r) =>
+    r.fulfill({ json: [{ provider_id: 'openai', label: 'OpenAI', models: ['gpt-4.1-mini'] }] }),
+  )
   await page.route('**/api/assistant/tools', (r) => r.fulfill({ json: [] }))
   await page.route('**/api/assistant/runtime-settings', (r) =>
     r.fulfill({

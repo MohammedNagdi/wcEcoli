@@ -1,6 +1,7 @@
 """SQLModel ORM models for wcEcoli reconstruction data."""
 
 from typing import Optional
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -109,6 +110,8 @@ class AssistantConversation(SQLModel, table=True):
     title: str = Field(index=True)
     assistant_surface: str = Field(index=True)
     status: str = "open"                         # open | archived
+    provider_id: str = ""
+    model: str = ""
     created_at: str = ""                         # ISO timestamp
     updated_at: str = ""                         # ISO timestamp
 
@@ -199,6 +202,18 @@ class AssistantProviderConfig(SQLModel, table=True):
     is_active: bool = False
     created_at: str = ""                         # ISO timestamp
     updated_at: str = ""                         # ISO timestamp
+
+
+class AssistantProviderModel(SQLModel, table=True):
+    __tablename__ = "assistant_provider_models"
+    __table_args__ = (UniqueConstraint("provider_id", "model_id"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider_id: str = Field(index=True)
+    model_id: str = Field(index=True)
+    is_builtin: bool = False
+    created_at: str = ""
+    updated_at: str = ""
 
 
 class Variant(SQLModel, table=True):

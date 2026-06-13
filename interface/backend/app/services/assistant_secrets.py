@@ -24,6 +24,7 @@ from pathlib import Path
 from app.config import settings
 
 _PREFIX = "enc:v1:"
+_EPHEMERAL_KEY: bytes | None = None
 
 
 def _key_path() -> Path:
@@ -31,6 +32,7 @@ def _key_path() -> Path:
 
 
 def _load_key() -> bytes:
+    global _EPHEMERAL_KEY
     env = os.environ.get("ASSISTANT_SECRET_KEY", "").strip()
     if env:
         try:
@@ -57,7 +59,9 @@ def _load_key() -> bytes:
             pass
     except OSError:
         # If we can't persist the key, fall back to a process-stable key so this run still works.
-        pass
+        if _EPHEMERAL_KEY is None:
+            _EPHEMERAL_KEY = key
+        return _EPHEMERAL_KEY
     return key
 
 

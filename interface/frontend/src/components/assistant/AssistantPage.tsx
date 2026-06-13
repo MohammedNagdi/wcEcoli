@@ -22,7 +22,9 @@ import {
   getAssistantToolCalls,
   getPlatformStatus,
   previewAssistantTool,
+  removeAssistantProviderModel,
   resolveAssistantConfirmation,
+  testAssistantProviderModel,
   updateAssistantProviderConfig,
 } from '../../api/client'
 import type {
@@ -56,6 +58,26 @@ function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: '
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${classes[tone]}`}>
       {children}
+    </span>
+  )
+}
+
+function InfoTooltip({ label, text }: { label: string; text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        aria-label={label}
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-300 text-[10px] font-bold text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
+        i
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-64 -translate-x-1/2 rounded-md bg-gray-950 px-3 py-2 text-xs font-normal normal-case leading-5 tracking-normal text-white shadow-lg group-hover:block group-focus-within:block"
+      >
+        {text}
+      </span>
     </span>
   )
 }
@@ -151,7 +173,7 @@ const FRONTIER_AND_LOCAL_PROVIDERS = [
     id: 'openai',
     label: 'OpenAI',
     description: 'Hosted frontier model with your OpenAI API key.',
-    defaultModel: 'gpt-4.1-mini',
+    defaultModel: '',
     endpointHint: '',
     secretLabel: 'OpenAI API key',
   },
@@ -159,9 +181,17 @@ const FRONTIER_AND_LOCAL_PROVIDERS = [
     id: 'anthropic',
     label: 'Anthropic',
     description: 'Hosted Claude model with your Anthropic API key.',
-    defaultModel: 'claude-sonnet-4-5',
+    defaultModel: '',
     endpointHint: '',
     secretLabel: 'Anthropic API key',
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    description: 'Hosted access to multiple model providers with your OpenRouter API key.',
+    defaultModel: '',
+    endpointHint: '',
+    secretLabel: 'OpenRouter API key',
   },
   {
     id: 'ollama',
@@ -203,10 +233,13 @@ function AssistantProviderSetup({
   const initialProvider = activeConfig?.provider_id || runtimeStatus?.providers.active_runtime_provider_id || 'openai'
   const [providerId, setProviderId] = useState(initialProvider)
   const [apiKey, setApiKey] = useState('')
+  const [replacingKey, setReplacingKey] = useState(false)
   const [endpointUrl, setEndpointUrl] = useState('')
   const [model, setModel] = useState('')
+  const [customModel, setCustomModel] = useState('')
   const [ollamaModels, setOllamaModels] = useState<OllamaModelList | null>(null)
   const [loadingModels, setLoadingModels] = useState(false)
+  const [testingModel, setTestingModel] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const selectedTemplate = FRONTIER_AND_LOCAL_PROVIDERS.find((provider) => provider.id === providerId) ?? FRONTIER_AND_LOCAL_PROVIDERS[0]
@@ -225,6 +258,8 @@ function AssistantProviderSetup({
     setModel(nextConfig?.model || nextConfig?.default_model || template.defaultModel)
     setOllamaModels(null)
     setApiKey('')
+    setReplacingKey(false)
+    setCustomModel('')
     setMessage(null)
   }, [configs, providerId])
 
@@ -267,6 +302,7 @@ function AssistantProviderSetup({
       })
       await onRefresh()
       setApiKey('')
+      setReplacingKey(false)
       setMessage(`${selectedTemplate.label} is now the active assistant provider.`)
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err))
@@ -289,6 +325,39 @@ function AssistantProviderSetup({
     }
   }
 
+  async function testAndAddModel() {
+    const candidate = customModel.trim()
+    if (!candidate) return
+    setTestingModel(true)
+    setMessage(null)
+    try {
+      const result = await testAssistantProviderModel(providerId, candidate, replacingKey ? apiKey : '')
+      if (!result.success) {
+        setMessage(`Model test failed: ${result.error}`)
+        return
+      }
+      await onRefresh()
+      setModel(candidate)
+      setCustomModel('')
+      setMessage(result.added ? `${candidate} tested and added.` : `${candidate} tested successfully.`)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setTestingModel(false)
+    }
+  }
+
+  async function removeModel(modelId: string) {
+    setMessage(null)
+    try {
+      await removeAssistantProviderModel(providerId, modelId)
+      await onRefresh()
+      setMessage(`${modelId} removed.`)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   return (
     <section className="p-1">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -298,9 +367,25 @@ function AssistantProviderSetup({
             Choose the model backend used for assistant text. The model can answer and propose actions, but platform changes still require typed previews and explicit confirmations.
           </p>
         </div>
-        <StatusPill tone={runtimeStatus?.providers.runtime_ready ? 'ready' : 'blocked'}>
-          {runtimeStatus?.providers.runtime_ready ? 'active provider ready' : 'setup needed'}
-        </StatusPill>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <StatusPill tone={runtimeStatus?.providers.runtime_ready ? 'ready' : 'blocked'}>
+            {runtimeStatus?.providers.runtime_ready ? 'active provider ready' : 'setup needed'}
+          </StatusPill>
+          <span
+            className="max-w-xs truncate text-xs text-gray-500"
+            title={runtimeStatus?.providers.runtime_ready
+              ? `${runtimeStatus.providers.active_runtime_provider_id} (${runtimeStatus.providers.active_runtime_model})`
+              : runtimeStatus?.providers.runtime_issue || 'No provider is active yet.'}
+          >
+            {runtimeStatus?.providers.runtime_ready
+              ? `${runtimeStatus.providers.active_runtime_provider_id} · ${runtimeStatus.providers.active_runtime_model}`
+              : runtimeStatus?.providers.runtime_issue || 'No active runtime'}
+          </span>
+          <InfoTooltip
+            label="Current runtime help"
+            text="Saved credentials are local to this installation. They are used only for assistant chat calls and are not exposed to tools or provenance payloads."
+          />
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -329,19 +414,51 @@ function AssistantProviderSetup({
         })}
       </div>
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_1fr_1.2fr]">
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
         {providerId !== 'ollama' && (
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{selectedTemplate.secretLabel}</span>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={selectedConfig?.secret_configured || selectedStatus?.secret_configured ? 'Saved key present; paste a new key to replace' : 'Paste API key'}
-              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
-            />
-            <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.secretHelp}</span>
-          </label>
+          <div className="block">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              {selectedTemplate.secretLabel}
+              <InfoTooltip label={`${selectedTemplate.secretLabel} help`} text={copy.secretHelp} />
+            </div>
+            {selectedConfig?.secret_configured && !replacingKey ? (
+              <div className="mt-1 flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  aria-label={`${selectedTemplate.secretLabel} saved`}
+                  value="••••••••"
+                  className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm tracking-widest text-gray-700 shadow-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setReplacingKey(true)}
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700"
+                >
+                  Replace key
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 flex gap-2">
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder="Paste API key"
+                  className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+                />
+                {replacingKey && (
+                  <button
+                    type="button"
+                    onClick={() => { setReplacingKey(false); setApiKey('') }}
+                    className="rounded-md border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         )}
         {providerId === 'ollama' && (
           <label className="block">
@@ -353,7 +470,7 @@ function AssistantProviderSetup({
               placeholder={selectedTemplate.endpointHint}
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
             />
-            <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.endpointHelp}</span>
+            <span className="ml-1 inline-flex"><InfoTooltip label="Ollama endpoint help" text={copy.endpointHelp} /></span>
           </label>
         )}
         {providerId === 'ollama' ? (
@@ -402,32 +519,58 @@ function AssistantProviderSetup({
                 className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
               />
             )}
-            <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.modelHelp}</span>
+            <span className="mt-1 inline-flex"><InfoTooltip label="Installed model help" text={copy.modelHelp} /></span>
           </label>
         ) : (
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Model</span>
-            <input
-              type="text"
+          <div className="block">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Default model
+              <InfoTooltip label="Default model help" text={copy.modelHelp} />
+            </div>
+            <select
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder={selectedTemplate.defaultModel}
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
-            />
-            <span className="mt-1 block text-xs leading-5 text-gray-500">{copy.modelHelp}</span>
-          </label>
+            >
+              {(selectedConfig?.models ?? []).map((item) => (
+                <option key={item.model_id} value={item.model_id}>{item.model_id}</option>
+              ))}
+            </select>
+            <div className="mt-2 flex gap-2">
+              <input
+                type="text"
+                value={customModel}
+                onChange={(event) => setCustomModel(event.target.value)}
+                placeholder="Add another model identifier"
+                className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={testAndAddModel}
+                disabled={testingModel || !customModel.trim()}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 disabled:text-gray-300"
+              >
+                {testingModel ? 'Testing...' : 'Test and add'}
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {(selectedConfig?.models ?? []).map((item) => (
+                <span key={item.model_id} className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                  {item.model_id}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item.model_id}`}
+                    onClick={() => removeModel(item.model_id)}
+                    disabled={(selectedConfig?.models.length ?? 0) <= 1}
+                    className="rounded-full px-1 font-bold text-gray-400 hover:text-red-600 disabled:cursor-not-allowed disabled:text-gray-200"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
         )}
-        <div className="rounded-md border border-gray-100 bg-gray-50 p-3 text-xs leading-5 text-gray-600">
-          <div className="font-semibold text-gray-800">Current runtime</div>
-          <div className="mt-1">
-            {runtimeStatus?.providers.runtime_ready
-              ? `${runtimeStatus.providers.active_runtime_provider_id} (${runtimeStatus.providers.active_runtime_model})`
-              : runtimeStatus?.providers.runtime_issue || 'No provider is active yet.'}
-          </div>
-          <div className="mt-2">
-            Saved credentials are local to this installation. They are used only for assistant chat calls and are not exposed to tools or provenance payloads.
-          </div>
-        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -442,10 +585,10 @@ function AssistantProviderSetup({
         <button
           type="button"
           onClick={clearProvider}
-          disabled={saving || loading || !selectedConfig?.configured}
+          disabled={saving || loading || !selectedConfig?.updated_at}
           className="rounded-md border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 disabled:cursor-not-allowed disabled:text-gray-300"
         >
-          Clear saved setup
+          Delete configuration
         </button>
         {message && <span className="text-sm text-gray-600">{message}</span>}
       </div>
@@ -1678,6 +1821,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
   // chain section → grid → columns must all be height-defined for `h-full` to resolve.
   const {
     providerConfigured, runtimeLabel, context,
+    providerModelOptions, selectedProviderId, selectedModel, selectionAvailable, selectConversationRuntime,
     conversations, activeConversation, messages, proposals, input, setInput,
     inspectPreview, inspectExecution, loading, sending, inspecting, error,
     streamingText, streamingTool, resolvedNote, memory, compactionNotice,
@@ -1689,6 +1833,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [showScrollDown, setShowScrollDown] = useState(false)
+  const selectedProviderOption = providerModelOptions.find((option) => option.provider_id === selectedProviderId)
 
   function onMessagesScroll() {
     const el = scrollRef.current
@@ -1801,15 +1946,47 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
         </aside>
 
         <div className={`relative flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm`}>
-          <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-gray-900">
                 {activeConversation?.title ?? 'New chat'}
               </div>
               <div className="mt-0.5 truncate text-xs leading-5 text-gray-500">{contextSummary(context)}</div>
             </div>
-            <span className="shrink-0 text-[11px] text-gray-500">read-only · actions need confirmation</span>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <label className="sr-only" htmlFor="chat-provider-select">Chat provider</label>
+              <select
+                id="chat-provider-select"
+                value={selectedProviderId}
+                disabled={sending}
+                onChange={(event) => {
+                  const option = providerModelOptions.find((item) => item.provider_id === event.target.value)
+                  void selectConversationRuntime(event.target.value, option?.models[0] ?? '')
+                }}
+                className="max-w-40 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs font-medium text-gray-700 disabled:bg-gray-50"
+              >
+                {!selectionAvailable && selectedProviderId && <option value={selectedProviderId}>{selectedProviderId} unavailable</option>}
+                {providerModelOptions.map((option) => <option key={option.provider_id} value={option.provider_id}>{option.label}</option>)}
+              </select>
+              <label className="sr-only" htmlFor="chat-model-select">Chat model</label>
+              <select
+                id="chat-model-select"
+                value={selectedModel}
+                disabled={sending || !selectedProviderOption}
+                onChange={(event) => void selectConversationRuntime(selectedProviderId, event.target.value)}
+                className="max-w-56 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs font-medium text-gray-700 disabled:bg-gray-50"
+              >
+                {!selectionAvailable && selectedModel && <option value={selectedModel}>{selectedModel} unavailable</option>}
+                {(selectedProviderOption?.models ?? []).map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <span className="shrink-0 text-[11px] text-gray-500">read-only · actions need confirmation</span>
+            </div>
           </div>
+          {!selectionAvailable && (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+              This chat's provider or model is unavailable. Choose a configured option before sending.
+            </div>
+          )}
 
           <div ref={scrollRef} onScroll={onMessagesScroll} className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5">
             {(inspectPreview || inspectExecution) && (
@@ -1854,6 +2031,11 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                       <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                         {isUser ? 'You' : 'Assistant'}
                       </span>
+                      {!isUser && message.provider_id && (
+                        <span className="max-w-56 truncate text-[11px] text-gray-400" title={`${message.provider_id} · ${message.model}`}>
+                          {message.provider_id} · {message.model}
+                        </span>
+                      )}
                       {showStatus && (
                         <StatusPill tone={messageStatusTone(message.status)}>
                           {messageStatusLabel(message.status)}
@@ -2001,7 +2183,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                   type="button"
                   data-testid="assistant-send"
                   onClick={() => sendMessage()}
-                  disabled={!input.trim()}
+                  disabled={!input.trim() || !selectionAvailable}
                   className="mb-0.5 shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition disabled:opacity-40"
                 >
                   Send

@@ -1,13 +1,17 @@
 import json
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from app.config import settings
 from app.db.models import (
     AssistantConfirmation,
+    AssistantConversation,
     AssistantProvenance,
     AssistantProviderConfig,
+    AssistantProviderModel,
     AssistantToolCall,
     BuilderSectionDraft,
     Condition,
@@ -27,6 +31,7 @@ from app.services.assistant_harness import (
     AssistantConversationUpdate,
     AssistantMessageCreate,
     AssistantProviderConfigUpdate,
+    AssistantProviderModelTestRequest,
     AssistantToolPreviewRequest,
     AssistantToolExecutionRequest,
     ConfirmationCreate,
@@ -38,6 +43,8 @@ from app.services.assistant_harness import (
     create_conversation,
     update_conversation,
     execute_tool,
+    delete_provider_model,
+    ensure_provider_models,
     get_assistant_harness_status,
     get_provider_layer_status,
     message_to_out,
@@ -47,6 +54,7 @@ from app.services.assistant_harness import (
     record_provenance,
     resolve_confirmation,
     store_message,
+    test_and_add_provider_model as _test_and_add_provider_model,
     tool_call_to_out,
     upsert_provider_config,
 )
@@ -89,6 +97,202 @@ def test_assistant_status_exposes_provider_and_tool_contracts_without_execution(
     assert "route" in status.context_contract
     tool_names = {tool.name for tool in status.tool_registry}
     assert {"create_experiment", "run_simulation", "inspect_result"} <= tool_names
+
+
+def test_hosted_provider_models_seed_and_final_model_cannot_be_removed():
+    engine, session = _build_session()
+    try:
+        models = ensure_provider_models(session, "openai")
+        assert [item.model_id for item in models] == [
+            "gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini",
+        ]
+        for item in models[:-1]:
+            delete_provider_model(session, "openai", item.model_id)
+        with pytest.raises(HTTPException, match="final remaining model"):
+            delete_provider_model(session, "openai", models[-1].model_id)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_provider_model_test_prefers_typed_key_then_falls_back_to_saved_key(monkeypatch):
+    engine, session = _build_session()
+    calls = []
+
+    def fake_transport(url, headers, payload, timeout):
+        calls.append(headers)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr("app.services.assistant_runtime._default_transport", fake_transport)
+    try:
+        upsert_provider_config(
+            session,
+            "openai",
+            AssistantProviderConfigUpdate(api_key="saved-key", model="gpt-4.1-mini", make_active=True),
+        )
+        typed = _test_and_add_provider_model(
+            session,
+            "openai",
+            AssistantProviderModelTestRequest(model="custom-typed", api_key="typed-key"),
+        )
+        saved = _test_and_add_provider_model(
+            session,
+            "openai",
+            AssistantProviderModelTestRequest(model="custom-saved"),
+        )
+        assert typed.success and typed.added
+        assert saved.success and saved.added
+        assert calls[0]["Authorization"] == "Bearer typed-key"
+        assert calls[1]["Authorization"] == "Bearer saved-key"
+        assert session.exec(
+            select(AssistantProviderModel).where(AssistantProviderModel.model_id == "custom-typed")
+        ).first()
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_failed_provider_model_test_does_not_persist(monkeypatch):
+    engine, session = _build_session()
+
+    def failing_transport(url, headers, payload, timeout):
+        raise OSError("provider unavailable")
+
+    monkeypatch.setattr("app.services.assistant_runtime._default_transport", failing_transport)
+    try:
+        result = _test_and_add_provider_model(
+            session,
+            "openrouter",
+            AssistantProviderModelTestRequest(model="vendor/model-with/slash", api_key="typed-key"),
+        )
+        assert result.success is False
+        assert session.exec(
+            select(AssistantProviderModel).where(AssistantProviderModel.model_id == "vendor/model-with/slash")
+        ).first() is None
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_removing_selected_provider_model_assigns_remaining_default():
+    engine, session = _build_session()
+    try:
+        upsert_provider_config(
+            session,
+            "openai",
+            AssistantProviderConfigUpdate(api_key="key", model="gpt-4.1-mini", make_active=True),
+        )
+        delete_provider_model(session, "openai", "gpt-4.1-mini")
+        config = session.exec(select(AssistantProviderConfig)).one()
+        assert config.model == "gpt-4.1"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_conversation_runtime_selection_persists_and_overrides_global_provider():
+    from app.services.assistant_agent import generate_assistant_agent_reply
+
+    engine, session = _build_session()
+    snapshot = {
+        "assistant_provider": settings.assistant_provider,
+        "assistant_model": settings.assistant_model,
+        "openai_api_key": settings.openai_api_key,
+        "anthropic_api_key": settings.anthropic_api_key,
+    }
+    calls = []
+
+    def fake_transport(url, headers, payload, timeout):
+        calls.append({"url": url, "payload": payload})
+        return {"content": [{"type": "text", "text": "selected reply"}], "stop_reason": "end_turn"}
+
+    try:
+        settings.assistant_provider = "openai"
+        settings.assistant_model = "gpt-4.1-mini"
+        settings.openai_api_key = "global-openai-key"
+        settings.anthropic_api_key = ""
+        upsert_provider_config(
+            session,
+            "anthropic",
+            AssistantProviderConfigUpdate(api_key="anthropic-key", model="claude-sonnet-4-5", make_active=False),
+        )
+        conversation = create_conversation(
+            session,
+            AssistantConversationCreate(
+                title="selected runtime",
+                provider_id="anthropic",
+                model="claude-sonnet-4-5",
+            ),
+        )
+        result = generate_assistant_agent_reply(
+            "hello",
+            {"route": "/assistant"},
+            session=session,
+            conversation_id=conversation.id,
+            provider_id=conversation.provider_id,
+            model=conversation.model,
+            transport=fake_transport,
+        )
+        assert result.status == "completed"
+        assert result.provider_id == "anthropic"
+        assert result.model == "claude-sonnet-4-5"
+        assert calls[0]["payload"]["model"] == "claude-sonnet-4-5"
+        assert settings.assistant_provider == "openai"
+    finally:
+        _restore_runtime_settings(snapshot)
+        session.close()
+        engine.dispose()
+
+
+def test_conversation_runtime_can_switch_and_rejects_unavailable_model():
+    engine, session = _build_session()
+    try:
+        upsert_provider_config(
+            session,
+            "openai",
+            AssistantProviderConfigUpdate(api_key="key", model="gpt-4.1-mini", make_active=True),
+        )
+        conversation = create_conversation(session, AssistantConversationCreate(title="switch"))
+        updated = update_conversation(
+            session,
+            conversation.id or 0,
+            AssistantConversationUpdate(provider_id="openai", model="gpt-4.1"),
+        )
+        assert updated.model == "gpt-4.1"
+        with pytest.raises(HTTPException, match="not available"):
+            update_conversation(
+                session,
+                conversation.id or 0,
+                AssistantConversationUpdate(provider_id="openai", model="deleted-model"),
+            )
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_message_output_includes_provider_model_from_provenance():
+    engine, session = _build_session()
+    try:
+        conversation = AssistantConversation(title="reply metadata", assistant_surface="central")
+        session.add(conversation)
+        session.commit()
+        session.refresh(conversation)
+        message = store_message(session, conversation, "assistant", "reply", AssistantContext())
+        record_provenance(
+            session,
+            conversation_id=conversation.id,
+            message_id=message.id,
+            provider_id="openrouter",
+            model="openai/gpt-4.1-mini",
+            request={},
+            response={},
+        )
+        output = message_to_out(message, session)
+        assert output.provider_id == "openrouter"
+        assert output.model == "openai/gpt-4.1-mini"
+    finally:
+        session.close()
+        engine.dispose()
 
 
 def test_assistant_message_round_trip_records_blocked_response_and_provenance():
@@ -675,6 +879,8 @@ def test_persisted_provider_config_overrides_environment_selection():
         settings.assistant_provider = "openai"
         settings.assistant_model = "env-model"
         settings.openai_api_key = ""
+        session.add(AssistantProviderModel(provider_id="openai", model_id="stored-model", is_builtin=False))
+        session.commit()
         upsert_provider_config(
             session,
             "openai",
@@ -1357,7 +1563,7 @@ def test_agent_loop_executes_read_only_tool_and_feeds_result_back():
         upsert_provider_config(
             session,
             "openai",
-            AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True),
+            AssistantProviderConfigUpdate(api_key="k", model="gpt-4.1-mini", make_active=True),
         )
 
         result = generate_assistant_agent_reply(
@@ -1464,7 +1670,7 @@ def test_agent_recovers_text_embedded_tool_call_from_weak_model():
         session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
         session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", ko_index=84))
         session.commit()
-        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="gpt-4.1-mini", make_active=True))
 
         result = generate_assistant_agent_reply(
             "How many genes are supported?",
@@ -1527,7 +1733,7 @@ def test_streaming_agent_emits_deltas_and_runs_tool():
         session.add(Gene(id=1, ecoli_id="EG10001", symbol="dnaA", ko_index=42))
         session.add(Gene(id=2, ecoli_id="EG10002", symbol="crp", ko_index=84))
         session.commit()
-        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="gpt-4.1-mini", make_active=True))
 
         events = list(stream_assistant_agent_events(
             "How many genes are supported?",
@@ -1569,7 +1775,7 @@ def test_compaction_summarizes_old_turns_and_pack_surfaces_it():
         settings.assistant_provider = ""
         settings.assistant_keep_recent_turns = 4
         settings.assistant_compact_threshold = 3
-        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="gpt-4.1-mini", make_active=True))
 
         conversation = create_conversation(session, AssistantConversationCreate(title="c"))
         ctx = AssistantContext()
@@ -2048,7 +2254,7 @@ def test_agent_loop_surfaces_side_effect_tool_without_executing():
         upsert_provider_config(
             session,
             "openai",
-            AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True),
+            AssistantProviderConfigUpdate(api_key="k", model="gpt-4.1-mini", make_active=True),
         )
 
         result = generate_assistant_agent_reply(
@@ -2217,7 +2423,7 @@ def test_agent_degrades_gracefully_on_provider_failure():
         settings.assistant_provider = ""
         settings.assistant_model = ""
         settings.openai_api_key = ""
-        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="gpt-4.1-mini", make_active=True))
 
         def boom(url, headers, payload, timeout):
             raise urllib.error.URLError("connection refused")
@@ -2248,7 +2454,7 @@ def test_streaming_degrades_gracefully_on_provider_failure():
         settings.assistant_provider = ""
         settings.assistant_model = ""
         settings.openai_api_key = ""
-        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="gpt-4.1-mini", make_active=True))
 
         def boom(url, headers, payload, timeout):
             raise urllib.error.URLError("connection refused")
@@ -2324,7 +2530,7 @@ def test_semantic_boundary_triggers_earlier_compaction():
         settings.assistant_provider = ""
         settings.assistant_keep_recent_turns = 4
         settings.assistant_compact_threshold = 6  # high enough that size alone won't trigger
-        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="m", make_active=True))
+        upsert_provider_config(session, "openai", AssistantProviderConfigUpdate(api_key="k", model="gpt-4.1-mini", make_active=True))
 
         # Control: same gene throughout -> below threshold, no compaction.
         same = create_conversation(session, AssistantConversationCreate(title="same"))

@@ -375,10 +375,12 @@ def stream_assistant_agent_events(
     session: Session,
     history: list[dict[str, Any]] | None = None,
     conversation_id: int | None = None,
+    provider_id: str = "",
+    model: str = "",
     stream_transport=None,
 ) -> Generator[dict[str, Any], None, None]:
     active_config = _active_provider_config(session)
-    requested_provider = active_config.provider_id if active_config else (settings.assistant_provider or "").strip()
+    requested_provider = provider_id or (active_config.provider_id if active_config else (settings.assistant_provider or "").strip())
 
     def _emit(result: AssistantAgentResult) -> Generator[dict[str, Any], None, None]:
         yield {"type": "result", "result": result.model_dump()}
@@ -390,7 +392,7 @@ def stream_assistant_agent_events(
         ))
         return
 
-    provider = _select_provider(session)
+    provider = _select_provider(session, provider_id, model)
     if not provider:
         yield from _emit(AssistantAgentResult(
             status="no_provider_configured",

@@ -57,7 +57,7 @@ RUNTIME_PROVIDER_SPECS = {
         kind="anthropic",
         secret_setting="anthropic_api_key",
         default_base_url="https://api.anthropic.com/v1",
-        default_model="claude-opus-4-8",
+        default_model="claude-sonnet-4-5",
     ),
     "openrouter": RuntimeProviderSpec(
         provider_id="openrouter",
@@ -137,7 +137,26 @@ def _config_secret(config: AssistantProviderConfig) -> str:
     return reveal(config.secret_value or "", bool(getattr(config, "secret_encrypted", False))).strip()
 
 
-def _select_provider(session: Session | None = None) -> ResolvedRuntimeProvider | None:
+def _select_provider(
+    session: Session | None = None,
+    provider_id: str = "",
+    model: str = "",
+) -> ResolvedRuntimeProvider | None:
+    if provider_id:
+        spec = RUNTIME_PROVIDER_SPECS.get(provider_id)
+        if not spec:
+            return None
+        config = session.exec(
+            select(AssistantProviderConfig).where(AssistantProviderConfig.provider_id == provider_id)
+        ).first() if session is not None else None
+        return ResolvedRuntimeProvider(
+            spec=spec,
+            secret_value=_config_secret(config) if config else "",
+            endpoint_url=config.endpoint_url.strip() if config else "",
+            model=model.strip() or (config.model.strip() if config else ""),
+            source="local_config" if config else "environment",
+        )
+
     active_config = _active_provider_config(session)
     if active_config:
         spec = RUNTIME_PROVIDER_SPECS.get(active_config.provider_id)

@@ -25,6 +25,7 @@ from app.db.models import (
     AssistantConversation,
     AssistantMessage,
     AssistantProviderConfig,
+    AssistantProviderModel,
     AssistantProvenance,
     AssistantRuntimeSettings,
     AssistantToolCall,
@@ -60,6 +61,18 @@ ProviderHealthState = Literal["not_configured", "configured_not_checked"]
 AssistantState = Literal["scaffolded_disabled", "provider_configured_tools_disabled", "read_only_tools_enabled"]
 AssistantMessageRole = Literal["user", "assistant", "system"]
 ConfirmationStatus = Literal["pending", "approved", "rejected", "cancelled", "used"]
+
+HOSTED_PROVIDER_MODELS: dict[str, list[str]] = {
+    "openai": ["gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini"],
+    "anthropic": ["claude-sonnet-4-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"],
+    "openrouter": [
+        "openai/gpt-4.1-mini",
+        "openai/gpt-4.1",
+        "anthropic/claude-sonnet-4-5",
+        "google/gemini-2.5-pro",
+        "meta-llama/llama-3.3-70b-instruct",
+    ],
+}
 
 
 CONTEXT_CONTRACT = [
@@ -176,6 +189,11 @@ class ProviderLayerStatus(BaseModel):
     notes: list[str]
 
 
+class AssistantProviderModelOut(BaseModel):
+    model_id: str
+    is_builtin: bool
+
+
 class AssistantProviderConfigOut(BaseModel):
     provider_id: str
     label: str
@@ -192,6 +210,7 @@ class AssistantProviderConfigOut(BaseModel):
     requires_endpoint: bool = False
     configuration_hint: str = ""
     updated_at: str = ""
+    models: list[AssistantProviderModelOut] = Field(default_factory=list)
 
 
 class AssistantProviderConfigUpdate(BaseModel):
@@ -200,6 +219,19 @@ class AssistantProviderConfigUpdate(BaseModel):
     model: str = ""
     label: str = ""
     make_active: bool = True
+
+
+class AssistantProviderModelTestRequest(BaseModel):
+    model: str
+    api_key: str = ""
+
+
+class AssistantProviderModelTestOut(BaseModel):
+    success: bool
+    provider_id: str
+    model: str
+    added: bool = False
+    error: str = ""
 
 
 class OllamaModelOut(BaseModel):
@@ -279,10 +311,14 @@ class AssistantConversationCreate(BaseModel):
     title: str = "New assistant conversation"
     assistant_surface: AssistantSurface = "central"
     context: AssistantContext = Field(default_factory=AssistantContext)
+    provider_id: str = ""
+    model: str = ""
 
 
 class AssistantConversationUpdate(BaseModel):
-    title: str
+    title: str | None = None
+    provider_id: str | None = None
+    model: str | None = None
 
 
 class AssistantConversationOut(BaseModel):
@@ -290,6 +326,8 @@ class AssistantConversationOut(BaseModel):
     title: str
     assistant_surface: AssistantSurface
     status: str
+    provider_id: str = ""
+    model: str = ""
     created_at: str
     updated_at: str
 
@@ -307,6 +345,14 @@ class AssistantMessageOut(BaseModel):
     context: AssistantContext
     status: str
     created_at: str
+    provider_id: str = ""
+    model: str = ""
+
+
+class AssistantProviderModelOption(BaseModel):
+    provider_id: str
+    label: str
+    models: list[str] = Field(default_factory=list)
 
 
 class AssistantToolCallOut(BaseModel):
@@ -582,6 +628,7 @@ def provider_configs_to_out(session: Session) -> list[AssistantProviderConfigOut
     for definition in PROVIDER_DEFINITIONS:
         config = configs_by_id.get(definition.provider_id)
         runtime_spec = RUNTIME_PROVIDER_SPECS.get(definition.provider_id)
+        models = ensure_provider_models(session, definition.provider_id)
         outputs.append(
             AssistantProviderConfigOut(
                 provider_id=definition.provider_id,
@@ -601,9 +648,186 @@ def provider_configs_to_out(session: Session) -> list[AssistantProviderConfigOut
                 requires_endpoint=bool(runtime_spec and runtime_spec.endpoint_setting and not runtime_spec.secret_setting),
                 configuration_hint=definition.configuration_hint,
                 updated_at=config.updated_at if config else "",
+                models=[
+                    AssistantProviderModelOut(model_id=item.model_id, is_builtin=item.is_builtin)
+                    for item in models
+                ],
             )
         )
     return outputs
+
+
+def ensure_provider_models(session: Session, provider_id: str) -> list[AssistantProviderModel]:
+    models = session.exec(
+        select(AssistantProviderModel)
+        .where(AssistantProviderModel.provider_id == provider_id)
+        .order_by(AssistantProviderModel.id)
+    ).all()
+    if models or provider_id not in HOSTED_PROVIDER_MODELS:
+        return models
+    timestamp = now_iso()
+    for model_id in HOSTED_PROVIDER_MODELS[provider_id]:
+        session.add(
+            AssistantProviderModel(
+                provider_id=provider_id,
+                model_id=model_id,
+                is_builtin=True,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+    session.commit()
+    return session.exec(
+        select(AssistantProviderModel)
+        .where(AssistantProviderModel.provider_id == provider_id)
+        .order_by(AssistantProviderModel.id)
+    ).all()
+
+
+def _hosted_provider_or_error(provider_id: str):
+    spec = RUNTIME_PROVIDER_SPECS.get(provider_id)
+    if not spec or provider_id not in HOSTED_PROVIDER_MODELS:
+        raise HTTPException(status_code=422, detail=f"Provider '{provider_id}' does not support managed hosted models.")
+    return spec
+
+
+def test_and_add_provider_model(
+    session: Session,
+    provider_id: str,
+    data: AssistantProviderModelTestRequest,
+) -> AssistantProviderModelTestOut:
+    spec = _hosted_provider_or_error(provider_id)
+    ensure_provider_models(session, provider_id)
+    model = data.model.strip()
+    if not model:
+        raise HTTPException(status_code=422, detail="Model identifier is required.")
+    config = session.exec(
+        select(AssistantProviderConfig).where(AssistantProviderConfig.provider_id == provider_id)
+    ).first()
+    from app.services.assistant_secrets import reveal
+
+    api_key = data.api_key.strip()
+    if not api_key and config:
+        api_key = reveal(config.secret_value or "", bool(config.secret_encrypted)).strip()
+    if not api_key and spec.secret_setting:
+        api_key = str(getattr(settings, spec.secret_setting, "") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=422, detail="An API key is required to test this model.")
+
+    try:
+        from app.services.assistant_agent import _call_provider
+        from app.services.assistant_runtime import _default_transport
+
+        _response, step = _call_provider(
+            kind=spec.kind,
+            base_url=spec.default_base_url.rstrip("/"),
+            model=model,
+            api_key=api_key,
+            extra_headers=spec.extra_headers,
+            system="Reply with only: ok",
+            native_messages=[{"role": "user", "content": "ok"}],
+            provider_tools=[],
+            timeout=max(5, int(settings.assistant_request_timeout_sec or 30)),
+            transport=_default_transport,
+        )
+        if not step.text.strip():
+            raise ValueError("Provider returned an empty response.")
+    except (urllib.error.URLError, TimeoutError, OSError, KeyError, IndexError, TypeError, ValueError) as exc:
+        return AssistantProviderModelTestOut(
+            success=False,
+            provider_id=provider_id,
+            model=model,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+    existing = session.exec(
+        select(AssistantProviderModel).where(
+            AssistantProviderModel.provider_id == provider_id,
+            AssistantProviderModel.model_id == model,
+        )
+    ).first()
+    if not existing:
+        timestamp = now_iso()
+        session.add(
+            AssistantProviderModel(
+                provider_id=provider_id,
+                model_id=model,
+                is_builtin=False,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+        session.commit()
+    return AssistantProviderModelTestOut(success=True, provider_id=provider_id, model=model, added=not bool(existing))
+
+
+def delete_provider_model(session: Session, provider_id: str, model: str) -> list[AssistantProviderModelOut]:
+    _hosted_provider_or_error(provider_id)
+    models = ensure_provider_models(session, provider_id)
+    target = next((item for item in models if item.model_id == model), None)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Model '{model}' is not saved for provider '{provider_id}'.")
+    if len(models) <= 1:
+        raise HTTPException(status_code=422, detail="The final remaining model cannot be removed.")
+    session.delete(target)
+    config = session.exec(
+        select(AssistantProviderConfig).where(AssistantProviderConfig.provider_id == provider_id)
+    ).first()
+    if config and config.model == model:
+        config.model = next(item.model_id for item in models if item.id != target.id)
+        config.updated_at = now_iso()
+        session.add(config)
+    session.commit()
+    return [
+        AssistantProviderModelOut(model_id=item.model_id, is_builtin=item.is_builtin)
+        for item in ensure_provider_models(session, provider_id)
+    ]
+
+
+def provider_model_options(session: Session) -> list[AssistantProviderModelOption]:
+    outputs: list[AssistantProviderModelOption] = []
+    configs = _provider_configs_by_id(session)
+    for definition in PROVIDER_DEFINITIONS:
+        config = configs.get(definition.provider_id)
+        if not _provider_configured_for_status(definition, config):
+            continue
+        models = [item.model_id for item in ensure_provider_models(session, definition.provider_id)]
+        configured_model = _provider_model(definition, config)
+        if definition.provider_id == "ollama":
+            discovered = get_ollama_models(session, config.endpoint_url if config else "")
+            if discovered.reachable:
+                models.extend(item.name for item in discovered.models if item.name not in models)
+        if configured_model and configured_model not in models:
+            models.insert(0, configured_model)
+        outputs.append(
+            AssistantProviderModelOption(
+                provider_id=definition.provider_id,
+                label=definition.label,
+                models=models,
+            )
+        )
+    return outputs
+
+
+def validate_conversation_runtime(session: Session, provider_id: str, model: str) -> tuple[str, str]:
+    requested_provider = provider_id.strip()
+    provider_id = requested_provider
+    model = model.strip()
+    options = provider_model_options(session)
+    if not provider_id:
+        layer = get_provider_layer_status(session)
+        provider_id = layer.active_runtime_provider_id
+        model = model or layer.active_runtime_model
+        if not provider_id:
+            return "", ""
+    option = next((item for item in options if item.provider_id == provider_id), None)
+    if not option:
+        raise HTTPException(status_code=422, detail=f"Provider '{provider_id}' is not configured.")
+    if not model:
+        model = option.models[0] if option.models else ""
+    if not model or model not in option.models:
+        raise HTTPException(status_code=422, detail=f"Model '{model}' is not available for provider '{provider_id}'.")
+    return provider_id, model
 
 
 def upsert_provider_config(
@@ -616,6 +840,9 @@ def upsert_provider_config(
         raise HTTPException(status_code=404, detail=f"Unknown assistant provider '{provider_id}'.")
     if provider_id not in RUNTIME_PROVIDER_SPECS:
         raise HTTPException(status_code=422, detail=f"Provider '{provider_id}' does not have a runtime adapter.")
+    available_models = ensure_provider_models(session, provider_id)
+    if available_models and data.model.strip() not in {item.model_id for item in available_models}:
+        raise HTTPException(status_code=422, detail="Select a saved model or test and add it first.")
 
     timestamp = now_iso()
     record = session.exec(select(AssistantProviderConfig).where(AssistantProviderConfig.provider_id == provider_id)).first()
@@ -649,9 +876,12 @@ def upsert_provider_config(
 
 def delete_provider_config(session: Session, provider_id: str) -> None:
     record = session.exec(select(AssistantProviderConfig).where(AssistantProviderConfig.provider_id == provider_id)).first()
-    if not record:
-        return
-    session.delete(record)
+    if record:
+        session.delete(record)
+    for model in session.exec(
+        select(AssistantProviderModel).where(AssistantProviderModel.provider_id == provider_id)
+    ).all():
+        session.delete(model)
     session.commit()
 
 
@@ -4159,12 +4389,25 @@ def conversation_to_out(record: AssistantConversation) -> AssistantConversationO
         title=record.title,
         assistant_surface=record.assistant_surface,  # type: ignore[arg-type]
         status=record.status,
+        provider_id=record.provider_id,
+        model=record.model,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
 
 
-def message_to_out(record: AssistantMessage) -> AssistantMessageOut:
+def message_to_out(record: AssistantMessage, session: Session | None = None) -> AssistantMessageOut:
+    provider_id = ""
+    model = ""
+    if session is not None and record.role == "assistant":
+        provenance = session.exec(
+            select(AssistantProvenance)
+            .where(AssistantProvenance.message_id == record.id)
+            .order_by(AssistantProvenance.id.desc())
+        ).first()
+        if provenance:
+            provider_id = provenance.provider_id
+            model = provenance.model
     return AssistantMessageOut(
         id=record.id or 0,
         conversation_id=record.conversation_id,
@@ -4173,6 +4416,8 @@ def message_to_out(record: AssistantMessage) -> AssistantMessageOut:
         context=AssistantContext.model_validate(from_json(record.context_json, {})),
         status=record.status,
         created_at=record.created_at,
+        provider_id=provider_id,
+        model=model,
     )
 
 
@@ -4222,10 +4467,13 @@ def tool_call_to_out(record: AssistantToolCall) -> AssistantToolCallOut:
 def create_conversation(session: Session, data: AssistantConversationCreate) -> AssistantConversation:
     title = data.title.strip() or "New assistant conversation"
     timestamp = now_iso()
+    provider_id, model = validate_conversation_runtime(session, data.provider_id, data.model)
     conversation = AssistantConversation(
         title=title,
         assistant_surface=data.assistant_surface,
         status="open",
+        provider_id=provider_id,
+        model=model,
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -4241,10 +4489,15 @@ def update_conversation(
     conversation = session.get(AssistantConversation, conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Assistant conversation not found.")
-    title = data.title.strip()
-    if not title:
-        raise HTTPException(status_code=422, detail="Conversation title cannot be empty.")
-    conversation.title = title[:200]
+    if data.title is not None:
+        title = data.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="Conversation title cannot be empty.")
+        conversation.title = title[:200]
+    if data.provider_id is not None or data.model is not None:
+        provider_id = data.provider_id if data.provider_id is not None else conversation.provider_id
+        model = data.model if data.model is not None else conversation.model
+        conversation.provider_id, conversation.model = validate_conversation_runtime(session, provider_id, model)
     conversation.updated_at = now_iso()
     session.add(conversation)
     session.commit()

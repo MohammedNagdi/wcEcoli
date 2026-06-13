@@ -21,7 +21,8 @@ import type {
   PlatformStatus, DistributionStatus, ProviderLayerStatus, AssistantHarnessStatus,
   AssistantToolSpec, AssistantConversation, AssistantExchange, AssistantContext, AssistantMessage, AssistantConfirmation,
   AssistantToolPreview, AssistantToolExecution, AssistantToolCall, AssistantProvenance,
-  AssistantProviderConfig, AssistantProviderConfigUpdate,
+  AssistantProviderConfig, AssistantProviderConfigUpdate, AssistantProviderModel, AssistantProviderModelTest,
+  AssistantProviderModelOption,
   OllamaModelList,
 } from '../types'
 
@@ -505,6 +506,10 @@ export async function getAssistantProviderConfigs(): Promise<AssistantProviderCo
   return fetchJSON('/assistant/provider-configs')
 }
 
+export async function getAssistantProviderModelOptions(): Promise<AssistantProviderModelOption[]> {
+  return fetchJSON('/assistant/provider-model-options')
+}
+
 export async function updateAssistantProviderConfig(
   providerId: string,
   data: AssistantProviderConfigUpdate
@@ -518,6 +523,27 @@ export async function updateAssistantProviderConfig(
 
 export async function clearAssistantProviderConfig(providerId: string): Promise<AssistantProviderConfig[]> {
   return fetchJSON(`/assistant/provider-configs/${encodeURIComponent(providerId)}`, { method: 'DELETE' })
+}
+
+export async function testAssistantProviderModel(
+  providerId: string,
+  model: string,
+  apiKey = '',
+): Promise<AssistantProviderModelTest> {
+  return fetchJSON(`/assistant/provider-configs/${encodeURIComponent(providerId)}/models/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, api_key: apiKey }),
+  })
+}
+
+export async function removeAssistantProviderModel(
+  providerId: string,
+  model: string,
+): Promise<AssistantProviderModel[]> {
+  return fetchJSON(`/assistant/provider-configs/${encodeURIComponent(providerId)}/models?model=${encodeURIComponent(model)}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function getOllamaModels(endpointUrl?: string): Promise<OllamaModelList> {
@@ -565,6 +591,8 @@ export async function createAssistantConversation(data: {
   title: string
   assistant_surface: string
   context: AssistantContext
+  provider_id?: string
+  model?: string
 }): Promise<AssistantConversation> {
   return fetchJSON('/assistant/conversations', {
     method: 'POST',
@@ -589,6 +617,17 @@ export async function renameAssistantConversation(
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title }),
+  })
+}
+
+export async function updateAssistantConversation(
+  conversationId: number,
+  data: { title?: string; provider_id?: string; model?: string },
+): Promise<AssistantConversation> {
+  return fetchJSON(`/assistant/conversations/${conversationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
   })
 }
 

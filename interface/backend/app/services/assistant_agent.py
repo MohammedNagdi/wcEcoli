@@ -727,6 +727,8 @@ def compact_conversation(
     session: Session | None,
     conversation_id: int,
     *,
+    provider_id: str = "",
+    model: str = "",
     transport: Transport | None = None,
 ) -> dict[str, Any]:
     """Fold older turns into a rolling, model-written summary once enough accumulate.
@@ -746,7 +748,7 @@ def compact_conversation(
 
     if session is None:
         return {"compacted": False, "reason": "no_session"}
-    provider = _select_provider(session)
+    provider = _select_provider(session, provider_id, model)
     if not provider or not _resolved_provider_configured(provider):
         return {"compacted": False, "reason": "no_provider"}
 
@@ -860,10 +862,12 @@ def generate_assistant_agent_reply(
     session: Session | None = None,
     history: list[dict[str, Any]] | None = None,
     conversation_id: int | None = None,
+    provider_id: str = "",
+    model: str = "",
     transport: Transport | None = None,
 ) -> AssistantAgentResult:
     active_config = _active_provider_config(session)
-    requested_provider = active_config.provider_id if active_config else (settings.assistant_provider or "").strip()
+    requested_provider = provider_id or (active_config.provider_id if active_config else (settings.assistant_provider or "").strip())
     if requested_provider and requested_provider not in RUNTIME_PROVIDER_SPECS:
         return AssistantAgentResult(
             status="provider_not_supported",
@@ -876,7 +880,7 @@ def generate_assistant_agent_reply(
             response={"reason": "selected provider has no runtime adapter"},
         )
 
-    provider = _select_provider(session)
+    provider = _select_provider(session, provider_id, model)
     if not provider:
         return AssistantAgentResult(
             status="no_provider_configured",

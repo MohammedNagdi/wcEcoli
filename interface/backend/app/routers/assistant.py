@@ -37,6 +37,10 @@ from app.services.assistant_harness import (
     AssistantToolSpec,
     AssistantProviderConfigOut,
     AssistantProviderConfigUpdate,
+    AssistantProviderModelOut,
+    AssistantProviderModelTestOut,
+    AssistantProviderModelTestRequest,
+    AssistantProviderModelOption,
     AssistantRuntimeSettingsOut,
     AssistantRuntimeSettingsUpdate,
     get_runtime_settings,
@@ -61,6 +65,7 @@ from app.services.assistant_harness import (
     delete_conversation,
     update_conversation,
     delete_provider_config,
+    delete_provider_model,
     execute_tool,
     get_assistant_harness_status,
     get_ollama_models,
@@ -69,14 +74,17 @@ from app.services.assistant_harness import (
     message_to_out,
     preview_tool,
     provider_configs_to_out,
+    provider_model_options,
     provenance_to_out,
     record_agent_side_effect_proposals,
     record_contextual_proposals,
     record_provenance,
     resolve_confirmation,
     store_message,
+    test_and_add_provider_model,
     tool_call_to_out,
     upsert_provider_config,
+    validate_conversation_runtime,
 )
 from app.services.assistant_agent import (
     PendingSideEffect,
@@ -124,6 +132,11 @@ def list_provider_configs(session: Session = Depends(get_session)) -> list[Assis
     return provider_configs_to_out(session)
 
 
+@router.get("/provider-model-options", response_model=list[AssistantProviderModelOption])
+def list_provider_model_options(session: Session = Depends(get_session)) -> list[AssistantProviderModelOption]:
+    return provider_model_options(session)
+
+
 @router.put("/provider-configs/{provider_id}", response_model=AssistantProviderConfigOut)
 def update_provider_config(
     provider_id: str,
@@ -141,6 +154,24 @@ def clear_provider_config(
 ) -> list[AssistantProviderConfigOut]:
     delete_provider_config(session, provider_id)
     return provider_configs_to_out(session)
+
+
+@router.post("/provider-configs/{provider_id}/models/test", response_model=AssistantProviderModelTestOut)
+def test_provider_model(
+    provider_id: str,
+    data: AssistantProviderModelTestRequest,
+    session: Session = Depends(get_session),
+) -> AssistantProviderModelTestOut:
+    return test_and_add_provider_model(session, provider_id, data)
+
+
+@router.delete("/provider-configs/{provider_id}/models", response_model=list[AssistantProviderModelOut])
+def remove_provider_model(
+    provider_id: str,
+    model: str = Query(...),
+    session: Session = Depends(get_session),
+) -> list[AssistantProviderModelOut]:
+    return delete_provider_model(session, provider_id, model)
 
 
 @router.get("/provider-configs/ollama/models", response_model=OllamaModelListOut)
@@ -255,7 +286,7 @@ def list_messages(
         .where(AssistantMessage.role != "summary")  # internal rolling summary, not a chat bubble
         .order_by(AssistantMessage.id)
     ).all()
-    return [message_to_out(record) for record in records]
+    return [message_to_out(record, session) for record in records]
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=AssistantExchangeOut)
@@ -269,6 +300,7 @@ def create_message(
         raise HTTPException(status_code=404, detail="Assistant conversation not found.")
     if not data.content.strip():
         raise HTTPException(status_code=422, detail="Message content must not be empty.")
+    validate_conversation_runtime(session, conversation.provider_id, conversation.model)
 
     persisted_conversation_id = conversation.id or conversation_id
     user_message = store_message(session, conversation, "user", data.content, data.context)
@@ -301,6 +333,8 @@ def create_message(
         session=session,
         history=conversation_context.get("messages", []),
         conversation_id=persisted_conversation_id,
+        provider_id=conversation.provider_id,
+        model=conversation.model,
     )
     conversation = session.get(AssistantConversation, persisted_conversation_id)
     if not conversation:
@@ -364,13 +398,13 @@ def create_message(
         )
     )
     try:
-        compact_conversation(session, persisted_conversation_id)
+        compact_conversation(session, persisted_conversation_id, provider_id=conversation.provider_id, model=conversation.model)
     except Exception:  # noqa: BLE001 — compaction is best-effort and must never fail a turn
         pass
     return AssistantExchangeOut(
         conversation=conversation_to_out(conversation),
-        user_message=message_to_out(user_message),
-        assistant_message=message_to_out(assistant_message),
+        user_message=message_to_out(user_message, session),
+        assistant_message=message_to_out(assistant_message, session),
         provenance_id=provenance.id or 0,
         tool_calls=[record.id or 0 for record in proposals],
         proposals=[tool_call_to_out(record) for record in proposals],
@@ -393,11 +427,12 @@ def create_message_stream(
         raise HTTPException(status_code=404, detail="Assistant conversation not found.")
     if not data.content.strip():
         raise HTTPException(status_code=422, detail="Message content must not be empty.")
+    validate_conversation_runtime(session, conversation.provider_id, conversation.model)
 
     def event_generator():
         persisted_conversation_id = conversation.id or conversation_id
         user_message = store_message(session, conversation, "user", data.content, data.context)
-        yield _sse({"type": "user", "message": message_to_out(user_message).model_dump()})
+        yield _sse({"type": "user", "message": message_to_out(user_message, session).model_dump()})
 
         conversation_context = assistant_conversation_context_pack(
             session, conversation_id=persisted_conversation_id, current_message_id=user_message.id
@@ -426,6 +461,8 @@ def create_message_stream(
                 session=session,
                 history=conversation_context.get("messages", []),
                 conversation_id=persisted_conversation_id,
+                provider_id=conversation.provider_id,
+                model=conversation.model,
             ):
                 if event.get("type") == "result":
                     final_result = event["result"]
@@ -488,15 +525,20 @@ def create_message_stream(
         # only perceptible cost is on the infrequent turns where a summary is actually written.
         compacted = False
         try:
-            compaction = compact_conversation(session, persisted_conversation_id)
+            compaction = compact_conversation(
+                session,
+                persisted_conversation_id,
+                provider_id=conversation_after.provider_id,
+                model=conversation_after.model,
+            )
             compacted = bool(compaction.get("compacted"))
         except Exception:  # noqa: BLE001 — best-effort
             pass
         yield _sse({
             "type": "done",
             "conversation": conversation_to_out(conversation_after).model_dump(),
-            "user_message": message_to_out(user_message).model_dump(),
-            "assistant_message": message_to_out(assistant_message).model_dump(),
+            "user_message": message_to_out(user_message, session).model_dump(),
+            "assistant_message": message_to_out(assistant_message, session).model_dump(),
             "proposals": [tool_call_to_out(record).model_dump() for record in proposals],
             "compacted": compacted,
             # The exact read-only tool outputs, so the UI can render authoritative data cards from
