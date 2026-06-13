@@ -97,6 +97,33 @@ test.describe('Assistant smoke', () => {
     await expect(msg.locator('em')).toHaveCount(0)
   })
 
+  test('renders grounded tool data verbatim, independent of the model prose', async ({ page }) => {
+    // Model prose is deliberately WRONG (fabricated job id); the grounded card must show the real data.
+    await mockAssistantApi(page, {
+      reply: 'You have results. Job ID 999, experiment fictional.',
+      toolResults: [{
+        tool_name: 'list_results',
+        result: {
+          results: [
+            { job_id: 12, experiment_name: 'manY knockout follow-up', condition: 'basal', gene_symbol: 'manY',
+              metrics: { growth_rate: { mean: 0.00024 }, doubling_time_min: { mean: 47.96 } } },
+          ],
+        },
+      }],
+    })
+    await page.goto('/assistant')
+    await page.getByTestId('assistant-input').fill('list my results')
+    await page.getByTestId('assistant-send').click()
+
+    const grounded = page.getByTestId('grounded-results')
+    await expect(grounded).toBeVisible()
+    // The authoritative table shows the REAL job id + experiment, not the model's fabricated one.
+    await expect(grounded.locator('table')).toContainText('manY knockout follow-up')
+    await expect(grounded.locator('table tbody tr td').first()).toHaveText('12')
+    await expect(grounded).toContainText('from platform data')
+    await expect(grounded).not.toContainText('999')
+  })
+
   test('shows the reasoning trail separately from the final answer', async ({ page }) => {
     await mockAssistantApi(page, {
       thinking: 'I need a job id to read channels; let me check conditions first.',

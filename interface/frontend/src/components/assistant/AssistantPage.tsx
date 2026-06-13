@@ -43,6 +43,7 @@ import type {
 } from '../../types'
 import type { AssistantMemory } from '../../api/client'
 import { useAssistant } from './AssistantProvider'
+import type { ToolResultEntry } from './AssistantProvider'
 import { RuntimeSettingsCard, ConnectionTestCard } from './AssistantSettings'
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'ready' | 'blocked' | 'planned' }) {
@@ -1412,6 +1413,170 @@ function ThinkingBlock({ segments, live = false }: { segments: string[]; live?: 
   )
 }
 
+// --- Grounded tool-result cards: render read-only adapter output verbatim, so the data is correct
+// even when the model paraphrases it wrong. Sourced from the tool JSON, not the model's prose. ---
+
+type GroundedColumn = { key: string; label: string; mono?: boolean }
+type GroundedField = { key: string; label: string }
+type GroundedSection = { label: string; arrayKey: string; columns: GroundedColumn[] }
+type GroundedSpec =
+  | { label: string; mode: 'table'; arrayKey: string; columns: GroundedColumn[] }
+  | { label: string; mode: 'totals'; totalsKey: string }
+  | { label: string; mode: 'fields'; objectKey: string; fields: GroundedField[] }
+  | { label: string; mode: 'multi'; sections: GroundedSection[] }
+
+const M = (k: string, l: string) => ({ key: k, label: l, mono: true })
+
+// Every read-only DATA adapter renders an authoritative card. Prose tools (platform_guide,
+// explain_modeling) intentionally stay as the model's narration — they have no tabular ground truth.
+const GROUNDED_TOOLS: Record<string, GroundedSpec> = {
+  list_results: {
+    label: 'Completed results', mode: 'table', arrayKey: 'results',
+    columns: [M('job_id', 'Job'), { key: 'experiment_name', label: 'Experiment' }, M('condition', 'Condition'),
+      M('gene_symbol', 'Gene'), M('metrics.growth_rate.mean', 'Growth rate'), M('metrics.doubling_time_min.mean', 'Doubling (min)')],
+  },
+  compare_results: {
+    label: 'Result comparison', mode: 'table', arrayKey: 'comparison',
+    columns: [M('job_id', 'Job'), { key: 'experiment_name', label: 'Experiment' }, M('condition', 'Condition'),
+      M('metrics.growth_rate.mean', 'Growth rate'), M('metrics.doubling_time_min.mean', 'Doubling (min)'), M('metrics.final_mass_fg.mean', 'Final mass (fg)')],
+  },
+  list_conditions: {
+    label: 'Conditions', mode: 'table', arrayKey: 'conditions',
+    columns: [M('name', 'Condition'), M('nutrients', 'Nutrients'), M('doubling_time', 'Doubling'), M('active_tfs', 'Active TFs'), M('inactive_tfs', 'Inactive TFs')],
+  },
+  list_experiments: {
+    label: 'Experiments', mode: 'table', arrayKey: 'experiments',
+    columns: [M('id', 'ID'), { key: 'name', label: 'Name' }, { key: 'variant_type', label: 'Type' }, M('gene_symbol', 'Gene'), M('condition', 'Condition'), { key: 'status', label: 'Status' }],
+  },
+  inspect_experiment: {
+    label: 'Experiment jobs', mode: 'table', arrayKey: 'jobs',
+    columns: [M('id', 'Job'), { key: 'status', label: 'Status' }, M('seed', 'Seed'), M('generations', 'Gens'), M('condition', 'Condition')],
+  },
+  inspect_result: {
+    label: 'Result metrics (per cell)', mode: 'table', arrayKey: 'summary.rows',
+    columns: [M('seed', 'Seed'), M('generation', 'Gen'), M('division_time_sec', 'Division (s)'), M('final_mass_fg', 'Final mass (fg)'), M('growth_rate', 'Growth rate'), M('doubling_time_min', 'Doubling (min)'), { key: 'divided', label: 'Divided' }],
+  },
+  model_structure: {
+    label: 'Metabolic reactions', mode: 'table', arrayKey: 'reactions',
+    columns: [M('id', 'Reaction'), { key: 'direction', label: 'Direction' }, { key: 'reversible', label: 'Reversible' }, M('catalysts', 'Catalysts')],
+  },
+  inspect_tf_network: {
+    label: 'TF regulation network', mode: 'multi',
+    sections: [
+      { label: 'Regulators', arrayKey: 'regulators', columns: [M('regulator', 'Regulator'), M('log2fc', 'log2FC'), { key: 'regulation', label: 'Dir' }] },
+      { label: 'Targets', arrayKey: 'targets', columns: [M('target', 'Target'), M('log2fc', 'log2FC'), { key: 'regulation', label: 'Dir' }] },
+    ],
+  },
+  inspect_gene: {
+    label: 'Gene', mode: 'fields', objectKey: 'gene',
+    fields: [{ key: 'symbol', label: 'Symbol' }, { key: 'ecoli_id', label: 'ECOLI id' }, { key: 'category', label: 'Category' },
+      { key: 'ko_index', label: 'KO index' }, { key: 'monomer_id', label: 'Monomer' }, { key: 'position', label: 'Position' }, { key: 'strand', label: 'Strand' }],
+  },
+  inspect_molecule_trajectories: {
+    label: 'Trajectory scope (this job)', mode: 'fields', objectKey: 'trajectory_scope',
+    fields: [{ key: 'result_rows_for_this_job', label: 'Lineage trajectories' }, { key: 'seeds', label: 'Seeds' }, { key: 'generation_indices', label: 'Generations' }],
+  },
+  read_result_series: {
+    label: 'Time-series stats', mode: 'fields', objectKey: 'series.stats',
+    fields: [{ key: 'n_points', label: 'Points' }, { key: 't_start', label: 't start (s)' }, { key: 't_end', label: 't end (s)' },
+      { key: 'min', label: 'Min' }, { key: 'max', label: 'Max' }, { key: 'mean', label: 'Mean' }, { key: 'first', label: 'First' }, { key: 'last', label: 'Last' }],
+  },
+  gene_catalog: { label: 'Gene catalog', mode: 'totals', totalsKey: 'totals' },
+}
+
+function getPath(obj: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((acc, key) => (acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[key] : undefined), obj)
+}
+
+function fmtGrounded(value: unknown): string {
+  if (value == null || value === '') return '—'
+  if (typeof value === 'boolean') return value ? 'yes' : 'no'
+  if (Array.isArray(value)) return value.length ? value.map((v) => fmtGrounded(v)).join(', ') : '—'
+  if (typeof value === 'number') {
+    if (value !== 0 && Math.abs(value) < 0.001) return value.toExponential(2)
+    return value.toLocaleString(undefined, { maximumFractionDigits: 3 })
+  }
+  return String(value)
+}
+
+function GroundedTable({ rows, columns }: { rows: unknown[]; columns: GroundedColumn[] }) {
+  if (!Array.isArray(rows) || rows.length === 0) return <div className="px-2 py-1 text-xs text-gray-500">No rows.</div>
+  return (
+    <table className="w-full border-collapse text-xs">
+      <thead>
+        <tr>
+          {columns.map((c) => (
+            <th key={c.key} className="border-b border-gray-200 px-2 py-1 text-left font-semibold text-gray-600">{c.label}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.slice(0, 25).map((row, ri) => (
+          <tr key={ri} className="even:bg-gray-50/60">
+            {columns.map((c) => (
+              <td key={c.key} className={`px-2 py-1 align-top text-gray-800 ${c.mono ? 'font-mono' : ''}`}>{fmtGrounded(getPath(row, c.key))}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function GroundedToolResults({ entries }: { entries: ToolResultEntry[] }) {
+  const cards = entries.filter((e) => GROUNDED_TOOLS[e.tool_name])
+  if (cards.length === 0) return null
+  return (
+    <div className="space-y-2" data-testid="grounded-results">
+      {cards.map((entry, idx) => {
+        const spec = GROUNDED_TOOLS[entry.tool_name]
+        return (
+          <div key={`${entry.tool_name}-${idx}`} className="rounded-xl border border-gray-200 bg-white">
+            <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">{spec.label}</span>
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">from platform data</span>
+            </div>
+            <div className="overflow-x-auto p-2">
+              {spec.mode === 'totals' && (
+                <div className="flex flex-wrap gap-1.5 px-1 py-1">
+                  {Object.entries((getPath(entry.result, spec.totalsKey) as Record<string, unknown>) ?? {}).map(([k, v]) => (
+                    <span key={k} className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-700">
+                      <span className="text-gray-500">{k.replace(/_/g, ' ')}:</span> <span className="font-mono font-medium">{fmtGrounded(v)}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {spec.mode === 'fields' && (
+                <div className="grid gap-1.5 px-1 py-1 sm:grid-cols-2">
+                  {spec.fields.map((f) => (
+                    <div key={f.key} className="flex items-baseline justify-between gap-2 rounded-md border border-gray-100 bg-gray-50 px-2 py-1 text-[11px]">
+                      <span className="text-gray-500">{f.label}</span>
+                      <span className="font-mono font-medium text-gray-800">{fmtGrounded(getPath(getPath(entry.result, spec.objectKey), f.key))}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {spec.mode === 'table' && (
+                <GroundedTable rows={(getPath(entry.result, spec.arrayKey) as unknown[]) ?? []} columns={spec.columns} />
+              )}
+              {spec.mode === 'multi' && (
+                <div className="space-y-2">
+                  {spec.sections.map((sec) => (
+                    <div key={sec.label}>
+                      <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">{sec.label}</div>
+                      <GroundedTable rows={(getPath(entry.result, sec.arrayKey) as unknown[]) ?? []} columns={sec.columns} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 /** Below the conversation list: a "current chat" group (inspect/result note/memory) + labels help.
  * Proposed actions render inline in the chat (Claude-style), not here. */
 function SidePanelCards({
@@ -1516,7 +1681,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
     conversations, activeConversation, messages, proposals, input, setInput,
     inspectPreview, inspectExecution, loading, sending, inspecting, error,
     streamingText, streamingTool, resolvedNote, memory, compactionNotice,
-    thinkingSegments, messageThinking, bottomRef, scrollRef,
+    thinkingSegments, messageThinking, messageToolResults, bottomRef, scrollRef,
     clearMemory, stopStreaming, loadConversationMessages, startNewChat,
     removeConversation, renameConversation, sendMessage, inspectCurrentResult, runReadOnlyProposal,
     handleProposalResolved,
@@ -1713,6 +1878,13 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                     </div>
                   </div>
                 </div>
+                {!isUser && messageToolResults[message.id] && (
+                  <div className="mt-2 flex justify-start">
+                    <div className="w-full max-w-[90%]">
+                      <GroundedToolResults entries={messageToolResults[message.id]} />
+                    </div>
+                  </div>
+                )}
                 </div>
               )
             })}

@@ -499,6 +499,13 @@ def create_message_stream(
             "assistant_message": message_to_out(assistant_message).model_dump(),
             "proposals": [tool_call_to_out(record).model_dump() for record in proposals],
             "compacted": compacted,
+            # The exact read-only tool outputs, so the UI can render authoritative data cards from
+            # the adapter JSON (not the model's paraphrase).
+            "tool_results": [
+                {"tool_name": item.get("tool_name"), "result": item.get("result")}
+                for item in final_result.get("executed_tools", [])
+                if isinstance(item, dict)
+            ],
         })
 
     return StreamingResponse(

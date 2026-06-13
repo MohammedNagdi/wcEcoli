@@ -142,6 +142,8 @@ interface MockOptions {
   assistantStatus?: string
   /** if set, stream this as reasoning before a tool call, then the reply as the final answer */
   thinking?: string
+  /** authoritative read-only tool outputs to attach to the `done` event (grounded data cards) */
+  toolResults?: { tool_name: string; result: Record<string, unknown> }[]
 }
 
 export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Promise<void> {
@@ -163,7 +165,7 @@ export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Prom
     streamEvents.push({ type: 'delta', text: reply.slice(0, Math.ceil(reply.length / 2)) })
     streamEvents.push({ type: 'delta', text: reply.slice(Math.ceil(reply.length / 2)) })
   }
-  streamEvents.push({ type: 'done', conversation: CONVERSATION, user_message: userMsg, assistant_message: asstMsg, proposals })
+  streamEvents.push({ type: 'done', conversation: CONVERSATION, user_message: userMsg, assistant_message: asstMsg, proposals, tool_results: opts.toolResults ?? [] })
   const streamBody = sse(streamEvents)
 
   // Catch-all FIRST so the specific handlers below (registered later) take precedence — Playwright

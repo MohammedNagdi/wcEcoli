@@ -32,6 +32,11 @@ import type {
   PlatformStatus,
 } from '../../types'
 
+export interface ToolResultEntry {
+  tool_name: string
+  result: Record<string, unknown>
+}
+
 function parseOptionalNumber(value: string | null): number | null {
   if (value == null || value === '') return null
   const n = Number(value)
@@ -84,6 +89,8 @@ export interface AssistantContextValue {
   thinkingSegments: string[]
   /** Reasoning trail attached to a completed assistant message id (session-only). */
   messageThinking: Record<number, string[]>
+  /** Authoritative read-only tool outputs per assistant message id (grounded data cards). */
+  messageToolResults: Record<number, ToolResultEntry[]>
   bottomRef: RefObject<HTMLDivElement>
   /** The scrollable message list element — auto-scroll targets this, not the window. */
   scrollRef: RefObject<HTMLDivElement>
@@ -222,6 +229,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   // collapsible "thinking" block, then attached per-message once the final answer lands.
   const [thinkingSegments, setThinkingSegments] = useState<string[]>([])
   const [messageThinking, setMessageThinking] = useState<Record<number, string[]>>({})
+  // Authoritative read-only tool outputs per assistant message id — rendered as grounded data cards
+  // straight from the adapter JSON (so the data is correct even if the model paraphrases it wrong).
+  const [messageToolResults, setMessageToolResults] = useState<Record<number, ToolResultEntry[]>>({})
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -484,6 +494,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
               if (asstId != null && thinkingRef.current.length > 0) {
                 setMessageThinking((current) => ({ ...current, [asstId]: thinkingRef.current }))
               }
+              // Attach authoritative read-only tool outputs for grounded data cards.
+              const toolResults = (payload as { tool_results?: ToolResultEntry[] }).tool_results
+              if (asstId != null && Array.isArray(toolResults) && toolResults.length > 0) {
+                setMessageToolResults((current) => ({ ...current, [asstId]: toolResults }))
+              }
             },
             onError: (message) => setError(message),
           },
@@ -631,6 +646,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     compactionNotice,
     thinkingSegments,
     messageThinking,
+    messageToolResults,
     bottomRef,
     scrollRef,
     clearMemory,
