@@ -3292,8 +3292,10 @@ def _execute_list_experiments(session: Session, normalized_arguments: dict[str, 
         if experiment.batch_id:
             batches.add(experiment.batch_id)
 
+    requested_status = _canonical_status(status_filter) if status_filter else ""
+
     def matches(experiment: Experiment) -> bool:
-        if status_filter and (experiment.status or "draft").lower() != status_filter:
+        if requested_status and _canonical_status(experiment.status or "draft") != requested_status:
             return False
         if batch_id and experiment.batch_id != batch_id:
             return False
@@ -3458,8 +3460,26 @@ def _aggregate_job_metrics(results: list[SimulationResult]) -> dict[str, Any]:
     }
 
 
+_STATUS_BUCKETS = {
+    "done": {"done", "completed", "complete", "finished", "success", "succeeded", "ok", "ready"},
+    "running": {"running", "in_progress", "active", "started", "processing"},
+    "pending": {"pending", "queued", "waiting", "scheduled", "not_started"},
+    "failed": {"failed", "error", "errored", "failure", "cancelled", "canceled", "aborted"},
+}
+
+
+def _canonical_status(value: Any) -> str:
+    """Map a status (DB value or model-supplied synonym like 'completed') to a canonical bucket."""
+    token = str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    for canon, names in _STATUS_BUCKETS.items():
+        if token in names:
+            return canon
+    return token
+
+
 def _execute_list_results(session: Session, normalized_arguments: dict[str, Any]) -> dict[str, Any]:
     status_filter = (normalized_arguments.get("status") or "").strip().lower()
+    requested = _canonical_status(status_filter) if status_filter else "done"
     limit = int(normalized_arguments.get("limit") or 20)
     jobs = session.exec(select(SimulationJob).order_by(SimulationJob.id.desc())).all()
 
@@ -3468,10 +3488,9 @@ def _execute_list_results(session: Session, normalized_arguments: dict[str, Any]
         by_status[job.status or "unknown"] = by_status.get(job.status or "unknown", 0) + 1
 
     # Default to completed results (what 'a result' usually means); allow an explicit override.
+    # Match on the canonical bucket so 'completed'/'finished'/'success' all hit DB status 'done'.
     def matches(job: SimulationJob) -> bool:
-        if status_filter:
-            return (job.status or "").lower() == status_filter
-        return (job.status or "").lower() == "done"
+        return _canonical_status(job.status) == requested
 
     matched = [job for job in jobs if matches(job)]
     rows: list[dict[str, Any]] = []

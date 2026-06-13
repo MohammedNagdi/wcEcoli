@@ -906,6 +906,11 @@ def test_list_results_finds_completed_jobs():
         # Explicit status filter surfaces the running job.
         running = execute_tool(session, "list_results", AssistantToolExecutionRequest(arguments={"status": "running"}))
         assert running.result["matched_count"] == 1 and running.result["results"][0]["job_id"] == 2
+
+        # Status synonyms map to the canonical DB value ('done'); 'completed' must not return zero.
+        for synonym in ("completed", "complete", "finished", "success"):
+            out = execute_tool(session, "list_results", AssistantToolExecutionRequest(arguments={"status": synonym}))
+            assert out.result["matched_count"] == 1, synonym
     finally:
         session.close()
         engine.dispose()
@@ -1902,6 +1907,17 @@ def test_lenient_recovery_handles_python_literals():
     assert calls[0].input["variant_index"] is None
     assert "{" not in cleaned  # raw JSON stripped from the visible answer
     assert "Preparing it." in cleaned
+
+
+def test_recovery_strips_hallucinated_unknown_tool_json():
+    """A model inventing a non-existent tool must not leak its raw JSON to the user."""
+    from app.services.assistant_agent import _extract_text_tool_calls
+
+    text = 'Let me try the jobs. {"name": "list_jobs", "parameters": {}}'
+    cleaned, calls = _extract_text_tool_calls(text, {"list_results"}, prefix="call")
+    assert calls == []  # unknown tool is NOT executed
+    assert "{" not in cleaned and "list_jobs" not in cleaned  # but it is hidden from display
+    assert "Let me try the jobs." in cleaned
 
 
 def test_model_structure_adapter_reads_reconstruction():

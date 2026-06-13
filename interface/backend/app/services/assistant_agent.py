@@ -477,20 +477,28 @@ def _extract_text_tool_calls(
         if not isinstance(obj, dict):
             continue
         name = obj.get("name") or obj.get("tool") or obj.get("tool_name")
-        if not isinstance(name, str) or name not in tool_names:
+        if not isinstance(name, str):
             continue
-        args = obj.get("arguments")
-        if args is None:
-            args = obj.get("parameters")
-        if args is None:
-            args = obj.get("input")
-        if isinstance(args, str):
-            args = _lenient_json_loads(args)
+        raw_args = obj.get("arguments")
+        if raw_args is None:
+            raw_args = obj.get("parameters")
+        if raw_args is None:
+            raw_args = obj.get("input")
+        # Only treat it as a (leaked) tool call if it has a params-like field or names a real tool —
+        # avoids stripping unrelated JSON the user might legitimately be discussing.
+        looks_like_call = raw_args is not None or name in tool_names
+        if not looks_like_call:
+            continue
+        # Strip the JSON from the displayed text whether or not the tool exists, so a hallucinated
+        # call like {"name": "list_jobs"} never leaks as raw text.
+        cut_spans.append((start, end))
+        if name not in tool_names:
+            continue  # unknown/hallucinated tool: hide it, but don't execute anything
+        args = _lenient_json_loads(raw_args) if isinstance(raw_args, str) else raw_args
         if not isinstance(args, dict):
             args = {}
         calls.append(NormalizedToolCall(id=f"{prefix}_text_{len(calls)}", name=name, input=args))
-        cut_spans.append((start, end))
-    if not calls:
+    if not cut_spans:
         return text, []
     cleaned = text
     for start, end in reversed(cut_spans):
