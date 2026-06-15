@@ -2115,6 +2115,22 @@ def test_lenient_recovery_handles_python_literals():
     assert "Preparing it." in cleaned
 
 
+def test_secret_reveal_roundtrips_and_fails_loudly(monkeypatch):
+    """Encrypt/decrypt round-trips; a changed key returns '' (re-enter), never garbage."""
+    import base64
+    from app.services import assistant_secrets as sec
+
+    monkeypatch.setenv("ASSISTANT_SECRET_KEY", base64.b64encode(b"0" * 32).decode())
+    token = sec.encrypt_secret("sk-secret-123")
+    assert token.startswith("enc:v1:")
+    assert sec.reveal(token, True) == "sk-secret-123"          # round-trip with the right key
+    assert sec.reveal("legacy-plaintext", False) == "legacy-plaintext"  # legacy values tolerated
+
+    # Key changed (e.g. ephemeral fallback after a restart) -> reveal returns '' instead of garbage.
+    monkeypatch.setenv("ASSISTANT_SECRET_KEY", base64.b64encode(b"1" * 32).decode())
+    assert sec.reveal(token, True) == ""
+
+
 def test_recovery_strips_hallucinated_unknown_tool_json():
     """A model inventing a non-existent tool must not leak its raw JSON to the user."""
     from app.services.assistant_agent import _extract_text_tool_calls

@@ -25,7 +25,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.exc import OperationalError
-from sqlmodel import Session, col, create_engine, select
+from sqlmodel import Session, col, select
+
+from app.db.engine import make_sqlite_engine
 
 from app.config import settings
 from app.db.models import Experiment, SimulationJob, SimulationResult, Timeline
@@ -668,7 +670,7 @@ def _repair_stale_statuses(engine):
 
 def poll_loop():
     """Main worker loop — poll for pending jobs and execute them."""
-    engine = create_engine("sqlite:///" + str(settings.database_path), echo=False)
+    engine = make_sqlite_engine(settings.database_path)
     logger.info("Simulation worker started — polling every %ds", settings.worker_poll_interval)
     logger.info("Database: %s", settings.database_path)
     logger.info("Docker image: %s", settings.docker_image)

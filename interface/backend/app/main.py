@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel
 
 from app.config import settings
+from app.db.engine import make_sqlite_engine
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
     global _engine
     from app.db.init_db import init_database
     init_database()
-    _engine = create_engine(f"sqlite:///{settings.database_path}", echo=False)
+    _engine = make_sqlite_engine(settings.database_path)
     # Ensure user-data tables (experiments, simulation_jobs, simulation_results)
     # exist even when reconstruction data hasn't changed and init_database()
     # skipped the rebuild.

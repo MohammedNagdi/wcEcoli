@@ -17,11 +17,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import struct
 from pathlib import Path
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 _PREFIX = "enc:v1:"
 _EPHEMERAL_KEY: bytes | None = None
@@ -58,9 +61,16 @@ def _load_key() -> bytes:
         except OSError:
             pass
     except OSError:
-        # If we can't persist the key, fall back to a process-stable key so this run still works.
+        # If we can't persist the key, fall back to a process-stable key so this run still works —
+        # but warn loudly: secrets encrypted with this key will NOT decrypt after a restart.
         if _EPHEMERAL_KEY is None:
             _EPHEMERAL_KEY = key
+            logger.warning(
+                "Could not persist the assistant secret key at %s; using an ephemeral in-memory key. "
+                "Stored provider API keys will not decrypt after a restart. Set ASSISTANT_SECRET_KEY "
+                "(base64 32 bytes) or fix write permissions on that directory.",
+                path,
+            )
         return _EPHEMERAL_KEY
     return key
 
@@ -110,4 +120,10 @@ def reveal(secret_value: str, secret_encrypted: bool) -> str:
     try:
         return decrypt_secret(secret_value)
     except (ValueError, TypeError):
+        # Don't fail silently: a stored key that won't decrypt means the encryption key changed or
+        # was lost (e.g. ephemeral-key fallback after a restart). Surface it so the user re-enters it.
+        logger.warning(
+            "A stored provider secret could not be decrypted (the encryption key changed or was lost). "
+            "Re-enter the API key in Provider setup."
+        )
         return ""

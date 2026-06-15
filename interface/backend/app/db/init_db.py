@@ -12,7 +12,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel
+
+from app.db.engine import make_sqlite_engine
 
 from app.config import settings
 from app.db.models import (
@@ -1012,7 +1014,7 @@ def init_database() -> None:
     if db_path.exists():
         db_path.unlink()
 
-    engine = create_engine(f"sqlite:///{db_path}", echo=False)
+    engine = make_sqlite_engine(db_path)
     SQLModel.metadata.create_all(engine)
 
     with Session(engine) as session:
@@ -1048,4 +1050,4 @@ def init_database() -> None:
 def get_engine():
     """Get the SQLite engine, initializing the database if needed."""
     init_database()
-    return create_engine(f"sqlite:///{settings.database_path}", echo=False)
+    return make_sqlite_engine(settings.database_path)
