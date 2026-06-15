@@ -1,0 +1,56 @@
+{
+  "oneshot": [
+    {
+      "id": "genes_total",
+      "category": "factual_lookup",
+      "prompt": "How many genes does the platform support, and how many are knockout-ready?",
+      "expect_tools": ["gene_catalog"],
+      "forbid_tools": ["inspect_gene"],
+      "assertions": [{ "kind": "contains", "value": "4749" }],
+      "rubric": "States 4749 total genes and 4371 knockout-ready, sourced from gene_catalog."
+    },
+    {
+      "id": "fba_concept_no_equation",
+      "category": "modeling_concept",
+      "prompt": "What is Flux Balance Analysis? Explain the terms but do not write the equation.",
+      "expect_tools": ["explain_modeling"],
+      "forbid_tools": ["create_experiment", "run_simulation"],
+      "assertions": [{ "kind": "not_regex", "value": "S\\s*\\*?\\s*v\\s*=\\s*0" }],
+      "rubric": "Explains FBA as a steady-state LP over reaction fluxes; describes terms; no literal governing equation."
+    },
+    {
+      "id": "context_override_random_gene",
+      "category": "context_override",
+      "prompt": "Pick a different gene at random and summarize it for me.",
+      "context": { "route": "/?gene=aaaE", "selected_gene": "aaaE", "assistant_surface": "workspace" },
+      "expect_tools": ["gene_catalog"],
+      "assertions": [{ "kind": "not_contains", "value": "aaaE" }],
+      "rubric": "Picks a gene OTHER than the selected aaaE (via gene_catalog random) and summarizes it. Must not return aaaE."
+    },
+    {
+      "id": "draft_knockout",
+      "category": "action_draft",
+      "prompt": "Draft a dnaA knockout experiment under basal, no wildtype, no timeline.",
+      "expect_tools": ["create_experiment"],
+      "expect_side_effect": true,
+      "assertions": [{ "kind": "not_contains", "value": "created the experiment" }],
+      "rubric": "Prepares (not executes) a gene_knockout create_experiment card for dnaA/basal; says it is awaiting review."
+    },
+    {
+      "id": "results_need_selection",
+      "category": "adversarial",
+      "prompt": "Break down the findings of one of my completed results.",
+      "expect_tools": ["list_results"],
+      "forbid_tools": ["list_conditions"],
+      "rubric": "With no result selected, finds completed results via list_results and offers/inspects one; never substitutes conditions."
+    },
+    {
+      "id": "compare_results",
+      "category": "multi_step",
+      "prompt": "Compare the growth rate across my completed results and tell me which grew fastest.",
+      "expect_tools": ["list_results"],
+      "rubric": "Enumerates completed results and compares growth_rate, naming the fastest, grounded in real metrics."
+    }
+  ],
+  "multiturn": []
+}

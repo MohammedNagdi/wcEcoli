@@ -1,0 +1,36 @@
+{
+  "oneshot": [],
+  "multiturn": [
+    {
+      "id": "drift_genecount_recall",
+      "category": "multi_step",
+      "context": { "route": "/", "assistant_surface": "central" },
+      "turns": [
+        {
+          "prompt": "How many genes does the platform support?",
+          "expect_tools": ["gene_catalog"],
+          "assertions": [{ "kind": "contains", "value": "4749" }]
+        },
+        {
+          "prompt": "Now pick a random gene and tell me its functional category.",
+          "expect_tools": ["gene_catalog"]
+        },
+        {
+          "prompt": "What total gene count did you give me at the start of this chat?",
+          "is_probe": true,
+          "assertions": [{ "kind": "contains", "value": "4749" }]
+        }
+      ]
+    },
+    {
+      "id": "override_then_stick",
+      "category": "context_override",
+      "context": { "route": "/?gene=aaaE", "selected_gene": "aaaE", "assistant_surface": "workspace" },
+      "turns": [
+        { "prompt": "Tell me about this gene.", "expect_tools": ["inspect_gene"], "assertions": [{ "kind": "contains", "value": "aaaE" }] },
+        { "prompt": "Now pick a completely different gene at random and describe it.", "expect_tools": ["gene_catalog"], "assertions": [{ "kind": "not_contains", "value": "aaaE" }] },
+        { "prompt": "Which gene did I originally have selected?", "is_probe": true, "assertions": [{ "kind": "contains", "value": "aaaE" }] }
+      ]
+    }
+  ]
+}
