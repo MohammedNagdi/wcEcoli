@@ -446,6 +446,7 @@ export function ExperimentGuidePage() {
     { id: 'timelines', label: 'Timelines' },
     { id: 'parameters', label: 'Simulation parameters' },
     { id: 'assistant', label: 'Assistant' },
+    { id: 'shortcuts', label: 'Keyboard shortcuts' },
   ]
 
   return (
@@ -706,6 +707,44 @@ export function ExperimentGuidePage() {
             For values that change over time (counts, fluxes), the Assistant can prepare a simulation for you to run,
             then read the results — it does not invent dynamic numbers. Conceptual questions about the model and FBA
             are answered from curated references, describing what each term does rather than reproducing equations.
+          </div>
+        </div>
+      )}
+
+      {activeSection === 'shortcuts' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <p className="text-sm text-gray-600">
+              Keyboard shortcuts work anywhere in the platform (except while typing in a text field, where the
+              keys go to the field).
+            </p>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <th className="px-4 py-2">Shortcut</th>
+                  <th className="px-4 py-2">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {[
+                  ['Ctrl / ⌘ + K', 'Open the command search palette (jump to any gene or page)'],
+                  ['Ctrl / ⌘ + B', 'Hide / show the left navigation sidebar'],
+                  ['Ctrl / ⌘ + J', 'Open / close the Assistant dock from any page'],
+                  ['Ctrl / ⌘ + Enter', 'Send the current message in the Assistant composer'],
+                  ['Esc', 'Close the Assistant dock or the command palette'],
+                  ['/', 'Focus the search box on pages that have one'],
+                ].map(([keys, action]) => (
+                  <tr key={keys}>
+                    <td className="whitespace-nowrap px-4 py-2.5">
+                      <kbd className="rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-sans text-xs text-gray-700">{keys}</kbd>
+                    </td>
+                    <td className="px-4 py-2.5 text-gray-700">{action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

@@ -28,7 +28,6 @@ const ICON_DESIGN = 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'
 const ICON_GUIDE = 'M12 3a7 7 0 00-7 7c0 2.5 1.5 4.5 3.5 5.5V17h7v-1.5c2-1 3.5-3 3.5-5.5a7 7 0 00-7-7zm-2 14h4m-3 3h2'
 const ICON_COLLAPSE = 'M15 5l-5 5 5 5M5 5v10'
 const ICON_EXPAND = 'M5 5l5 5-5 5m10-10v10'
-const ICON_SEARCH = 'M8.5 4a4.5 4.5 0 103.18 7.68L16 16'
 
 const NAV_GROUPS: NavGroup[] = [
   {
@@ -87,9 +86,14 @@ export function Shell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if (!(event.metaKey || event.ctrlKey)) return
+      const key = event.key.toLowerCase()
+      if (key === 'k') {
         event.preventDefault()
         setCommandSearchOpen(true)
+      } else if (key === 'b') {
+        event.preventDefault()
+        setCollapsed((current) => !current)
       }
     }
 
@@ -130,18 +134,8 @@ export function Shell({ children }: { children: ReactNode }) {
           >
             <NavIcon d={collapsed ? ICON_EXPAND : ICON_COLLAPSE} className="h-4 w-4" />
           </button>
-          {!collapsed && (
-            <button
-              type="button"
-              onClick={() => setCommandSearchOpen(true)}
-              className="flex items-center gap-1 rounded-md border border-gray-200 px-1.5 py-1 text-[11px] text-gray-500 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-700"
-              title="Search"
-              aria-label="Open command search"
-            >
-              <NavIcon d={ICON_SEARCH} className="h-3.5 w-3.5" />
-              <kbd className="font-sans text-[10px] text-gray-400">Ctrl K</kbd>
-            </button>
-          )}
+          {/* Command search lives on Ctrl/Cmd-K (documented in Guide → Keyboard shortcuts);
+              the always-visible button was removed to declutter the header. */}
         </div>
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-3">

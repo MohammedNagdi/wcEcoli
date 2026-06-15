@@ -1761,9 +1761,11 @@ function SidePanelCards({
             </div>
           )}
 
-          <details className="rounded-lg border border-gray-200 bg-gray-50" open={hasMemory}>
+          {/* Collapsed by default — expand to read. The summary is model-written markdown, so render
+              it formatted (bold/lists) instead of as a raw blob. */}
+          <details className="rounded-lg border border-gray-200 bg-gray-50">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-              <span>What this chat remembers</span>
+              <span>What this chat remembers{hasMemory ? '' : ' · empty'}</span>
               {hasMemory && (
                 <button
                   type="button"
@@ -1774,20 +1776,28 @@ function SidePanelCards({
                 </button>
               )}
             </summary>
-            <div className="space-y-2 border-t border-gray-200 p-3">
+            <div className="space-y-3 border-t border-gray-200 p-3">
               {hasMemory ? (
                 <>
                   {memory?.summary && (
-                    <p className="break-words text-xs leading-5 text-gray-600">{memory.summary}</p>
-                  )}
-                  {memory && memory.remembered_genes.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {memory.remembered_genes.map((gene) => (
-                        <span key={gene} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600">{gene}</span>
-                      ))}
+                    <div>
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Summary</div>
+                      <div className="max-h-64 overflow-y-auto rounded-md bg-white p-2 text-xs leading-5 text-gray-700">
+                        <MessageMarkdown text={memory.summary} />
+                      </div>
                     </div>
                   )}
-                  <p className="text-[11px] leading-4 text-gray-500">
+                  {memory && memory.remembered_genes.length > 0 && (
+                    <div>
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Remembered genes</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {memory.remembered_genes.map((gene) => (
+                          <span key={gene} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-700">{gene}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[11px] leading-4 text-gray-400">
                     Older turns are compacted into this summary so long chats keep context. Clearing forgets it.
                   </p>
                 </>
