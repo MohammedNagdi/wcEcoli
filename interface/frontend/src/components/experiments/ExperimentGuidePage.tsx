@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { getVariants, getConditions, getTimelines, getAssistantTools } from '../../api/client'
 import type { Variant, Condition, Timeline, AssistantToolSpec } from '../../types'
 import { variantLabel } from '../../utils/labels'
@@ -404,7 +404,8 @@ export function ExperimentGuidePage() {
   const [conditions, setConditions] = useState<Condition[]>([])
   const [timelines, setTimelines] = useState<Timeline[]>([])
   const [assistantTools, setAssistantTools] = useState<AssistantToolSpec[]>([])
-  const [activeSection, setActiveSection] = useState<string>('variants')
+  const [searchParams] = useSearchParams()
+  const [activeSection, setActiveSection] = useState<string>(searchParams.get('section') || 'variants')
 
   useEffect(() => {
     getVariants().then(setVariants)
@@ -732,8 +733,10 @@ export function ExperimentGuidePage() {
                   ['Ctrl / ⌘ + K', 'Open the command search palette (jump to any gene or page)'],
                   ['Ctrl / ⌘ + B', 'Hide / show the left navigation sidebar'],
                   ['Ctrl / ⌘ + J', 'Open / close the Assistant dock from any page'],
+                  ['Alt + N', 'Open the Assistant and start a new chat'],
                   ['Ctrl / ⌘ + Enter', 'Send the current message in the Assistant composer'],
                   ['Esc', 'Close the Assistant dock or the command palette'],
+                  ['?', 'Open this keyboard-shortcuts reference'],
                   ['/', 'Focus the search box on pages that have one'],
                 ].map(([keys, action]) => (
                   <tr key={keys}>

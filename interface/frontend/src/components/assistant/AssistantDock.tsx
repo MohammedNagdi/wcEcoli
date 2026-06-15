@@ -10,13 +10,14 @@ import { TaskCenteredAssistantPanel } from './AssistantPage'
  * itself (the full page is the experience there).
  */
 export function AssistantDock() {
-  const { isOpen, openAssistant, closeAssistant } = useAssistant()
+  const { isOpen, openAssistant, closeAssistant, startNewChat } = useAssistant()
   const location = useLocation()
   const onAssistantRoute = location.pathname === '/assistant'
   const panelRef = useRef<HTMLDivElement>(null)
   const lastFocus = useRef<HTMLElement | null>(null)
 
-  // Cmd/Ctrl-J toggles the dock (Ctrl-K is the command palette); Esc closes it.
+  // Cmd/Ctrl-J toggles the dock (Ctrl-K is the command palette); Esc closes it. Alt-N starts a new
+  // chat (Ctrl/Cmd-Shift-N is the browser's incognito window and can't be intercepted).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
@@ -24,13 +25,17 @@ export function AssistantDock() {
         e.preventDefault()
         if (isOpen) closeAssistant()
         else openAssistant()
+      } else if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        if (!isOpen && !onAssistantRoute) openAssistant()
+        void startNewChat()
       } else if (e.key === 'Escape' && isOpen) {
         closeAssistant()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isOpen, onAssistantRoute, openAssistant, closeAssistant])
+  }, [isOpen, onAssistantRoute, openAssistant, closeAssistant, startNewChat])
 
   // Focus the composer on open; restore focus to the trigger on close.
   useEffect(() => {

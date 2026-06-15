@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { CommandSearch } from '../common/CommandSearch'
 import { AssistantDock } from '../assistant/AssistantDock'
 
@@ -81,11 +81,21 @@ function NavIcon({ d, className = 'w-4 h-4' }: { d: string; className?: string }
 
 export function Shell({ children }: { children: ReactNode }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const [commandSearchOpen, setCommandSearchOpen] = useState(false)
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const tag = target?.tagName
+      const editable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable
+      // '?' (no modifiers, not while typing) -> the keyboard-shortcuts reference in the Guide.
+      if (event.key === '?' && !editable && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault()
+        navigate('/guide?section=shortcuts')
+        return
+      }
       if (!(event.metaKey || event.ctrlKey)) return
       const key = event.key.toLowerCase()
       if (key === 'k') {
@@ -99,7 +109,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [navigate])
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/' || location.pathname === '/genes'
