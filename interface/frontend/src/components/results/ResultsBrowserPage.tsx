@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { AskAssistantButton } from '../assistant/AskAssistantButton'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getJobs, getExperiments, getExperimentResults, compareExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
-import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 import { SearchInput } from '../common/SearchInput'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { BatchDashboard } from '../experiments/BatchDashboard'
@@ -620,11 +619,13 @@ export function ResultsBrowserPage() {
     return s + 's'
   }
 
-  const assistantHref = buildAssistantHref({
-    surface: 'results',
-    route: `${location.pathname}${location.search}`,
-    variantType: typeFilter !== 'all' ? typeFilter : null,
-    prompt: `Help me triage the Results browser. Explain the ${viewMode} view, current filters, redundant controls, failed/running jobs, and which result should be opened first for biological interpretation.`,
+  useRegisterAssistantContext({
+    context: {
+      assistant_surface: 'results',
+      route: `${location.pathname}${location.search}`,
+      selected_variant_type: typeFilter !== 'all' ? typeFilter : null,
+    },
+    suggestedPrompt: `Help me triage the Results browser. Explain the ${viewMode} view, current filters, redundant controls, failed/running jobs, and which result should be opened first for biological interpretation.`,
   })
 
   return (
@@ -636,12 +637,6 @@ export function ResultsBrowserPage() {
           <p className="mt-1 text-sm text-gray-500">{viewDescription(viewMode)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <AskAssistantButton
-            href={assistantHref}
-            className="px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
-          >
-            Ask Assistant
-          </AskAssistantButton>
           <Link
             to="/results/compare"
             className="px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { AskAssistantButton } from '../assistant/AskAssistantButton'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getAllGenes } from '../../api/client'
 import type { Gene } from '../../types'
 import { CATEGORY_FILL, hasGenomePosition } from '../../utils/genome'
 import { categoryLabel } from '../../utils/labels'
-import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 import { SearchInput } from '../common/SearchInput'
 import { SkeletonLine } from '../common/Skeleton'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
@@ -37,11 +36,13 @@ export function GenomeViewerPage({ embedded = false, compact = false }: GenomeVi
   const [showStats, setShowStats] = useState(true)
   const highlightedCategories = useMemo(() => new Set(genomeHighlight ?? []), [genomeHighlight])
   const mapSearchTerm = genomeSearch ?? selectedGene ?? ''
-  const assistantHref = buildAssistantHref({
-    surface: 'genome',
-    route: `${location.pathname}${location.search}`,
-    gene: selectedGene,
-    prompt: `Help me interpret the genome map. Focus on the selected gene or search term, visible functional-category highlights, genomic position, and what linked Workspace or Network views would clarify next.`,
+  useRegisterAssistantContext({
+    context: {
+      assistant_surface: 'genome',
+      route: `${location.pathname}${location.search}`,
+      selected_gene: selectedGene || mapSearchTerm || null,
+    },
+    suggestedPrompt: 'Help me interpret the genome map. Focus on the selected gene or search term, visible functional-category highlights, genomic position, and what linked Workspace or Network views would clarify next.',
   })
 
   useEffect(() => {
@@ -134,12 +135,6 @@ export function GenomeViewerPage({ embedded = false, compact = false }: GenomeVi
             </p>
           </div>
           <div className="flex w-full items-center gap-2 lg:w-auto">
-            <AskAssistantButton
-              href={assistantHref}
-              className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
-            >
-              Ask Assistant
-            </AskAssistantButton>
             <SearchInput
               value={genomeSearch ?? ''}
               onChange={setGenomeSearch}

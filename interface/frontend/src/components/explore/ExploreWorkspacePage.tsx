@@ -8,11 +8,11 @@ import { CategoryBadge, DirectionBadge } from '../common/Badge'
 import { getAAPathways } from '../../api/client'
 import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
-import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
-import { AskAssistantButton } from '../assistant/AskAssistantButton'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import type { AAPathway, GeneDetail } from '../../types'
 
 export function ExploreWorkspacePage() {
+  const location = useLocation()
   const {
     selectedGene,
     selectedCategory,
@@ -27,6 +27,16 @@ export function ExploreWorkspacePage() {
   const [isDragging, setIsDragging] = useState(false)
   const dragging = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  useRegisterAssistantContext({
+    context: {
+      assistant_surface: 'workspace',
+      route: `${location.pathname}${location.search}`,
+      selected_gene: selectedGene,
+      selected_condition: selectedCondition,
+    },
+    suggestedPrompt: 'Help me inspect this selected gene. Summarize its model state IDs, pathway context, regulation, and which experiment or result views would be useful next.',
+  })
 
   useEffect(() => {
     let mounted = true
@@ -106,7 +116,6 @@ export function ExploreWorkspacePage() {
             aaPathways={aaPathways}
             loading={detailLoading}
             selectedGene={selectedGene}
-            selectedCondition={selectedCondition}
             onSelectGene={(symbol) => setSelectedGene(symbol, { replace: false })}
           />
         </section>
@@ -120,18 +129,14 @@ function SelectedGeneSummary({
   aaPathways,
   loading,
   selectedGene,
-  selectedCondition,
   onSelectGene,
 }: {
   gene: GeneDetail | null
   aaPathways: AAPathway[]
   loading: boolean
   selectedGene: string | null
-  selectedCondition: string | null
   onSelectGene: (symbol: string) => void
 }) {
-  const location = useLocation()
-
   if (loading && selectedGene) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-gray-400">
@@ -151,14 +156,6 @@ function SelectedGeneSummary({
   const length = gene.left_end_pos && gene.right_end_pos
     ? Math.abs(gene.right_end_pos - gene.left_end_pos) + 1
     : null
-  const assistantHref = buildAssistantHref({
-    surface: 'workspace',
-    route: `${location.pathname}${location.search}`,
-    gene: gene.symbol,
-    condition: selectedCondition,
-    prompt: 'Help me inspect this selected gene. Summarize its model state IDs, pathway context, regulation, and which experiment or result views would be useful next.',
-  })
-
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-start justify-between border-b border-gray-100 px-4 py-3">
@@ -167,12 +164,6 @@ function SelectedGeneSummary({
           <p className="text-xs text-gray-400">{gene.ecoli_id}</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
-          <AskAssistantButton
-            href={assistantHref}
-            className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
-          >
-            Ask Assistant
-          </AskAssistantButton>
           <Link
             to={'/genome?gene=' + encodeURIComponent(gene.symbol)}
             className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"

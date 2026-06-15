@@ -239,4 +239,91 @@ test.describe('Assistant smoke', () => {
     await expect(page.getByTestId('assistant-input')).toHaveCount(0)
     await expect(page.getByTestId('assistant-dock-toggle')).toBeVisible()
   })
+
+  test('floating Assistant preserves page prompt and reactive context without a page-level trigger', async ({ page }) => {
+    await page.route(/^https?:\/\/[^/]+\/api\//, (r) => r.fulfill({ json: [] }))
+    await page.route('**/api/ml/data-summary', (r) => r.fulfill({
+      json: {
+        total_experiments: 2, total_completed_jobs: 2, total_genes: 10, mechanistic_genes: 8,
+        divided_count: 1, not_divided_count: 1, conditions: ['basal'], variant_types: ['gene_knockout'],
+      },
+    }))
+    await page.route('**/api/features*', (r) => r.fulfill({
+      json: { total_rows: 0, total_experiments: 0, total_genes: 0, columns: [], rows: [] },
+    }))
+    await mockAssistantApi(page, { reply: 'ML context received.' })
+    await page.goto('/ml')
+
+    await expect(page.getByText('Ask Assistant', { exact: true })).toHaveCount(0)
+    await expect(page.getByTestId('assistant-dock-toggle')).toBeVisible()
+
+    const conditionSelect = page.locator('label', { hasText: 'Condition' }).locator('..').locator('select')
+    await conditionSelect.selectOption('basal')
+    await page.getByTestId('assistant-dock-toggle').click()
+
+    const input = page.getByTestId('assistant-input')
+    await expect(input).toHaveValue(/Help me assess this ML setup/)
+    await expect(page.getByText(/reviewing simulation-derived ML readiness for basal/)).toBeVisible()
+
+    const requestPromise = page.waitForRequest('**/api/assistant/conversations/*/messages/stream')
+    await page.getByTestId('assistant-send').click()
+    const request = await requestPromise
+    expect(request.postDataJSON()).toMatchObject({
+      context: {
+        assistant_surface: 'ml',
+        selected_condition: 'basal',
+      },
+    })
+  })
+
+  test('floating Assistant preserves drafts and clears stale registered page context', async ({ page }) => {
+    await page.route(/^https?:\/\/[^/]+\/api\//, (r) => r.fulfill({ json: [] }))
+    await mockAssistantApi(page, {})
+    await page.goto('/results')
+
+    await page.getByTestId('assistant-dock-toggle').click()
+    const input = page.getByTestId('assistant-input')
+    await expect(input).toHaveValue(/Help me triage the Results browser/)
+    await input.fill('Keep this draft')
+    await page.keyboard.press('Escape')
+
+    await page.getByRole('link', { name: 'Guide' }).click()
+    await page.getByTestId('assistant-dock-toggle').click()
+    await expect(page.getByTestId('assistant-input')).toHaveValue('Keep this draft')
+    await expect(page.getByText('You are in the central Assistant workspace.')).toBeVisible()
+  })
+
+  test('result details register the current job for assistant inspection', async ({ page }) => {
+    await page.route(/^https?:\/\/[^/]+\/api\//, (r) => r.fulfill({ json: [] }))
+    await page.route('**/api/jobs/12/timeseries', (r) => r.fulfill({
+      json: {
+        summary: [{
+          job_id: 12, seed: 0, generation: 0, division_time_sec: null,
+          final_mass_fg: null, growth_rate: null, doubling_time_min: null,
+        }],
+        timeseries: {},
+      },
+    }))
+    await page.route('**/api/jobs/12', (r) => r.fulfill({
+      json: {
+        id: 12, experiment_id: 0, status: 'failed', phase: '', sim_dir: '', log_tail: '',
+        started_at: '', finished_at: '', error_message: '', created_at: '', variant_type: 'wildtype',
+        variant_index: 0, condition: 'basal', seed: 0, generations: 1, timeline: '',
+      },
+    }))
+    await mockAssistantApi(page, {})
+    await page.goto('/results/12')
+
+    await page.getByTestId('assistant-dock-toggle').click()
+    await expect(page.getByRole('button', { name: 'Inspect current result (Job #12)' })).toBeVisible()
+    await expect(page.getByTestId('assistant-input')).toHaveValue(/Help me interpret this simulation result/)
+  })
+
+  test('full Assistant deep links still prefill URL prompts and context', async ({ page }) => {
+    await mockAssistantApi(page, {})
+    await page.goto('/assistant?gene=dnaA&prompt=Explain%20dnaA')
+
+    await expect(page.getByTestId('assistant-input')).toHaveValue('Explain dnaA')
+    await expect(page.getByText('You are focused on gene dnaA.')).toBeVisible()
+  })
 })

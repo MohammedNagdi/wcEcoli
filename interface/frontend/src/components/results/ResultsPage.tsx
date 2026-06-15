@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
-import { AskAssistantButton } from '../assistant/AskAssistantButton'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -19,7 +19,6 @@ import { HelpTip, HelpNote } from '../common/HelpTip'
 import type { SimulationJob, ResultsResponse, ResultsSummary, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { statusLabel, variantLabel } from '../../utils/labels'
-import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -431,6 +430,20 @@ export function ResultsPage() {
     setActiveChannels(new Set(preset.channels.filter((channel) => availableChannels.includes(channel))))
   }
 
+  const focusGeneSymbol = singleGeneSymbol(resolvedGeneSymbol)
+  useRegisterAssistantContext({
+    context: {
+      assistant_surface: 'results',
+      route: `${location.pathname}${location.search}`,
+      selected_job: job?.id ?? null,
+      selected_gene: focusGeneSymbol ?? null,
+      selected_experiment: experiment?.id ?? null,
+      selected_condition: experiment?.condition ?? null,
+      selected_variant_type: experiment?.variant_type ?? job?.variant_type ?? null,
+    },
+    suggestedPrompt: 'Help me interpret this simulation result. Start with the phenotype summary, WT comparison, and the most useful model outputs to inspect next.',
+  })
+
   if (loading) {
     return (
       <div className="text-center py-12 text-gray-400">
@@ -454,7 +467,6 @@ export function ResultsPage() {
   const channels = Object.keys(results.timeseries)
   const isMock = !job.sim_dir || job.status !== 'done'
   const grouped = groupChannels(channels)
-  const focusGeneSymbol = singleGeneSymbol(resolvedGeneSymbol)
   const primarySummary = results.summary[0]
   const resultTitle = experiment?.name || (resolvedGeneSymbol ? `${resolvedGeneSymbol} knockout` : `Job #${job.id}`)
   const strongestWtDelta = strongestDelta(wtDelta)
@@ -463,17 +475,6 @@ export function ResultsPage() {
   const hasWildtype = Boolean(wtDelta?.has_wildtype)
   const comparisonMetricRows = comparisonRows(primarySummary, wtDelta)
   const comparisonPresets = suggestedComparisonPresets(wtDelta)
-  const assistantHref = buildAssistantHref({
-    surface: 'results',
-    route: `${location.pathname}${location.search}`,
-    job: String(job.id),
-    gene: focusGeneSymbol,
-    experiment: experiment?.id,
-    condition: experiment?.condition,
-    variantType: experiment?.variant_type,
-    prompt: 'Help me interpret this simulation result. Start with the phenotype summary, WT comparison, and the most useful model outputs to inspect next.',
-  })
-
   return (
     <div className="h-full overflow-y-auto pr-1">
       <div className="max-w-6xl mx-auto pb-8">
@@ -485,12 +486,6 @@ export function ResultsPage() {
             <h1 className="text-2xl font-semibold text-gray-900">{resultTitle}</h1>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <AskAssistantButton
-              href={assistantHref}
-              className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 font-medium text-brand-700 hover:bg-brand-100"
-            >
-              Ask Assistant
-            </AskAssistantButton>
             <span className={'rounded-full border px-2.5 py-1 font-medium ' + statusTone(job.status)}>
               {statusLabel(job.status)}
             </span>

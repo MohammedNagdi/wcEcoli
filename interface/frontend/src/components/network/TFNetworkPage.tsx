@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { AskAssistantButton } from '../assistant/AskAssistantButton'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import CytoscapeComponent from 'react-cytoscapejs'
 import type { Core, EventObject, ElementDefinition } from 'cytoscape'
 import { getTFNetwork } from '../../api/client'
@@ -8,7 +8,6 @@ import type { TFNetwork } from '../../types'
 import { SearchInput } from '../common/SearchInput'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { type RegulationEffect, regulationEffect } from '../../utils/regulation'
-import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 
 const FULL_LAYOUT = {
   name: 'cose',
@@ -555,11 +554,13 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     return { activation, repression, all: activation + repression }
   }, [network, minTargets])
 
-  const assistantHref = buildAssistantHref({
-    surface: 'network',
-    route: `${location.pathname}${location.search}`,
-    gene: selectedGene,
-    prompt: `Help me interpret the transcription-factor network. Focus on the ${networkMode} view, ${edgeFilter} regulation edges, hub threshold ${minTargets}, and any selected gene or TF context.`,
+  useRegisterAssistantContext({
+    context: {
+      assistant_surface: 'network',
+      route: `${location.pathname}${location.search}`,
+      selected_gene: selectedGene,
+    },
+    suggestedPrompt: `Help me interpret the transcription-factor network. Focus on the ${networkMode} view, ${edgeFilter} regulation edges, hub threshold ${minTargets}, and any selected gene or TF context.`,
   })
 
   useEffect(() => {
@@ -751,14 +752,6 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
               </span>
             )}
           </span>
-          {!embedded && (
-            <AskAssistantButton
-              href={assistantHref}
-              className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
-            >
-              Ask Assistant
-            </AskAssistantButton>
-          )}
         </div>
 
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">

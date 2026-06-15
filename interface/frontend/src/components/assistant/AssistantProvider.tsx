@@ -40,6 +40,11 @@ export interface ToolResultEntry {
   result: Record<string, unknown>
 }
 
+export interface PageAssistantRegistration {
+  context: Partial<AssistantContext>
+  suggestedPrompt?: string
+}
+
 function parseOptionalNumber(value: string | null): number | null {
   if (value == null || value === '') return null
   const n = Number(value)
@@ -50,7 +55,6 @@ export interface AssistantContextValue {
   // Panel visibility (used by the docked panel from Phase 2 on; harmless now)
   isOpen: boolean
   openAssistant: (opts?: { prompt?: string }) => void
-  openAssistantWithHref: (href: string) => void
   closeAssistant: () => void
 
   // Platform / provider status
@@ -69,7 +73,7 @@ export interface AssistantContextValue {
 
   // Page context (reactive to the route; pages can register richer context)
   context: AssistantContext
-  registerContext: (ctx: Partial<AssistantContext>) => void
+  registerContext: (registration: PageAssistantRegistration) => void
   clearContext: () => void
   suggestedPrompt: string
 
@@ -207,19 +211,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     }
   }, [location.pathname, location.search])
 
-  const [registeredContext, setRegisteredContext] = useState<Partial<AssistantContext> | null>(null)
-  const registerContext = (ctx: Partial<AssistantContext>) => setRegisteredContext(ctx)
-  const clearContext = () => setRegisteredContext(null)
-  // Drop stale page context when the route changes (so the dock isn't tied to a page you left).
-  useEffect(() => {
-    setRegisteredContext(null)
-  }, [location.pathname])
+  const [pageRegistration, setPageRegistration] = useState<PageAssistantRegistration | null>(null)
+  const registerContext = (registration: PageAssistantRegistration) => setPageRegistration(registration)
+  const clearContext = () => setPageRegistration(null)
   const context = useMemo<AssistantContext>(
-    () => (registeredContext ? { ...urlContext, ...registeredContext } : urlContext),
-    [urlContext, registeredContext],
+    () => (pageRegistration ? { ...urlContext, ...pageRegistration.context } : urlContext),
+    [urlContext, pageRegistration],
   )
 
-  const suggestedPrompt = useMemo(() => new URLSearchParams(location.search).get('prompt') || '', [location.search])
+  const urlSuggestedPrompt = useMemo(() => new URLSearchParams(location.search).get('prompt') || '', [location.search])
+  const suggestedPrompt = pageRegistration?.suggestedPrompt || urlSuggestedPrompt
 
   // ── chat state ──
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
@@ -399,10 +400,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (suggestedPrompt && !input.trim() && messages.length === 0) {
-      setInput(suggestedPrompt)
+    if (urlSuggestedPrompt && !input.trim() && messages.length === 0) {
+      setInput(urlSuggestedPrompt)
     }
-  }, [suggestedPrompt, input, messages.length])
+  }, [urlSuggestedPrompt, input, messages.length])
 
   useEffect(() => {
     if (!activeConversation) {
@@ -671,37 +672,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   function openAssistant(opts?: { prompt?: string }) {
     setIsOpen(true)
-    if (opts?.prompt) setInput((current) => (current.trim() ? current : opts.prompt!))
+    const prompt = opts?.prompt || pageRegistration?.suggestedPrompt || ''
+    if (prompt) setInput((current) => (current.trim() ? current : prompt))
   }
   function closeAssistant() {
     setIsOpen(false)
   }
 
-  // Open the dock with the context+prompt encoded in a legacy assistantHref (/assistant?gene=...&prompt=...).
-  // Replaces the old "navigate to /assistant" links so the page stays visible beside the chat.
-  function openAssistantWithHref(href: string) {
-    const q = href.indexOf('?')
-    const params = new URLSearchParams(q >= 0 ? href.slice(q + 1) : '')
-    setRegisteredContext({
-      route: params.get('route') || `${location.pathname}${location.search}`,
-      assistant_surface: params.get('surface') || 'central',
-      selected_gene: params.get('gene') || null,
-      selected_experiment: parseOptionalNumber(params.get('experiment')),
-      selected_job: parseOptionalNumber(params.get('job')),
-      selected_result: parseOptionalNumber(params.get('result')),
-      selected_condition: params.get('condition') || null,
-      selected_variant_type: params.get('variant_type') || null,
-      selected_builder_section: params.get('builder_section') || null,
-    })
-    const prompt = params.get('prompt') || ''
-    if (prompt) setInput((current) => (current.trim() ? current : prompt))
-    setIsOpen(true)
-  }
-
   const value: AssistantContextValue = {
     isOpen,
     openAssistant,
-    openAssistantWithHref,
     closeAssistant,
     status,
     providerConfigs,
@@ -764,11 +744,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
  * docked panel is page-aware without navigating. Clears on unmount. Pass a stable/memoized object or
  * primitive fields — re-registers whenever they change.
  */
-export function useRegisterAssistantContext(ctx: Partial<AssistantContext>) {
+export function useRegisterAssistantContext(registration: PageAssistantRegistration) {
   const { registerContext, clearContext } = useAssistant()
-  const key = JSON.stringify(ctx)
+  const key = JSON.stringify(registration)
   useEffect(() => {
-    registerContext(ctx)
+    registerContext(registration)
     return () => clearContext()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])

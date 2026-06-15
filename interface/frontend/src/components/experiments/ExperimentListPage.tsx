@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { AskAssistantButton } from '../assistant/AskAssistantButton'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
-import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
 import { BatchDashboard } from './BatchDashboard'
 import { FailedJobsPanel } from './FailedJobsPanel'
@@ -136,13 +135,15 @@ export function ExperimentListPage() {
   const selectedExperiment = selectedId != null
     ? experiments.find((e) => e.id === selectedId) ?? null
     : null
-  const assistantHref = buildAssistantHref({
-    surface: 'experiments',
-    route: `${location.pathname}${location.search}`,
-    experiment: selectedExperiment?.id,
-    condition: selectedExperiment?.condition,
-    variantType: selectedExperiment?.variant_type,
-    prompt: `Help me review the Experiments page. Explain the ${view} view, selected experiment or batch context, queue state, redundant controls, and the next safe action.`,
+  useRegisterAssistantContext({
+    context: {
+      assistant_surface: 'experiments',
+      route: `${location.pathname}${location.search}`,
+      selected_experiment: selectedExperiment?.id ?? null,
+      selected_condition: selectedExperiment?.condition ?? null,
+      selected_variant_type: selectedExperiment?.variant_type ?? null,
+    },
+    suggestedPrompt: `Help me review the Experiments page. Explain the ${view} view, selected experiment or batch context, queue state, redundant controls, and the next safe action.`,
   })
 
   const formatDate = (iso: string) => {
@@ -164,12 +165,6 @@ export function ExperimentListPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <AskAssistantButton
-            href={assistantHref}
-            className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
-          >
-            Ask Assistant
-          </AskAssistantButton>
           <Link
             to="/experiments/batch"
             className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100

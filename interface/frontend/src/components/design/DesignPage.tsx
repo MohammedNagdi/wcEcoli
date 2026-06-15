@@ -1,9 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { AskAssistantButton } from '../assistant/AskAssistantButton'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getDesignOverview, getEssentiality } from '../../api/client'
 import type { DesignOverview, GeneKOSummary, EssentialityStats } from '../../types'
-import { assistantHref as buildAssistantHref } from '../../utils/assistantLinks'
 
 const PHENOTYPE_COLORS: Record<string, string> = {
   essential: 'bg-red-100 text-red-800',
@@ -100,11 +99,13 @@ export function DesignPage() {
     return sortDir === 'asc' ? '↑' : '↓'
   }
 
-  const assistantHref = buildAssistantHref({
-    surface: 'design',
-    route: `${location.pathname}${location.search}`,
-    gene: searchTerm,
-    prompt: 'Help me review this Genome Design view. Explain what the current knockout phenotype summaries can and cannot support, which filters matter, and what simulation coverage is still missing before minimal-genome conclusions.',
+  useRegisterAssistantContext({
+    context: {
+      assistant_surface: 'design',
+      route: `${location.pathname}${location.search}`,
+      selected_gene: searchTerm || null,
+    },
+    suggestedPrompt: 'Help me review this Genome Design view. Explain what the current knockout phenotype summaries can and cannot support, which filters matter, and what simulation coverage is still missing before minimal-genome conclusions.',
   })
 
   if (loading) {
@@ -136,12 +137,6 @@ export function DesignPage() {
           from whole-cell simulation results.
         </p>
         </div>
-        <AskAssistantButton
-          href={assistantHref}
-          className="self-start rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
-        >
-          Ask Assistant
-        </AskAssistantButton>
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
