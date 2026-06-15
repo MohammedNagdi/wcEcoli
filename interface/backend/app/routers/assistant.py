@@ -394,6 +394,7 @@ def create_message(
             conversation=conversation,
             assistant_message=assistant_message,
             context=data.context,
+            user_content=data.content,
             skip_keys={(record.tool_name, record.arguments_json) for record in proposals},
         )
     )
@@ -517,6 +518,7 @@ def create_message_stream(
                 conversation=conversation_after,
                 assistant_message=assistant_message,
                 context=data.context,
+                user_content=data.content,
                 skip_keys={(record.tool_name, record.arguments_json) for record in proposals},
             )
         )

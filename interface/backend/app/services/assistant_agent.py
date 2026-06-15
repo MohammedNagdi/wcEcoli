@@ -266,8 +266,11 @@ _STABLE_SYSTEM_PROMPT = (
     "`create_experiment` with variant_type from the tool's allowed values (it is `gene_knockout` for knockouts) "
     "and variant_index = the gene's knockout index. Do NOT invent variant_type values like 'mutation' or "
     "'knockout'.\n"
-    "- When asked to 'pick' or 'select' a gene, call `gene_catalog` and choose a real gene from the result; do "
-    "not reuse a gene mentioned earlier unless the user refers to it.\n"
+    "- Page context (the selected gene/result/etc.) is the DEFAULT subject, not a constraint. If the user asks "
+    "for a DIFFERENT, random, or 'another' gene/result, honor that over the selection — do not keep returning the "
+    "selected one. For a random or different gene, call `gene_catalog` with `random: true` and pick from the "
+    "result; for a different result, call `list_results`. Only reuse the selected/earlier gene when the user "
+    "refers to it ('this gene', 'it', or by name).\n"
     "- Make tool calls via the tool interface only. NEVER paste a tool call as a JSON code block in your reply, "
     "and do not show raw arguments — the platform renders the confirmation card for you.\n"
     "- Tool results may include a `links` field — internal UI navigation targets. Never mention 'the links "
@@ -280,7 +283,10 @@ _STABLE_SYSTEM_PROMPT = (
 
 def _dynamic_context_block(context: dict[str, Any]) -> str:
     """The volatile, per-turn part of the system prompt (page context, facts, memory)."""
-    parts = [f"Current page context: {_context_summary(context)}."]
+    parts = [
+        f"Current page context (the default subject — the user may redirect to a different/random "
+        f"subject, which takes precedence): {_context_summary(context)}."
+    ]
     platform_facts = _platform_facts_summary(context)
     if platform_facts:
         parts.append(platform_facts)

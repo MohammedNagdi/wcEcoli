@@ -378,11 +378,13 @@ def test_contextual_proposals_record_non_executing_tool_calls():
             status="completed",
         )
 
+        # A message that explicitly references and acts on the selection surfaces all four cards.
         proposals = record_contextual_proposals(
             session,
             conversation=conversation,
             assistant_message=assistant_message,
             context=context,
+            user_content="Inspect this gene and this result, draft a knockout follow-up, and run the experiment.",
         )
 
         assert len(proposals) == 4
@@ -487,6 +489,7 @@ def test_model_gene_proposals_validate_mentions_and_deduplicate_contextual_draft
             conversation=conversation,
             assistant_message=assistant_message,
             context=context,
+            user_content="Draft a knockout follow-up for this gene.",
         )
         model_proposals = record_model_gene_proposals(
             session,
@@ -2113,6 +2116,47 @@ def test_lenient_recovery_handles_python_literals():
     assert calls[0].input["variant_index"] is None
     assert "{" not in cleaned  # raw JSON stripped from the visible answer
     assert "Preparing it." in cleaned
+
+
+def test_contextual_proposals_are_intent_gated():
+    """A selected gene must NOT auto-spawn an 'Inspect <gene>' card on unrelated/different requests."""
+    engine, session = _build_session()
+    try:
+        session.add(Gene(ecoli_id="EG10001", symbol="aaaE", category="other", ko_index=0))
+        session.commit()
+        ctx = AssistantContext(route="/?gene=aaaE", selected_gene="aaaE", assistant_surface="workspace")
+        conv = create_conversation(
+            session, AssistantConversationCreate(title="t", assistant_surface="workspace", context=ctx)
+        )
+        msg = store_message(session, conv, "assistant", "ok", ctx, status="completed")
+
+        def cards(user_content):
+            return [p.tool_name for p in record_contextual_proposals(
+                session, conversation=conv, assistant_message=msg, context=ctx, user_content=user_content
+            )]
+
+        assert cards("Explain what each page does.") == []          # unrelated -> no card
+        assert cards("Pick another gene at random and explain it.") == []  # different subject -> no card
+        assert cards("Inspect this gene please.") == ["inspect_gene"]      # references selection -> card
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_gene_catalog_random_sampling():
+    """gene_catalog(random=True) returns a sample so 'pick a random gene' isn't always the same head."""
+    engine, session = _build_session()
+    try:
+        for i in range(30):
+            session.add(Gene(ecoli_id=f"EG{i:05d}", symbol=f"gene{i:02d}", category="other", ko_index=0))
+        session.commit()
+        out = execute_tool(session, "gene_catalog", AssistantToolExecutionRequest(arguments={"random": True, "limit": 5}))
+        assert out.executed is True
+        assert out.normalized_arguments["random"] is True
+        assert len(out.result["genes"]) == 5
+    finally:
+        session.close()
+        engine.dispose()
 
 
 def test_secret_reveal_roundtrips_and_fails_loudly(monkeypatch):

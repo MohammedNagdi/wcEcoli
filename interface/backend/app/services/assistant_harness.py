@@ -1202,12 +1202,14 @@ def get_tool_registry() -> list[AssistantToolSpec]:
             description=(
                 "Count and summarize the genes supported in the platform. Optionally filter by functional category "
                 "or a symbol/name search. Use this for questions like 'how many genes are supported' or 'which "
-                "knockout-ready genes exist'. Returns totals and a matching subset, not per-gene mechanistic detail."
+                "knockout-ready genes exist'. Returns totals and a matching subset, not per-gene mechanistic detail. "
+                "Set `random: true` to get a random sample (use this to 'pick a random/different gene' instead of "
+                "anchoring on the page's selected gene)."
             ),
             status="execution_enabled",
             requires_confirmation=False,
             side_effect=False,
-            argument_schema={"category": "string", "search": "string", "limit": "integer"},
+            argument_schema={"category": "string", "search": "string", "limit": "integer", "random": "boolean"},
             result_schema={"totals": "object", "genes": "array"},
         ),
         AssistantToolSpec(
@@ -2140,10 +2142,11 @@ def _preview_gene_catalog(session: Session, args: dict[str, Any]) -> tuple[dict[
     category = _string_arg(args, "category", required=False, errors=[]) or ""
     search = _string_arg(args, "search", required=False, errors=[]) or ""
     limit = _clamp_limit(args, default=15, maximum=50)
-    normalized = {"category": category.strip(), "search": search.strip(), "limit": limit}
+    sample = bool(args.get("random"))
+    normalized = {"category": category.strip(), "search": search.strip(), "limit": limit, "random": sample}
     preview = {
         "summary": "Summarize the Genes table (counts, categories, knockout-ready and mechanistic genes).",
-        "filters": {"category": normalized["category"], "search": normalized["search"]},
+        "filters": {"category": normalized["category"], "search": normalized["search"], "random": sample},
     }
     return normalized, preview, [], []
 
@@ -2972,15 +2975,41 @@ def _record_assistant_proposal(
     )
 
 
+_DIFFERENT_SUBJECT_HINTS = (
+    "random", "another", "different", "other gene", "some gene", "any gene",
+    "each page", "all genes", "pick a", "choose a", "list all", "every gene",
+)
+_GENE_TOPIC = ("gene", "knockout", "protein", "inspect", "explain", "tell me", "detail", "fact", "about")
+_RESULT_TOPIC = ("result", "job", "run", "inspect", "metric", "growth", "division", "mass", "doubling")
+_DEICTIC = (" this", " it", " that", "current", "selected", " here", " its ")
+
+
+def _wants_different_subject(text: str) -> bool:
+    return any(hint in text for hint in _DIFFERENT_SUBJECT_HINTS)
+
+
+def _refs_selection(text: str, *, name: str | None, topics: tuple[str, ...]) -> bool:
+    """Does the user's message actually point at the page's current selection?"""
+    if name and name.lower() in text:
+        return True
+    return any(d in text for d in _DEICTIC) and any(t in text for t in topics)
+
+
 def record_contextual_proposals(
     session: Session,
     *,
     conversation: AssistantConversation,
     assistant_message: AssistantMessage,
     context: AssistantContext,
+    user_content: str = "",
     skip_keys: set[tuple[str, str]] | None = None,
 ) -> list[AssistantToolCall]:
     """Record non-executing proposal cards derived from validated page context.
+
+    Page context is a *hint*, not a mandate: a contextual card is only offered when the user's message
+    actually references the current selection (or asks to act on it), and never when they ask for a
+    different/random subject. This stops an unsolicited "Inspect <selected gene>" card from trailing
+    every reply just because a gene is selected on the page.
 
     ``skip_keys`` holds ``(tool_name, arguments_json)`` pairs already proposed this turn (e.g. by the
     model's own tool calls) so the contextual layer does not create a duplicate card.
@@ -2988,6 +3017,8 @@ def record_contextual_proposals(
 
     proposals: list[AssistantToolCall] = []
     seen = set(skip_keys or set())
+    text = (user_content or "").lower()
+    wants_other = _wants_different_subject(text)
 
     def add_proposal(**kwargs: Any) -> None:
         key = (kwargs["tool_name"], to_json(kwargs.get("arguments", {})))
@@ -3004,7 +3035,9 @@ def record_contextual_proposals(
             )
         )
 
-    if context.selected_job is not None:
+    if context.selected_job is not None and not wants_other and _refs_selection(
+        text, name=f"job {context.selected_job}", topics=_RESULT_TOPIC
+    ):
         add_proposal(
             tool_name="inspect_result",
             arguments={"job_id": context.selected_job, "gene": context.selected_gene or ""},
@@ -3015,7 +3048,8 @@ def record_contextual_proposals(
 
     if context.selected_gene:
         gene = _lookup_gene_by_symbol(session, context.selected_gene)
-        if gene:
+        refs_gene = not wants_other and _refs_selection(text, name=context.selected_gene, topics=_GENE_TOPIC)
+        if gene and refs_gene:
             add_proposal(
                 tool_name="inspect_gene",
                 arguments={"gene": gene.symbol},
@@ -3023,7 +3057,9 @@ def record_contextual_proposals(
                 description="Read validated Genes Table metadata, model-state IDs, and page links for the selected gene.",
                 proposal_kind="read_only",
             )
-        if gene and gene.ko_index > 0:
+        if gene and gene.ko_index > 0 and refs_gene and any(
+            k in text for k in ("knockout", "experiment", "draft", "ko ", "follow-up")
+        ):
             condition = context.selected_condition or "basal"
             add_proposal(
                 tool_name="create_experiment",
@@ -3044,7 +3080,9 @@ def record_contextual_proposals(
                 proposal_kind="side_effect_preview",
             )
 
-    if context.selected_experiment is not None:
+    if context.selected_experiment is not None and not wants_other and any(
+        k in text for k in ("run", "simulate", "queue", "launch", "execute")
+    ):
         add_proposal(
             tool_name="run_simulation",
             arguments={"experiment_id": context.selected_experiment, "seed": 0, "generations": 1},
@@ -3348,6 +3386,7 @@ def _execute_gene_catalog(session: Session, normalized_arguments: dict[str, Any]
     category = (normalized_arguments.get("category") or "").strip().lower()
     search = (normalized_arguments.get("search") or "").strip().lower()
     limit = int(normalized_arguments.get("limit") or 15)
+    sample = bool(normalized_arguments.get("random"))
     genes = session.exec(select(Gene)).all()
 
     by_category: dict[str, int] = {}
@@ -3376,6 +3415,13 @@ def _execute_gene_catalog(session: Session, normalized_arguments: dict[str, Any]
         return True
 
     matched = [gene for gene in genes if matches(gene)]
+    # `random` returns a varied sample so "pick a random/different gene" doesn't keep returning the
+    # alphabetical head (or the page's selected gene). Deterministic head otherwise.
+    if sample and matched:
+        import random as _random
+        shown = _random.sample(matched, min(limit, len(matched)))
+    else:
+        shown = matched[:limit]
     return {
         "totals": {
             "genes": len(genes),
@@ -3387,7 +3433,7 @@ def _execute_gene_catalog(session: Session, normalized_arguments: dict[str, Any]
         "category_breakdown": dict(sorted(by_category.items(), key=lambda item: -item[1])),
         "filters": {"category": category, "search": search},
         "matched_count": len(matched),
-        "genes": [_gene_summary(gene) for gene in matched[:limit]],
+        "genes": [_gene_summary(gene) for gene in shown],
         "note": "Counts are over the local Genes table. Knockout-ready genes have ko_index > 0.",
         "links": [{"label": "Gene catalog", "path": "/genes"}],
     }
