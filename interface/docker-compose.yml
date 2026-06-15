@@ -8,6 +8,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/eval:/app/eval          # assistant eval harness (run via `docker exec ... python -m eval.run_eval`)
+      - ./backend/hf_export:/app/hf_export # HF dataset export (run via `docker exec ... python -m hf_export.run_export`)
       - ../reconstruction:/data/reconstruction:rw
       - ../models:/data/models:ro
       - api-db:/app/data
