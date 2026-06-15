@@ -28,6 +28,7 @@ from app.db.engine import make_sqlite_engine
 from .report import build_scorecard
 from .runner import run_multiturn, run_oneshot
 from .schema import Dataset, ModelTarget
+from .transcript import build_transcript
 
 
 def main() -> None:
@@ -64,8 +65,10 @@ def main() -> None:
             handle.write(json.dumps(r, default=str) + "\n")
     scorecard_path = out_dir / f"scorecard-{stamp}.md"
     scorecard_path.write_text(build_scorecard(results), encoding="utf-8")
+    transcript_path = out_dir / f"transcript-{stamp}.md"
+    transcript_path.write_text(build_transcript(results), encoding="utf-8")
 
-    print(f"\nWrote {raw_path}\nWrote {scorecard_path}")
+    print(f"\nWrote {raw_path}\nWrote {scorecard_path}\nWrote {transcript_path}  <- paste this to Claude for judging")
 
 
 if __name__ == "__main__":

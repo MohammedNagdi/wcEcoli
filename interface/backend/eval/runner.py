@@ -50,8 +50,12 @@ def run_oneshot(session: Session, case: OneShotCase, target: ModelTarget) -> dic
     )
     return {
         "id": case.id, "kind": "oneshot", "category": case.category, "model": target.label,
+        "prompt": case.prompt, "context": dict(case.context),
+        "rubric": case.rubric, "gold": case.gold,
         "latency_ms": latency_ms, "status": s["status"], "content": s["content"],
         "tool_names": s["executed_tool_names"] + s["pending_tool_names"],
+        # Tool output is the ground truth the judge scores faithfulness against.
+        "tool_output": [{"tool_name": t.get("tool_name"), "result": t.get("result")} for t in s["executed_tools"]],
         "checks": check_results,
         "passed": all(c["passed"] for c in check_results),
     }
@@ -89,6 +93,7 @@ def run_multiturn(session: Session, scenario: MultiTurnScenario, target: ModelTa
             "turn": index, "is_probe": turn.is_probe, "prompt": turn.prompt,
             "latency_ms": latency_ms, "status": s["status"], "content": s["content"],
             "tool_names": s["executed_tool_names"] + s["pending_tool_names"],
+            "tool_output": [{"tool_name": t.get("tool_name"), "result": t.get("result")} for t in s["executed_tools"]],
             "checks": check_results, "passed": all(c["passed"] for c in check_results),
         })
     probes = [t for t in turn_results if t["is_probe"]]

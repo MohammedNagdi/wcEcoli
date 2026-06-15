@@ -73,6 +73,30 @@ category, per-model overall + latency, most-common failing checks).
 > ⚠️ Hosted models (`openai:…`, `anthropic:…`) cost money per run — the matrix multiplies cases ×
 > models. Start with the local models and a small dataset slice.
 
+## Claude-as-judge (free — no paid judge API)
+
+Instead of paying a hosted judge, run the harness against your **local** models (free via Ollama),
+then have a Claude Code session read the emitted `transcript-<ts>.md` and score it. The transcript
+includes, per case: prompt, page context, rubric, **tool output (ground truth)**, the model's answer,
+and the pre-computed deterministic checks — everything needed to grade without re-running.
+
+Workflow:
+1. `python -m eval.run_eval --dataset … --models "ollama:qwen3:8b,ollama:llama3.1:8b,ollama:qwen2.5-coder:14b,ollama:llama3.2:latest" --out eval/results`
+2. Open the run's `transcript-<ts>.md` and ask Claude: *"Judge this eval transcript with the JUDGE rubric."*
+3. Claude returns per-case scores + a model-comparison scorecard you save next to the run.
+
+**JUDGE rubric** (1–5 each; 5 best):
+- **correctness** — factually right given the tool output and the question.
+- **faithfulness** — every claim supported by the tool output; no fabricated ids/numbers/names.
+- **helpfulness** — answers what was asked, right level of detail, no filler.
+- **instruction_following** — honors explicit constraints ("a *different* gene", "no equation",
+  "no wildtype"), and for actions: *prepares* (never claims it executed).
+Also flag, per case: any **hallucination**, **tool mis-selection**, **context-stickiness** (ignored
+an override), or **format leak**. The deterministic checks are hints, not the verdict.
+
+Report back: a category × model pass/score matrix, the worst failures with one-line diagnoses, and a
+recommended model per task tier (this is the input to model routing).
+
 ## Extending
 
 - **Add cases**: copy a starter dataset, add entries (aim for ~100 one-shot across the 6 categories,
