@@ -1,0 +1,7 @@
+# Eval run outputs (scorecards, transcripts, raw jsonl) — regenerated, not source.
+results/
+
+# HF dataset export shards — large HDF5, belong on Hugging Face, never in git.
+hf_v0/
+hf_full/
+hf_*/

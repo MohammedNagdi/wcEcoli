@@ -4,7 +4,9 @@ Packages one completed simulation's per-generation trajectories into a uniform H
 flat metadata record (written as JSONL by run_export). v0 ships the ~25 *scalar* trajectory channels
 the platform already extracts (masses, growth rate, volume, ppGpp, AA pools, mRNA total, FBA
 objective/fluxes, ribosome rates, replication) — enough for the dynamics (T3), growth (T1), and
-viability (T2) benchmarks. The per-gene/per-reaction matrices are a v1/v2 "full tensor" addition.
+viability (T2) benchmarks. The high-dimensional per-gene mRNA/protein and per-reaction flux matrices
+are exported too when ``--full-tensors`` is set (see ``MATRIX_CHANNELS`` / ``write_matrix_channels``);
+their column-id maps are stored once under ``/reference``.
 
 HDF5 layout (one group per cell trajectory):
     /cond=<c>/geno=<g>/seed=<s>/gen=<n>
@@ -32,8 +34,39 @@ V0_CHANNELS = [
 ]
 
 
+# High-dimensional "omics" matrices (opt-in via --full-tensors): output channel name -> reader
+# molecule_type. Each is a (T, N) tensor; the N column ids are stored ONCE under /reference.
+MATRIX_CHANNELS = {
+    "mrna_counts_matrix": "mRNA",
+    "protein_counts_matrix": "protein",
+    "reaction_flux_matrix": "reaction_flux",
+    "exchange_flux_matrix": "exchange_flux",
+}
+
+
 def group_path(condition: str, genotype: str, seed: int, generation: int) -> str:
     return f"cond={condition}/geno={genotype}/seed={seed}/gen={generation}"
+
+
+def write_matrix_channels(h5file: Any, path: str, matrices: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
+    """Write per-cell (T, N) matrices under ``path``. Returns {channel: ids} for /reference (once).
+
+    ``matrices`` maps output-channel-name -> {"time", "matrix", "ids", "unit"} (reader output).
+    """
+    grp = h5file.require_group(path)
+    ids_by_channel: dict[str, list[str]] = {}
+    for name, mat in matrices.items():
+        matrix = np.asarray(mat["matrix"], dtype=np.float32)
+        if matrix.ndim != 2 or matrix.shape[0] == 0:
+            continue
+        time = np.asarray(mat["time"], dtype=np.float32)
+        sub = grp.require_group(name)
+        sub.create_dataset("time", data=time, compression="gzip", compression_opts=4)
+        dset = sub.create_dataset("value", data=matrix, compression="gzip", compression_opts=4, chunks=True)
+        dset.attrs["unit"] = mat.get("unit", "")
+        dset.attrs["n_columns"] = matrix.shape[1]
+        ids_by_channel[name] = [str(x) for x in (mat.get("ids") or [])]
+    return ids_by_channel
 
 
 def write_sim(h5file: Any, path: str, channels: dict[str, dict[str, Any]], attrs: dict[str, Any]) -> list[str]:

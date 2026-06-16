@@ -264,6 +264,35 @@ class SimOutReader:
 
         return data
 
+    # Per-molecule / per-reaction FULL matrices (the high-dimensional "omics" channels).
+    _FULL_MATRIX_SPEC = {
+        "mRNA":          ("RNACounts",    "mRNA_counts",            "mRNA_ids",           "molecules"),
+        "protein":       ("MonomerCounts", "monomerCounts",         "monomerIds",         "molecules"),
+        "reaction_flux": ("FBAResults",   "reactionFluxes",         "reactionIDs",        "mmol/gDCW/h"),
+        "exchange_flux": ("FBAResults",   "externalExchangeFluxes", "externalMoleculeIDs", "mmol/gDCW/h"),
+    }
+
+    def extract_full_matrix(self, molecule_type):
+        """Full (T, N) matrix + column ids + time for a molecule type.
+
+        Unlike the scalar `extract_*_timeseries` (which sum/aggregate), this returns the complete
+        per-gene / per-reaction tensor — the scientifically richest channel. Returns None if absent.
+        molecule_type in {'mRNA', 'protein', 'reaction_flux', 'exchange_flux'}.
+        """
+        spec = self._FULL_MATRIX_SPEC.get(molecule_type)
+        if spec is None:
+            return None
+        table, column, ids_attr, unit = spec
+        matrix = self._read_column(table, column)
+        if matrix is None or matrix.ndim != 2 or matrix.shape[0] == 0:
+            return None
+        time = self._read_column(table, "time")
+        if time is None or len(time) != matrix.shape[0]:
+            import numpy as _np
+            time = _np.arange(matrix.shape[0])
+        ids = self._read_attribute(table, ids_attr)
+        return {"time": time, "matrix": matrix, "ids": list(ids) if ids is not None else [], "unit": unit}
+
     def extract_all_channels(self):
         """Extract all available channels, keyed by channel name."""
         channels = {}

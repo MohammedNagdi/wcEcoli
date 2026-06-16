@@ -20,7 +20,7 @@ from app.config import settings
 from app.db.engine import make_sqlite_engine
 from app.db.models import Experiment, SimulationJob
 
-from .converter import build_record, group_path, write_sim
+from .converter import MATRIX_CHANNELS, build_record, group_path, write_matrix_channels, write_sim
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("hf_export")
@@ -34,14 +34,17 @@ def _genotype(exp: Experiment | None) -> tuple[str, str]:
     return (f"{gene}_KO" if gene else (exp.variant_type or "variant")), gene
 
 
-def export(out_dir: Path, limit: int | None) -> dict:
+def export(out_dir: Path, limit: int | None, full_tensors: bool = False) -> dict:
     import h5py
+    import numpy as np
     from app.services.table_reader_bridge import SimOutReader, find_sim_outs
 
     out_dir.mkdir(parents=True, exist_ok=True)
     engine = make_sqlite_engine(settings.database_path)
     records: list[dict] = []
     n_jobs = n_traj = 0
+    reference_ids: dict[str, list[str]] = {}  # written once under /reference
+    matrix_cols: dict[str, int] = {}
 
     with Session(engine) as session, h5py.File(out_dir / "trajectories.h5", "w") as h5:
         jobs = session.exec(
@@ -83,6 +86,24 @@ def export(out_dir: Path, limit: int | None) -> dict:
                 written = write_sim(h5, path, channels, attrs)
                 if not written:
                     continue
+
+                # High-dimensional per-gene/per-reaction matrices (opt-in; the dataset's real value).
+                if full_tensors:
+                    matrices = {}
+                    for ch_name, mol_type in MATRIX_CHANNELS.items():
+                        try:
+                            mat = reader.extract_full_matrix(mol_type)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("job %s gen %s: matrix %s failed: %s", job.id, generation, ch_name, exc)
+                            mat = None
+                        if mat is not None:
+                            matrices[ch_name] = mat
+                    ids_by_channel = write_matrix_channels(h5, path, matrices)
+                    for ch_name, ids in ids_by_channel.items():
+                        reference_ids.setdefault(ch_name, ids)  # ids are model-wide; store once
+                        matrix_cols[ch_name] = len(ids)
+                    written = written + list(matrices.keys())
+
                 n_traj += 1
                 records.append(build_record(
                     path=path, variant_type=attrs["variant_type"], condition=job.condition or "",
@@ -92,11 +113,19 @@ def export(out_dir: Path, limit: int | None) -> dict:
                                 "variant_index": getattr(job, "variant_index", None)},
                 ))
 
+        # Column-id maps for the high-dim matrices, stored ONCE (model-wide, not per cell).
+        if reference_ids:
+            ref = h5.require_group("reference")
+            str_dt = h5py.string_dtype(encoding="utf-8")
+            for ch_name, ids in reference_ids.items():
+                ref.create_dataset(f"{ch_name}_ids", data=np.array(ids, dtype=object), dtype=str_dt)
+
     (out_dir / "metadata.jsonl").write_text(
         "".join(json.dumps(r, default=str) + "\n" for r in records), encoding="utf-8")
     manifest = {
         "version": "v0", "n_jobs": n_jobs, "n_cell_trajectories": n_traj,
         "channels": sorted({c for r in records for c in r["channels"]}),
+        "matrix_channels": matrix_cols,
         "conditions": sorted({r["condition"] for r in records}),
         "genotypes": sorted({r["genotype"] for r in records}),
     }
@@ -109,8 +138,10 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--limit", type=int, default=None, help="cap number of jobs (pilot shard)")
+    ap.add_argument("--full-tensors", action="store_true",
+                    help="also export per-gene mRNA/protein + per-reaction flux matrices (large)")
     args = ap.parse_args()
-    print(json.dumps(export(args.out, args.limit), indent=2))
+    print(json.dumps(export(args.out, args.limit, args.full_tensors), indent=2))
 
 
 if __name__ == "__main__":

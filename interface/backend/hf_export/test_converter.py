@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from hf_export.converter import build_record, group_path, write_sim
+from hf_export.converter import build_record, group_path, write_matrix_channels, write_sim
 from hf_export.matrix import estimate_counts, v0_campaign
 
 
@@ -38,6 +38,26 @@ def test_write_sim_and_record(tmp_path):
     assert rec["h5_path"] == path and rec["genotype"] == "WT"
     assert rec["divided"] is True and rec["prov_experiment_id"] == 3
     assert rec["channels"] == written
+
+
+def test_write_matrix_channels(tmp_path):
+    import h5py
+
+    t = np.linspace(0, 3600, 50)
+    matrices = {
+        "mrna_counts_matrix": {"time": t, "matrix": np.random.rand(50, 8).astype("float32"),
+                               "ids": [f"RNA{i}" for i in range(8)], "unit": "molecules"},
+        "reaction_flux_matrix": {"time": t, "matrix": np.random.rand(50, 5).astype("float32"),
+                                 "ids": [f"RXN{i}" for i in range(5)], "unit": "mmol/gDCW/h"},
+    }
+    path = group_path("basal", "WT", 0, 0)
+    with h5py.File(tmp_path / "m.h5", "w") as h5:
+        ids = write_matrix_channels(h5, path, matrices)
+        grp = h5[path]
+        assert grp["mrna_counts_matrix"]["value"].shape == (50, 8)          # full (T, N) tensor
+        assert grp["mrna_counts_matrix"]["value"].attrs["n_columns"] == 8
+        assert grp["reaction_flux_matrix"]["value"].shape == (50, 5)
+        assert ids["mrna_counts_matrix"] == [f"RNA{i}" for i in range(8)]   # ids returned for /reference
 
 
 def test_v0_matrix_includes_dynamics():
