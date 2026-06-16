@@ -58,9 +58,12 @@ def main() -> None:
     parser.add_argument("--models", required=True, help="Comma list of provider:model, e.g. 'ollama:qwen3:8b,openai:gpt-4.1-mini'.")
     parser.add_argument("--db", default=str(settings.database_path), help="SQLite DB to ground tools against.")
     parser.add_argument("--out", default="eval/results", help="Output directory for results + scorecard.")
+    parser.add_argument("--limit", type=int, default=None, help="cap oneshot cases (small controlled run)")
     args = parser.parse_args()
 
     dataset = Dataset.model_validate_json(Path(args.dataset).read_text(encoding="utf-8"))
+    if args.limit:
+        dataset.oneshot = dataset.oneshot[: args.limit]
     targets = [ModelTarget.parse(spec) for spec in args.models.split(",") if spec.strip()]
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
