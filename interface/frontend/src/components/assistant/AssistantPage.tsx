@@ -1790,6 +1790,10 @@ function ModelPill({
             {(providerOption?.models ?? []).map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
           <p className="mt-2 text-[10px] leading-4 text-gray-400">Per-chat. The default is set in Provider settings.</p>
+          <p className="mt-1 text-[10px] leading-4 text-amber-600">
+            Local models need free RAM ≈ their size (8B ≈ 6 GB, 14B ≈ 12 GB). Large models can crash on
+            low-RAM machines — see Guide → Assistant.
+          </p>
         </div>
       )}
     </div>

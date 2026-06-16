@@ -399,6 +399,9 @@ def _call_provider(
             "messages": messages,
             "stream": False,
             "keep_alive": settings.assistant_ollama_keep_alive or "30m",
+            # Bound the context window so the KV cache footprint is small + predictable (avoids
+            # runaway memory on big local models). Large enough for prompt + tool results.
+            "options": {"num_ctx": int(settings.assistant_ollama_num_ctx or 8192)},
         }
         if provider_tools:
             payload["tools"] = _openai_tools(provider_tools)

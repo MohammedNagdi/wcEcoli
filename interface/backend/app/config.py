@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     assistant_local_timeout_sec: int = 300
     # Keep a local model resident between the agent loop's turns to avoid cold reloads.
     assistant_ollama_keep_alive: str = "30m"
+    # Context window sent to Ollama. Bounded (not the model's 32k max) so the KV cache stays small
+    # and predictable; large enough for our system prompt + tool results + a few turns.
+    assistant_ollama_num_ctx: int = 8192
     # Cap on observe->act->observe iterations per user turn.
     assistant_max_agent_turns: int = 6
     # Context compaction: keep this many recent turns verbatim; summarize older ones once at least

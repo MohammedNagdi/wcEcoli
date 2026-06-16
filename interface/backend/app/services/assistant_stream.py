@@ -343,6 +343,7 @@ def _stream_provider(
             "messages": messages,
             "stream": True,
             "keep_alive": settings.assistant_ollama_keep_alive or "30m",
+            "options": {"num_ctx": int(settings.assistant_ollama_num_ctx or 8192)},
         }
         if provider_tools:
             payload["tools"] = _openai_tools(provider_tools)

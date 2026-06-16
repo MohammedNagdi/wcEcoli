@@ -31,6 +31,27 @@ from .schema import Dataset, ModelTarget
 from .transcript import build_transcript
 
 
+def _unload_ollama(target: ModelTarget) -> None:
+    """Evict a local model from Ollama (keep_alive=0) before loading the next, so benchmarking
+    several models never stacks them in RAM (the cause of the 14B OOM in the multi-model run)."""
+    if target.provider_id != "ollama":
+        return
+    import os
+    import urllib.request
+
+    base = (os.environ.get("OLLAMA_BASE_URL") or "http://host.docker.internal:11434").rstrip("/")
+    try:
+        req = urllib.request.Request(
+            f"{base}/api/generate",
+            data=json.dumps({"model": target.model, "keep_alive": 0}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=20).read()
+        print(f"  (unloaded {target.model} from memory)")
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        print(f"  (unload skipped: {exc})")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Assistant response-quality evaluation harness.")
     parser.add_argument("--dataset", required=True, help="Path to a dataset JSON file (see schema.py).")
@@ -58,6 +79,7 @@ def main() -> None:
                 r = run_multiturn(session, scenario, target)
                 results.append(r)
                 print(f"  [multi ] {scenario.id:<28} {'PASS' if r['passed'] else 'FAIL'}  ~{r['avg_latency_ms']}ms/turn")
+        _unload_ollama(target)  # free RAM before the next model loads
 
     raw_path = out_dir / f"results-{stamp}.jsonl"
     with raw_path.open("w", encoding="utf-8") as handle:

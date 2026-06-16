@@ -709,6 +709,24 @@ export function ExperimentGuidePage() {
             then read the results — it does not invent dynamic numbers. Conceptual questions about the model and FBA
             are answered from curated references, describing what each term does rather than reproducing equations.
           </div>
+
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-800">
+            <div className="mb-1 font-semibold">Running local models (Ollama)</div>
+            A local model must fit in <span className="font-medium">free</span> RAM/VRAM, roughly equal to its size
+            at 4-bit: <span className="font-mono">~3B ≈ 3 GB</span>, <span className="font-mono">8B ≈ 6 GB</span>,
+            <span className="font-mono"> 14B ≈ 9–12 GB</span> (plus a context cache). If it exceeds available memory
+            the model server crashes (out-of-memory) or runs very slowly on CPU.
+            <ul className="mt-2 list-disc space-y-0.5 pl-4">
+              <li><span className="font-medium">GPU:</span> for fast inference the whole model should fit in VRAM. Most
+                laptop GPUs have 4–8 GB, enough for ~8B but not 14B — which then spills to CPU/RAM and slows down.</li>
+              <li><span className="font-medium">Docker/WSL2 caveat:</span> Docker Desktop's Linux VM reserves a large
+                slice of host RAM, leaving less for Ollama. Lower it in <span className="font-mono">%UserProfile%\.wslconfig</span>
+                (<span className="font-mono">[wsl2]</span> → <span className="font-mono">memory=8GB</span>) and restart Docker
+                to free RAM for local models.</li>
+              <li><span className="font-medium">Recommended:</span> ≤8B models on 16 GB machines; 13–14B needs ~24–32 GB
+                (or a ≥12 GB GPU). The assistant caps the context window to keep memory predictable.</li>
+            </ul>
+          </div>
         </div>
       )}
 
