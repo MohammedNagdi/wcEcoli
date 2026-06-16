@@ -1,0 +1,14 @@
+# Copy this to %UserProfile%\.wslconfig (e.g. C:\Users\<you>\.wslconfig), then apply with:
+#   wsl --shutdown        (quit Docker Desktop first; reopen it after)
+#   docker compose up -d
+#   docker exec interface-api-1 sh -c "grep MemTotal /proc/meminfo"   # verify the new cap
+#
+# Why: Docker Desktop's WSL2 VM defaults to ~50% of host RAM, which starves Ollama (local LLMs run on
+# the Windows host, not in WSL) and causes big-model OOM crashes. Capping it frees host RAM.
+# See LOCAL_MODELS.md for the full explanation and the per-workload trade-off.
+
+[wsl2]
+# Benchmarking / using local models: 12GB (Docker small, Ollama gets the rest).
+# Large simulation campaigns: raise to 18-20GB (the Docker worker is RAM-heavy), then re-run wsl --shutdown.
+memory=12GB
+swap=4GB
