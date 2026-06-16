@@ -4,8 +4,8 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.db.models import Condition, Gene
-from hf_export.matrix import CampaignCell
-from hf_export.submit_campaign import plan_cell, resolve_ko_genes
+from hf_export.matrix import CampaignCell, v0_campaign
+from hf_export.submit_campaign import plan_cell, resolve_ko_genes, stratified_sample
 
 
 def _session() -> Session:
@@ -35,6 +35,15 @@ def test_plan_cell_resolution():
 
     exotic = plan_cell(s, CampaignCell("sinusoidal_media", "WT/sin", params={}))
     assert not exotic["submittable"] and "not yet submittable" in exotic["reason"]
+
+
+def test_stratified_sample_spans_families():
+    cells = v0_campaign(ko_genes=["dnaA", "crp", "manY"])
+    picked = stratified_sample(cells, 8)
+    families = {c.variant_type for c in picked}
+    assert len(picked) == 8
+    # A first-N slice would be all wildtype; the stratified sample must span multiple families.
+    assert len(families) >= 3 and "gene_knockout" in families and "wildtype" in families
 
 
 def test_resolve_ko_genes():

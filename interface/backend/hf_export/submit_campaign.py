@@ -101,12 +101,34 @@ def submit_cell(session: Session, cell: CampaignCell, plan: dict[str, Any], seed
     return {"experiment_id": result.experiment.id, "job_ids": jobs.job_ids}
 
 
-def run(*, limit: int | None, dry_run: bool, seeds: int, generations: int, genes: list[str] | None) -> dict[str, Any]:
+def stratified_sample(cells: list[CampaignCell], n: int) -> list[CampaignCell]:
+    """Round-robin across variant families so a small pilot spans WT + KO + dynamics, not just the
+    alphabetical head (which is all WT)."""
+    from collections import defaultdict
+
+    groups: dict[str, list[CampaignCell]] = defaultdict(list)
+    for cell in cells:
+        groups[cell.variant_type].append(cell)
+    families = list(groups)
+    picked: list[CampaignCell] = []
+    i = 0
+    while len(picked) < n and any(groups[f] for f in families):
+        family = families[i % len(families)]
+        if groups[family]:
+            picked.append(groups[family].pop(0))
+        i += 1
+    return picked
+
+
+def run(*, limit: int | None, dry_run: bool, seeds: int, generations: int,
+        genes: list[str] | None, sample: int | None = None) -> dict[str, Any]:
     engine = make_sqlite_engine(settings.database_path)
     with Session(engine) as session:
         ko_genes = resolve_ko_genes(session, genes)
         cells = v0_campaign(ko_genes)
-        if limit:
+        if sample:
+            cells = stratified_sample(cells, sample)  # diverse mini-pilot; takes precedence over --limit
+        elif limit:
             cells = cells[:limit]
         plans = [(cell, plan_cell(session, cell)) for cell in cells]
         submittable = [(c, p) for c, p in plans if p["submittable"]]
@@ -142,7 +164,9 @@ def run(*, limit: int | None, dry_run: bool, seeds: int, generations: int, genes
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=None, help="cap campaign cells (mini-pilot)")
+    ap.add_argument("--limit", type=int, default=None, help="cap campaign cells, first-N (mini-pilot)")
+    ap.add_argument("--sample", type=int, default=None,
+                    help="pick N cells stratified across families (WT+KO+dynamics); overrides --limit")
     ap.add_argument("--dry-run", action="store_true", help="validate + count only; create nothing")
     ap.add_argument("--seeds", type=int, default=SEEDS)
     ap.add_argument("--generations", type=int, default=GENERATIONS)
@@ -150,7 +174,8 @@ def main() -> None:
     args = ap.parse_args()
     genes = [g.strip() for g in args.genes.split(",") if g.strip()] or None
     print(json.dumps(run(limit=args.limit, dry_run=args.dry_run, seeds=args.seeds,
-                         generations=args.generations, genes=genes), indent=2, default=str))
+                         generations=args.generations, genes=genes, sample=args.sample),
+                     indent=2, default=str))
 
 
 if __name__ == "__main__":
