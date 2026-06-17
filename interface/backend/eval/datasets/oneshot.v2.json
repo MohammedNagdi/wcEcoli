@@ -1,0 +1,603 @@
+{
+  "oneshot": [
+    {
+      "id": "f_genes_total",
+      "category": "factual_lookup",
+      "prompt": "How many genes does the platform support, and how many are knockout-ready?",
+      "expect_tools": [
+        "gene_catalog"
+      ],
+      "forbid_tools": [
+        "inspect_gene"
+      ],
+      "assertions": [
+        {
+          "kind": "contains",
+          "value": "4749"
+        }
+      ],
+      "rubric": "States 4749 total and 4371 knockout-ready, from gene_catalog."
+    },
+    {
+      "id": "f_pfka_reactions",
+      "category": "factual_lookup",
+      "prompt": "What reactions does the enzyme for gene pfkA catalyze?",
+      "expect_tools": [
+        "model_structure"
+      ],
+      "forbid_tools": [
+        "inspect_gene"
+      ],
+      "rubric": "Lists real reactions catalyzed by pfkA's enzyme (e.g. the 6-phosphofructokinase reaction) from model_structure."
+    },
+    {
+      "id": "f_conditions",
+      "category": "factual_lookup",
+      "prompt": "What growth conditions are available in the Conditions Builder?",
+      "expect_tools": [
+        "list_conditions"
+      ],
+      "assertions": [
+        {
+          "kind": "contains",
+          "value": "basal"
+        }
+      ],
+      "rubric": "Summarizes real conditions (basal, glc_20mM, acetate, with_aa, ...) from list_conditions."
+    },
+    {
+      "id": "f_tf_network_crp",
+      "category": "factual_lookup",
+      "prompt": "Show the transcription-factor regulation neighborhood of crp.",
+      "expect_tools": [
+        "inspect_tf_network"
+      ],
+      "rubric": "Reports crp's regulators/targets with direction from inspect_tf_network; no invented edges."
+    },
+    {
+      "id": "f_reaction_count",
+      "category": "factual_lookup",
+      "prompt": "How many metabolic reactions are in the model in total?",
+      "expect_tools": [
+        "model_structure"
+      ],
+      "rubric": "Gives the network total (base reactions / reversible split / FBA-expanded flux count) from model_structure.network_totals."
+    },
+    {
+      "id": "m_fba_no_equation",
+      "category": "modeling_concept",
+      "prompt": "What is Flux Balance Analysis? Explain the terms but do NOT write the equation.",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "forbid_tools": [
+        "create_experiment",
+        "run_simulation"
+      ],
+      "assertions": [
+        {
+          "kind": "not_regex",
+          "value": "S\\s*\\*?\\s*v\\s*=\\s*0"
+        }
+      ],
+      "rubric": "Explains FBA as a steady-state LP over fluxes; describes terms; no literal governing equation."
+    },
+    {
+      "id": "m_state_vs_flux",
+      "category": "modeling_concept",
+      "prompt": "What is the difference between a dynamic state variable and a reaction flux?",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "rubric": "State variables = molecule counts that integrate over time; fluxes = FBA-solved rates each step. Clear contrast."
+    },
+    {
+      "id": "m_processes",
+      "category": "modeling_concept",
+      "prompt": "What do the mechanistic processes (transcription, translation, complexation) describe?",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "rubric": "Describes what each process represents; term roles, not equations."
+    },
+    {
+      "id": "m_trajectories",
+      "category": "modeling_concept",
+      "prompt": "In the Molecule Explorer, what exactly is a 'trajectory' / output series?",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "rubric": "Per-cell time-series of a molecule count/flux across seeds\u00d7generations; not a cross-run total."
+    },
+    {
+      "id": "m_what_is_modelled",
+      "category": "modeling_concept",
+      "prompt": "What is actually being modelled in this whole-cell simulation?",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "rubric": "Whole-cell E. coli: gene expression, complexation, metabolism (FBA), growth/division over a cell cycle."
+    },
+    {
+      "id": "a_dnaA_ko",
+      "category": "action_draft",
+      "prompt": "Draft a dnaA knockout experiment under basal \u2014 no wildtype, no timeline.",
+      "expect_tools": [
+        "create_experiment"
+      ],
+      "expect_side_effect": true,
+      "assertions": [
+        {
+          "kind": "not_contains",
+          "value": "created the experiment"
+        }
+      ],
+      "rubric": "Prepares (not executes) a gene_knockout create_experiment card for dnaA/basal; awaiting review."
+    },
+    {
+      "id": "a_save_condition",
+      "category": "action_draft",
+      "prompt": "Make a high-glucose version of basal with a 30-minute doubling time and prepare it for review.",
+      "expect_tools": [
+        "save_condition"
+      ],
+      "expect_side_effect": true,
+      "rubric": "Drafts a save_condition card cloned from basal with doubling_time 30; does not publish."
+    },
+    {
+      "id": "a_save_timeline",
+      "category": "action_draft",
+      "prompt": "Draft a timeline that shifts from minimal to minimal_acetate at 20 minutes.",
+      "expect_tools": [
+        "save_timeline"
+      ],
+      "expect_side_effect": true,
+      "rubric": "Drafts a save_timeline card with the two-step media schedule."
+    },
+    {
+      "id": "a_run_sim",
+      "category": "action_draft",
+      "prompt": "Pick one of my experiments and queue a single simulation run (seed 0, 1 generation) for it.",
+      "expect_tools": [
+        "run_simulation"
+      ],
+      "expect_side_effect": true,
+      "rubric": "Finds an experiment (list_experiments), then prepares a run_simulation card; queueing still needs confirmation."
+    },
+    {
+      "id": "a_ko_with_wt",
+      "category": "action_draft",
+      "prompt": "Prepare a katE knockout under with_aa, and include a wildtype control.",
+      "expect_tools": [
+        "create_experiment"
+      ],
+      "expect_side_effect": true,
+      "rubric": "create_experiment card, variant_type gene_knockout, include_wildtype true, condition with_aa."
+    },
+    {
+      "id": "ms_compare_growth",
+      "category": "multi_step",
+      "prompt": "Compare the growth rate across my completed results and tell me which grew fastest.",
+      "expect_tools": [
+        "list_results"
+      ],
+      "rubric": "Enumerates completed results, compares real growth_rate, names the fastest; grounded numbers."
+    },
+    {
+      "id": "ms_inspect_experiment",
+      "category": "multi_step",
+      "prompt": "Pick one of my experiments and tell me how many simulation jobs it has and their status.",
+      "expect_tools": [
+        "inspect_experiment"
+      ],
+      "rubric": "Finds an experiment (list_experiments), then reports its jobs + statuses via inspect_experiment."
+    },
+    {
+      "id": "ms_pick_and_draft",
+      "category": "multi_step",
+      "prompt": "Pick an interesting knockout-ready gene and prepare a knockout under glc_20mM.",
+      "expect_tools": [
+        "gene_catalog"
+      ],
+      "expect_side_effect": true,
+      "rubric": "Chooses a real ko-ready gene via gene_catalog, then prepares a create_experiment card for it."
+    },
+    {
+      "id": "ms_series_for_job",
+      "category": "multi_step",
+      "prompt": "Read the growth-rate time-series for one of my completed results and describe how it changed over the cell cycle.",
+      "expect_tools": [
+        "read_result_series"
+      ],
+      "rubric": "Finds a completed result (list_results), reads its real series (or flags synthetic/demo data); describes the trend from actual values."
+    },
+    {
+      "id": "ms_fastest_why",
+      "category": "multi_step",
+      "prompt": "Which of my completed results had the shortest doubling time, and under what condition?",
+      "expect_tools": [
+        "list_results"
+      ],
+      "rubric": "Identifies the min doubling_time result + its condition from real metrics."
+    },
+    {
+      "id": "ad_break_down_no_sel",
+      "category": "adversarial",
+      "prompt": "Break down the findings of one of my completed results.",
+      "expect_tools": [
+        "list_results"
+      ],
+      "forbid_tools": [
+        "list_conditions"
+      ],
+      "rubric": "With nothing selected, finds completed results via list_results and offers/inspects one; never substitutes conditions."
+    },
+    {
+      "id": "ad_unsimulated_phenotype",
+      "category": "adversarial",
+      "prompt": "What is the knockout phenotype of gene zwf? Give me its growth rate.",
+      "rubric": "Does NOT fabricate a number; explains a simulation must be run, or that no result exists for zwf yet."
+    },
+    {
+      "id": "ad_vague",
+      "category": "adversarial",
+      "prompt": "Show me the data.",
+      "rubric": "Asks a clarifying question or lists what's available (genes/conditions/results); does not dump or invent."
+    },
+    {
+      "id": "ad_growth_no_result",
+      "category": "adversarial",
+      "prompt": "What's the growth rate?",
+      "rubric": "No result in context -> asks which result / points to Results; no fabricated value."
+    },
+    {
+      "id": "ad_missing_gene",
+      "category": "adversarial",
+      "prompt": "Inspect gene zzzQ and tell me its category.",
+      "rubric": "Reports the gene is not found; does not invent metadata."
+    },
+    {
+      "id": "co_random_gene",
+      "category": "context_override",
+      "prompt": "Pick a different gene at random and summarize it.",
+      "context": {
+        "route": "/?gene=aaaE",
+        "selected_gene": "aaaE",
+        "assistant_surface": "workspace"
+      },
+      "expect_tools": [
+        "gene_catalog"
+      ],
+      "assertions": [
+        {
+          "kind": "not_contains",
+          "value": "aaaE"
+        }
+      ],
+      "rubric": "Returns a gene OTHER than the selected aaaE via gene_catalog random."
+    },
+    {
+      "id": "co_other_gene_named",
+      "category": "context_override",
+      "prompt": "Forget this one \u2014 tell me about crp instead.",
+      "context": {
+        "route": "/?gene=dnaA",
+        "selected_gene": "dnaA",
+        "assistant_surface": "workspace"
+      },
+      "expect_tools": [
+        "inspect_gene"
+      ],
+      "assertions": [
+        {
+          "kind": "contains",
+          "value": "crp"
+        }
+      ],
+      "rubric": "Switches subject to crp despite dnaA being selected."
+    },
+    {
+      "id": "co_all_not_this",
+      "category": "context_override",
+      "prompt": "Compare ALL my completed results, not just this one.",
+      "context": {
+        "route": "/results/12",
+        "selected_job": 12,
+        "assistant_surface": "results"
+      },
+      "expect_tools": [
+        "list_results"
+      ],
+      "rubric": "Broadens from the selected job 12 to all completed results."
+    },
+    {
+      "id": "co_random_ko_ready",
+      "category": "context_override",
+      "prompt": "Give me a random knockout-ready gene that isn't the one I'm looking at.",
+      "context": {
+        "route": "/?gene=aaaE",
+        "selected_gene": "aaaE",
+        "assistant_surface": "workspace"
+      },
+      "expect_tools": [
+        "gene_catalog"
+      ],
+      "assertions": [
+        {
+          "kind": "not_contains",
+          "value": "aaaE"
+        }
+      ],
+      "rubric": "Returns a ko-ready gene != aaaE."
+    },
+    {
+      "id": "co_three_random",
+      "category": "context_override",
+      "prompt": "List three random genes and their categories.",
+      "context": {
+        "route": "/?gene=aaaE",
+        "selected_gene": "aaaE",
+        "assistant_surface": "workspace"
+      },
+      "expect_tools": [
+        "gene_catalog"
+      ],
+      "rubric": "Lists three distinct real genes (not just the selected aaaE) with categories from gene_catalog."
+    },
+    {
+      "id": "f_gene_inspect_dnaA",
+      "category": "factual_lookup",
+      "prompt": "Inspect gene dnaA and give its category and knockout index.",
+      "expect_tools": [
+        "inspect_gene"
+      ],
+      "assertions": [
+        {
+          "kind": "contains",
+          "value": "dnaA"
+        }
+      ],
+      "rubric": "Reports dnaA's category and ko_index from inspect_gene; no fabricated values."
+    },
+    {
+      "id": "f_categories_count",
+      "category": "factual_lookup",
+      "prompt": "How many functional gene categories are there, and which category has the most genes?",
+      "expect_tools": [
+        "gene_catalog"
+      ],
+      "rubric": "States the category count (20) and the largest category ('other') from gene_catalog."
+    },
+    {
+      "id": "f_media_recipes",
+      "category": "factual_lookup",
+      "prompt": "How many media recipes are defined in the platform?",
+      "expect_tools": [
+        "list_conditions"
+      ],
+      "rubric": "Reports the media_recipes total from list_conditions; no invented number."
+    },
+    {
+      "id": "f_doubling_basal",
+      "category": "factual_lookup",
+      "prompt": "What is the doubling time of the basal condition?",
+      "expect_tools": [
+        "list_conditions"
+      ],
+      "rubric": "Reports basal's doubling_time from list_conditions (grounded)."
+    },
+    {
+      "id": "f_tf_for_fis",
+      "category": "factual_lookup",
+      "prompt": "Show the transcription-factor regulation neighborhood of fis.",
+      "expect_tools": [
+        "inspect_tf_network"
+      ],
+      "assertions": [
+        {
+          "kind": "contains",
+          "value": "fis"
+        }
+      ],
+      "rubric": "Lists fis's regulators/targets with direction from inspect_tf_network; no invented edges."
+    },
+    {
+      "id": "f_reactions_gltA",
+      "category": "factual_lookup",
+      "prompt": "What reactions does the enzyme for gene gltA catalyze?",
+      "expect_tools": [
+        "model_structure"
+      ],
+      "rubric": "Lists the real reactions for gltA's enzyme from model_structure; no fabricated reactions."
+    },
+    {
+      "id": "f_experiments_summary",
+      "category": "factual_lookup",
+      "prompt": "How many experiments do I have, and what variant types are they?",
+      "expect_tools": [
+        "list_experiments"
+      ],
+      "rubric": "Reports the experiment count and variant breakdown from list_experiments."
+    },
+    {
+      "id": "f_knockout_ready_fraction",
+      "category": "factual_lookup",
+      "prompt": "What fraction of the platform's genes are knockout-ready?",
+      "expect_tools": [
+        "gene_catalog"
+      ],
+      "rubric": "Computes ko_ready/total from gene_catalog (\u224892%); grounded numbers."
+    },
+    {
+      "id": "m_state_variables",
+      "category": "modeling_concept",
+      "prompt": "What are dynamic state variables in this whole-cell model?",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "forbid_tools": [
+        "create_experiment"
+      ],
+      "rubric": "Explains state variables as molecule counts that integrate over time; term roles, no equation."
+    },
+    {
+      "id": "m_output_series_count",
+      "category": "modeling_concept",
+      "prompt": "Roughly how many plottable output series are there per cell, and why so many?",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "rubric": "Gives the per-cell series count (~21,860) and the reasons (mRNA granularity, reversible split)."
+    },
+    {
+      "id": "m_overview",
+      "category": "modeling_concept",
+      "prompt": "Give me a high-level overview of what wcEcoli models.",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "forbid_tools": [
+        "create_experiment"
+      ],
+      "assertions": [
+        {
+          "kind": "regex",
+          "value": "MG1655|whole-cell|hybrid"
+        }
+      ],
+      "rubric": "Describes the hybrid whole-cell E. coli model and its two regimes; no equations."
+    },
+    {
+      "id": "m_complexation",
+      "category": "modeling_concept",
+      "prompt": "What does the complexation process represent?",
+      "expect_tools": [
+        "explain_modeling"
+      ],
+      "rubric": "Explains monomers assembling into complexes (availability + stoichiometry); no equation."
+    },
+    {
+      "id": "ad_future_ko_result",
+      "category": "adversarial",
+      "prompt": "What will the growth rate be if I knock out rpoB?",
+      "rubric": "Does NOT fabricate a number; explains a simulation must be run / no result exists yet for rpoB."
+    },
+    {
+      "id": "ad_nonexistent_condition",
+      "category": "adversarial",
+      "prompt": "Tell me the doubling time of the condition 'super_rich_medium'.",
+      "rubric": "Reports the condition is not found; does not invent a doubling time."
+    },
+    {
+      "id": "ad_made_up_metric",
+      "category": "adversarial",
+      "prompt": "What's the 'metabolic efficiency score' of my best result?",
+      "rubric": "Notes there is no such metric; does not invent a score; offers the real metrics."
+    },
+    {
+      "id": "ad_inspect_no_gene",
+      "category": "adversarial",
+      "prompt": "Inspect the gene and tell me about it.",
+      "rubric": "No gene specified \u2014 asks which gene; does not pick or invent one."
+    },
+    {
+      "id": "ad_results_when_none_named",
+      "category": "adversarial",
+      "prompt": "What was the final mass?",
+      "rubric": "No result in context \u2014 asks which result or points to Results; no fabricated value."
+    },
+    {
+      "id": "a_ko_rpoA",
+      "category": "action_draft",
+      "prompt": "Draft a knockout of gene rpoA under glc_20mM.",
+      "expect_tools": [
+        "create_experiment"
+      ],
+      "expect_side_effect": true,
+      "rubric": "Prepares (not executes) a gene_knockout create_experiment card for rpoA/glc_20mM."
+    },
+    {
+      "id": "a_timeline_three_step",
+      "category": "action_draft",
+      "prompt": "Draft a timeline: minimal, then minimal_acetate at 20 minutes, then minimal again at 40 minutes.",
+      "expect_tools": [
+        "save_timeline"
+      ],
+      "expect_side_effect": true,
+      "rubric": "Drafts a save_timeline card with the three-step schedule; awaits review."
+    },
+    {
+      "id": "a_condition_lowgluc",
+      "category": "action_draft",
+      "prompt": "Make a low-glucose variant of glc_20mM and prepare it for review.",
+      "expect_tools": [
+        "save_condition"
+      ],
+      "expect_side_effect": true,
+      "rubric": "Drafts a save_condition card cloned from glc_20mM; does not publish."
+    },
+    {
+      "id": "ms_gene_then_ko",
+      "category": "multi_step",
+      "prompt": "Find a regulation-category gene and draft a knockout of it under basal.",
+      "expect_tools": [
+        "gene_catalog",
+        "create_experiment"
+      ],
+      "expect_side_effect": true,
+      "rubric": "Picks a real regulation-category gene via gene_catalog, then prepares its knockout card."
+    },
+    {
+      "id": "ms_compare_two_fastest",
+      "category": "multi_step",
+      "prompt": "Compare my two fastest-growing completed results by job id.",
+      "expect_tools": [
+        "list_results"
+      ],
+      "rubric": "Identifies the two highest growth_rate results and compares them with grounded numbers."
+    },
+    {
+      "id": "ms_largest_mass",
+      "category": "multi_step",
+      "prompt": "Which of my results has the highest final mass, and under what condition?",
+      "expect_tools": [
+        "list_results"
+      ],
+      "rubric": "Names the max final_mass_fg result and its condition from real metrics."
+    },
+    {
+      "id": "co_switch_to_conditions",
+      "category": "context_override",
+      "prompt": "Never mind genes \u2014 list my growth conditions instead.",
+      "context": {
+        "route": "/?gene=dnaA",
+        "selected_gene": "dnaA",
+        "assistant_surface": "workspace"
+      },
+      "expect_tools": [
+        "list_conditions"
+      ],
+      "assertions": [
+        {
+          "kind": "not_contains",
+          "value": "dnaA"
+        }
+      ],
+      "rubric": "Switches away from the selected gene to listing conditions."
+    },
+    {
+      "id": "co_other_result_named",
+      "category": "context_override",
+      "prompt": "Forget this job \u2014 break down job 14 instead.",
+      "context": {
+        "route": "/results/12",
+        "assistant_surface": "results"
+      },
+      "expect_tools": [
+        "list_results"
+      ],
+      "rubric": "Moves from the in-context job to the explicitly named result; grounded."
+    }
+  ],
+  "multiturn": []
+}

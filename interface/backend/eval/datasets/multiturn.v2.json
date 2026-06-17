@@ -1,0 +1,406 @@
+{
+  "oneshot": [],
+  "multiturn": [
+    {
+      "id": "mt_gene_recall",
+      "category": "multi_turn",
+      "context": {
+        "route": "/",
+        "assistant_surface": "workspace"
+      },
+      "turns": [
+        {
+          "prompt": "Tell me about gene dnaA.",
+          "expect_tools": [
+            "inspect_gene"
+          ]
+        },
+        {
+          "prompt": "Now switch to crp instead.",
+          "expect_tools": [
+            "inspect_gene"
+          ],
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "crp"
+            }
+          ]
+        },
+        {
+          "prompt": "Which gene did I ask you about FIRST in this chat?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "dnaA"
+            }
+          ]
+        },
+        {
+          "prompt": "Go back to that first gene and give me its knockout index.",
+          "is_probe": true,
+          "expect_tools": [
+            "inspect_gene"
+          ],
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "dnaA"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt_results_reference",
+      "category": "multi_turn",
+      "context": {
+        "route": "/results",
+        "assistant_surface": "results"
+      },
+      "turns": [
+        {
+          "prompt": "List my completed results.",
+          "expect_tools": [
+            "list_results"
+          ]
+        },
+        {
+          "prompt": "Which condition grew fastest?"
+        },
+        {
+          "prompt": "What was the very first thing I asked you in this chat?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "result"
+            }
+          ]
+        },
+        {
+          "prompt": "Refer to the fastest one by its job id and tell me its doubling time.",
+          "is_probe": true,
+          "expect_tools": [
+            "list_results"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt_override_persistence",
+      "category": "multi_turn",
+      "context": {
+        "route": "/?gene=aaaE",
+        "selected_gene": "aaaE",
+        "assistant_surface": "workspace"
+      },
+      "turns": [
+        {
+          "prompt": "Pick a random DIFFERENT gene and summarize it.",
+          "expect_tools": [
+            "gene_catalog"
+          ],
+          "assertions": [
+            {
+              "kind": "not_contains",
+              "value": "aaaE"
+            }
+          ]
+        },
+        {
+          "prompt": "Now inspect the gene I had selected on the page.",
+          "expect_tools": [
+            "inspect_gene"
+          ],
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "aaaE"
+            }
+          ]
+        },
+        {
+          "prompt": "Earlier you picked a random gene \u2014 was it the same as my selected one?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "not_contains",
+              "value": "aaaE was"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt_modeling_consistency",
+      "category": "multi_turn",
+      "context": {
+        "route": "/assistant",
+        "assistant_surface": "central"
+      },
+      "turns": [
+        {
+          "prompt": "What is Flux Balance Analysis?",
+          "expect_tools": [
+            "explain_modeling"
+          ],
+          "forbid_tools": [
+            "create_experiment"
+          ]
+        },
+        {
+          "prompt": "So is it an optimization or a time-integration?",
+          "assertions": [
+            {
+              "kind": "regex",
+              "value": "optimi"
+            }
+          ]
+        },
+        {
+          "prompt": "Without repeating the explanation, just name the concept you described two messages ago.",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "regex",
+              "value": "FBA|flux balance"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt_number_consistency",
+      "category": "multi_turn",
+      "context": {
+        "route": "/assistant",
+        "assistant_surface": "central"
+      },
+      "turns": [
+        {
+          "prompt": "How many genes does the platform support?",
+          "expect_tools": [
+            "gene_catalog"
+          ],
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "4749"
+            }
+          ]
+        },
+        {
+          "prompt": "And how many of those are knockout-ready?",
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "4371"
+            }
+          ]
+        },
+        {
+          "prompt": "What number did you give me for the TOTAL gene count?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "4749"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt_condition_recall",
+      "category": "multi_turn",
+      "context": {
+        "route": "/assistant",
+        "assistant_surface": "central"
+      },
+      "turns": [
+        {
+          "prompt": "Make a high-glucose version of basal with a 30-minute doubling time and prepare it.",
+          "expect_tools": [
+            "save_condition"
+          ]
+        },
+        {
+          "prompt": "What doubling time did I just set for that condition?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "30"
+            }
+          ]
+        },
+        {
+          "prompt": "And what base condition did I clone it from?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "basal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt_experiment_then_run",
+      "category": "multi_turn",
+      "context": {
+        "route": "/experiments",
+        "assistant_surface": "experiments"
+      },
+      "turns": [
+        {
+          "prompt": "List my experiments.",
+          "expect_tools": [
+            "list_experiments"
+          ]
+        },
+        {
+          "prompt": "Queue a single run for the acetate one.",
+          "expect_tools": [
+            "run_simulation"
+          ],
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "acetate"
+            }
+          ]
+        },
+        {
+          "prompt": "Which experiment did we just queue a run for?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "acetate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt_compare_then_drill",
+      "category": "multi_turn",
+      "context": {
+        "route": "/results",
+        "assistant_surface": "results"
+      },
+      "turns": [
+        {
+          "prompt": "List my completed results.",
+          "expect_tools": [
+            "list_results"
+          ]
+        },
+        {
+          "prompt": "Which grew fastest?"
+        },
+        {
+          "prompt": "Inspect that one in detail.",
+          "is_probe": true,
+          "expect_tools": [
+            "inspect_result"
+          ]
+        },
+        {
+          "prompt": "Remind me which job id we've been drilling into.",
+          "is_probe": true
+        }
+      ]
+    },
+    {
+      "id": "mt_topic_switch_back",
+      "category": "multi_turn",
+      "context": {
+        "route": "/assistant",
+        "assistant_surface": "central"
+      },
+      "turns": [
+        {
+          "prompt": "What is Flux Balance Analysis?",
+          "expect_tools": [
+            "explain_modeling"
+          ]
+        },
+        {
+          "prompt": "Now tell me about gene crp.",
+          "expect_tools": [
+            "inspect_gene"
+          ],
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "crp"
+            }
+          ]
+        },
+        {
+          "prompt": "Go back to the modeling topic \u2014 which one did I ask about?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "regex",
+              "value": "FBA|flux balance"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt_user_correction",
+      "category": "multi_turn",
+      "context": {
+        "route": "/",
+        "assistant_surface": "workspace"
+      },
+      "turns": [
+        {
+          "prompt": "Tell me about gene katE.",
+          "expect_tools": [
+            "inspect_gene"
+          ]
+        },
+        {
+          "prompt": "Sorry, I meant crp, not katE.",
+          "expect_tools": [
+            "inspect_gene"
+          ],
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "crp"
+            }
+          ]
+        },
+        {
+          "prompt": "Which gene did I correct myself FROM?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "katE"
+            }
+          ]
+        },
+        {
+          "prompt": "And which gene should you be telling me about now?",
+          "is_probe": true,
+          "assertions": [
+            {
+              "kind": "contains",
+              "value": "crp"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
