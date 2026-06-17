@@ -31,6 +31,50 @@ from .schema import Dataset, ModelTarget
 from .transcript import build_transcript
 
 
+def _run_config(args, dataset_text: str, targets: list[ModelTarget], stamp: str) -> dict:
+    """Full reproducibility record: dataset hash, model digests, options, harness commit."""
+    import hashlib
+    import os
+    import subprocess
+    import urllib.request
+
+    def git_commit() -> str:
+        try:
+            return subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+    def ollama_digest(model: str) -> str:
+        base = (os.environ.get("OLLAMA_BASE_URL") or "http://host.docker.internal:11434").rstrip("/")
+        try:
+            req = urllib.request.Request(f"{base}/api/show", data=json.dumps({"name": model}).encode(),
+                                         headers={"Content-Type": "application/json"})
+            d = json.load(urllib.request.urlopen(req, timeout=15))
+            det = d.get("details", {})
+            return f"{det.get('parameter_size', '?')}/{det.get('quantization_level', '?')}"
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+    return {
+        "timestamp": stamp,
+        "harness_git_commit": git_commit(),
+        "dataset_path": args.dataset,
+        "dataset_sha256": hashlib.sha256(dataset_text.encode("utf-8")).hexdigest(),
+        "repeats": args.repeats,
+        "limit": args.limit,
+        "models": [
+            {"label": t.label, "provider": t.provider_id, "model": t.model,
+             "spec": ollama_digest(t.model) if t.provider_id == "ollama" else "n/a"}
+            for t in targets
+        ],
+        "ollama_options": {
+            "num_ctx": getattr(settings, "assistant_ollama_num_ctx", None),
+            "keep_alive": getattr(settings, "assistant_ollama_keep_alive", None),
+        },
+        "note": "Single-call temperature is the model/Ollama default; set --repeats>=3 for stochastic CIs.",
+    }
+
+
 def _unload_ollama(target: ModelTarget) -> None:
     """Evict a local model from Ollama (keep_alive=0) before loading the next, so benchmarking
     several models never stacks them in RAM (the cause of the 14B OOM in the multi-model run)."""
@@ -59,9 +103,12 @@ def main() -> None:
     parser.add_argument("--db", default=str(settings.database_path), help="SQLite DB to ground tools against.")
     parser.add_argument("--out", default="eval/results", help="Output directory for results + scorecard.")
     parser.add_argument("--limit", type=int, default=None, help="cap oneshot cases (small controlled run)")
+    parser.add_argument("--repeats", type=int, default=1,
+                        help="run each case N times for multi-sample CIs (stochastic models)")
     args = parser.parse_args()
 
-    dataset = Dataset.model_validate_json(Path(args.dataset).read_text(encoding="utf-8"))
+    dataset_text = Path(args.dataset).read_text(encoding="utf-8")
+    dataset = Dataset.model_validate_json(dataset_text)
     if args.limit:
         dataset.oneshot = dataset.oneshot[: args.limit]
     targets = [ModelTarget.parse(spec) for spec in args.models.split(",") if spec.strip()]
@@ -69,19 +116,27 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
+    # Reproducibility record (audit: run-config metadata) — written next to the results.
+    runconfig = _run_config(args, dataset_text, targets, stamp)
+    (out_dir / f"runconfig-{stamp}.json").write_text(json.dumps(runconfig, indent=2), encoding="utf-8")
+
     engine = make_sqlite_engine(args.db)
     results: list[dict] = []
     for target in targets:
         print(f"\n=== {target.label} ===")
         with Session(engine) as session:
-            for case in dataset.oneshot:
-                r = run_oneshot(session, case, target)
-                results.append(r)
-                print(f"  [oneshot] {case.id:<28} {'PASS' if r['passed'] else 'FAIL'}  {r['latency_ms']}ms")
-            for scenario in dataset.multiturn:
-                r = run_multiturn(session, scenario, target)
-                results.append(r)
-                print(f"  [multi ] {scenario.id:<28} {'PASS' if r['passed'] else 'FAIL'}  ~{r['avg_latency_ms']}ms/turn")
+            for sample in range(args.repeats):
+                for case in dataset.oneshot:
+                    r = run_oneshot(session, case, target)
+                    r["sample"] = sample  # so the analysis can aggregate per-item across repeats
+                    results.append(r)
+                    tag = f" s{sample}" if args.repeats > 1 else ""
+                    print(f"  [oneshot{tag}] {case.id:<26} {'PASS' if r['passed'] else 'FAIL'}  {r['latency_ms']}ms")
+                for scenario in dataset.multiturn:
+                    r = run_multiturn(session, scenario, target)
+                    r["sample"] = sample
+                    results.append(r)
+                    print(f"  [multi ] {scenario.id:<28} {'PASS' if r['passed'] else 'FAIL'}  ~{r['avg_latency_ms']}ms/turn")
         _unload_ollama(target)  # free RAM before the next model loads
 
     raw_path = out_dir / f"results-{stamp}.jsonl"

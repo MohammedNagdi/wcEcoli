@@ -97,6 +97,25 @@ an override), or **format leak**. The deterministic checks are hints, not the ve
 Report back: a category × model pass/score matrix, the worst failures with one-line diagnoses, and a
 recommended model per task tier (this is the input to model routing).
 
+## Statistical analysis & reproducibility (airtight, computed — not narrated)
+
+Every number in the analysis comes from tested code over the stored results, with proper small-sample
+methods — no hand-waving.
+
+- **`python -m eval.analyze --results eval/results --out eval/results/analysis.md`** — per-model
+  overall + per-category pass rates with **Wilson 95% CIs**, the **tool-emission** axis, **split skill
+  axes** (tool-selection / grounding / format / assertion / side-effect, each over its applicable
+  subset; grounding is conditional on tool-emission so it can't pass vacuously), and **pairwise
+  significance** via **McNemar's exact test, Holm-corrected**, with paired-bootstrap Δ CIs. Each model
+  uses only its newest complete run. Subjective axes (correctness/helpfulness) are deliberately left to
+  a calibrated judge, not estimated.
+- **`--repeats N`** on `run_eval` collects N samples/item; `analyze` then aggregates to the **item
+  level** (bootstrap over items) so repeats don't pseudo-replicate the CIs.
+- **`runconfig-<ts>.json`** is written per run: dataset sha256, model digests, options, harness commit.
+- **`python -m eval.datasheet --dataset <file> --out <file>.DATASHEET.md`** — a Datasheets-for-Datasets
+  record (provenance, composition, uses, limitations, content hash).
+- Primitives + analysis are unit-tested: `pytest eval/test_stats.py eval/test_analyze.py`.
+
 ## Extending
 
 - **Add cases**: copy a starter dataset, add entries (aim for ~100 one-shot across the 6 categories,
