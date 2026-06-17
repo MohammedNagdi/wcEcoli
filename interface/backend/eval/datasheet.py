@@ -28,6 +28,20 @@ def build_datasheet(dataset_path: Path) -> str:
     with_ctx = sum(1 for c in ds.oneshot if c.context)
     with_assert = sum(1 for c in ds.oneshot if c.assertions)
 
+    # Multi-turn composition (drift/recall scenarios).
+    mt = ds.multiturn
+    mt_turns = sum(len(s.turns) for s in mt)
+    mt_probes = sum(1 for s in mt for t in s.turns if t.is_probe)
+    mt_cats = Counter(s.category for s in mt)
+    mt_line = (
+        f"- **Multi-turn:** {len(mt)} scenarios, {mt_turns} turns, {mt_probes} memory/reference "
+        f"**probe** turns (the drift signal). Categories: "
+        + (", ".join(f"{c}={mt_cats[c]}" for c in sorted(mt_cats)) or "none")
+        + ". Scored per-turn + scenario + probe-recall with Wilson CIs (`analyze.py`)."
+        if mt else
+        "- **Multi-turn:** none in this file."
+    )
+
     L = [
         f"# Datasheet — `{dataset_path.name}`",
         "",
@@ -46,6 +60,7 @@ def build_datasheet(dataset_path: Path) -> str:
         f"- **Tools exercised (expect_tools):** " + (", ".join(f"{t}×{tools[t]}" for t in sorted(tools)) or "none"),
         f"- **Negative controls (forbid_tools):** " + (", ".join(f"{t}×{forbid[t]}" for t in sorted(forbid)) or "none"),
         "- Each case carries a free-text **rubric** and optional **gold** answer for judge scoring.",
+        mt_line,
         "",
         "## Collection process",
         "Hand-authored against the live platform DB at authoring time, then **made data-agnostic** "

@@ -73,6 +73,24 @@ category, per-model overall + latency, most-common failing checks).
 > ⚠️ Hosted models (`openai:…`, `anthropic:…`) cost money per run — the matrix multiplies cases ×
 > models. Start with the local models and a small dataset slice.
 
+### Multi-turn drift / recall
+
+`datasets/multiturn.v1.json` (5 scenarios, 17 turns, 7 **probe** turns) scripts real conversations to
+measure context drift: topic recall ("which gene did I ask about first?"), reference resolution ("the
+fastest one — by job id"), override persistence (random-gene then back to the page selection), and
+self-consistency (re-state a number/concept given earlier). Probe turns carry `is_probe: true` and a
+deterministic assertion, so the drift signal is graded without a judge.
+
+```bash
+docker exec interface-api-1 python -m eval.run_eval \
+  --dataset eval/datasets/multiturn.v1.json \
+  --models "ollama:llama3.1:8b,ollama:qwen3:8b,ollama:llama3.2:latest" \
+  --out eval/results --repeats 3
+```
+
+`analyze.py` reports a **Multi-turn** table — scenario pass, per-turn pass, and **probe recall** (the
+isolated memory/reference metric) with Wilson CIs; `--repeats 3` aggregates to the item level.
+
 ## Claude-as-judge (free — no paid judge API)
 
 Instead of paying a hosted judge, run the harness against your **local** models (free via Ollama),

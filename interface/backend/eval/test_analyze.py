@@ -1,6 +1,6 @@
 """Analysis logic: split axes, grounding-conditionality, and paired significance."""
 
-from eval.analyze import _axis_value, _model_summary, _pairwise
+from eval.analyze import _axis_value, _model_summary, _multiturn_summary, _pairwise
 
 
 def _row(rid, passed, tools, checks):
@@ -39,3 +39,22 @@ def test_repeats_aggregate_to_item_level():
     s = _model_summary(rows)
     assert s["n"] == 10                      # items, not 30 rows (no pseudo-replication)
     assert abs(s["overall"].p - 0.4) < 1e-9  # mean of per-item pass-fractions
+
+
+def _mt(scenario_id, turn_pass, probe_pass):
+    """One multiturn result row: turn_pass/probe_pass are lists of bools (probe turns at the tail)."""
+    turns = ([{"turn": i, "is_probe": False, "passed": p} for i, p in enumerate(turn_pass)]
+             + [{"turn": len(turn_pass) + i, "is_probe": True, "passed": p}
+                for i, p in enumerate(probe_pass)])
+    return {"kind": "multiturn", "model": "m", "id": scenario_id, "category": "multi_turn",
+            "passed": all(t["passed"] for t in turns), "turns": turns, "avg_latency_ms": 1200}
+
+
+def test_multiturn_probe_recall_separates_drift():
+    # 2 scenarios: regular turns all pass, but probe (recall) turns fail half the time -> drift.
+    rows = [_mt("s1", [True, True], [True, False]), _mt("s2", [True, True], [False, True])]
+    s = _multiturn_summary(rows)
+    assert s["n_scenarios"] == 2
+    assert s["turn_pass"].n == 8 and s["turn_pass"].k == 6      # 8 distinct (scenario,turn) items
+    assert s["probe_recall"].n == 4 and s["probe_recall"].k == 2  # probes isolated -> 50% recall
+    assert s["scenario_pass"].k == 0                            # neither scenario fully clean

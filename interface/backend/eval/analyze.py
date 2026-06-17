@@ -59,8 +59,8 @@ def _axis_value(row: dict[str, Any], axis: str) -> bool | None:
     return all(vals) if vals else None
 
 
-def load_latest_per_model(results_dir: Path) -> dict[str, list[dict[str, Any]]]:
-    """For each model, the rows from its NEWEST results file (filenames sort by timestamp)."""
+def load_latest_per_model(results_dir: Path, kind: str = "oneshot") -> dict[str, list[dict[str, Any]]]:
+    """For each model, the `kind` rows from its NEWEST results file containing them."""
     model_rows: dict[str, list[dict[str, Any]]] = {}
     for path in sorted(results_dir.glob("results-*.jsonl")):  # ascending time -> newest wins
         by_model: dict[str, list[dict[str, Any]]] = {}
@@ -68,11 +68,30 @@ def load_latest_per_model(results_dir: Path) -> dict[str, list[dict[str, Any]]]:
             if not line.strip():
                 continue
             r = json.loads(line)
-            if r.get("kind") == "oneshot":
+            if r.get("kind") == kind:
                 by_model.setdefault(r["model"], []).append(r)
         for model, rows in by_model.items():
             model_rows[model] = rows  # overwrite with the newer file's rows
     return model_rows
+
+
+def _multiturn_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Drift/recall metrics for one model. Items = (scenario, turn); repeats aggregate per item."""
+    turn_items: dict[tuple[str, int], dict[str, Any]] = {}
+    scen_items: dict[str, list[float]] = {}
+    for r in rows:
+        scen_items.setdefault(r["id"], []).append(1.0 if r["passed"] else 0.0)
+        for t in r.get("turns", []):
+            d = turn_items.setdefault((r["id"], t["turn"]), {"passed": [], "is_probe": t["is_probe"]})
+            d["passed"].append(1.0 if t["passed"] else 0.0)
+    probe = [v["passed"] for v in turn_items.values() if v["is_probe"]]
+    return {
+        "n_scenarios": len(scen_items),
+        "scenario_pass": _estimate(list(scen_items.values())),
+        "turn_pass": _estimate([v["passed"] for v in turn_items.values()]),
+        "probe_recall": _estimate(probe) if probe else None,
+        "avg_latency_ms": int(statistics.mean([r["avg_latency_ms"] for r in rows])) if rows else 0,
+    }
 
 
 def _estimate(item_outcomes: list[list[float]]) -> Proportion | None:
@@ -161,7 +180,8 @@ def _pairwise(model_rows: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any
     return out
 
 
-def build_report(model_rows: dict[str, list[dict[str, Any]]]) -> str:
+def build_report(model_rows: dict[str, list[dict[str, Any]]],
+                 multiturn_rows: dict[str, list[dict[str, Any]]] | None = None) -> str:
     summ = {m: _model_summary(rows) for m, rows in model_rows.items()}
     order = sorted(summ, key=lambda m: -summ[m]["overall"].p)
     L = ["# Eval analysis (computed — Wilson 95% CIs)", ""]
@@ -190,6 +210,21 @@ def build_report(model_rows: dict[str, list[dict[str, Any]]]) -> str:
                  f"{row['diff']*100:+.0f}% [{row['lo']*100:+.0f}, {row['hi']*100:+.0f}] | "
                  f"{row['p_holm']:.3f} | {'**yes**' if row['significant'] else 'no (tie)'} |")
 
+    if multiturn_rows:
+        mt = {m: _multiturn_summary(rows) for m, rows in multiturn_rows.items()}
+        mt_order = sorted(mt, key=lambda m: -(mt[m]["turn_pass"].p if mt[m]["turn_pass"] else 0))
+        L += ["", "## Multi-turn (drift / recall) [95% CI]", "",
+              "_Scenario pass = every turn passed; turn pass = per-turn over all turns; probe recall ="
+              " the memory/reference probe turns only (the drift signal)._", "",
+              "| Model | scenarios | Scenario pass | Turn pass | Probe recall | Avg latency |",
+              "|---|---|---|---|---|---|"]
+        for m in mt_order:
+            s = mt[m]
+            sp = s["scenario_pass"].pct() if s["scenario_pass"] else "—"
+            tp = s["turn_pass"].pct() if s["turn_pass"] else "—"
+            pr = s["probe_recall"].pct() if s["probe_recall"] else "—"
+            L.append(f"| {m} | {s['n_scenarios']} | {sp} | {tp} | {pr} | {s['avg_latency_ms']/1000:.0f}s |")
+
     L += ["", "## Notes / limitations (anti-slop)",
           "- **Single sample per item** (no `--repeats`): CIs reflect binomial uncertainty at n=30 only,"
           " not run-to-run model stochasticity. Re-run with `--repeats >=3` for variance over samples.",
@@ -208,8 +243,9 @@ def main() -> None:
     ap.add_argument("--results", default="eval/results", type=Path, help="dir of results-*.jsonl")
     ap.add_argument("--out", default=None, type=Path, help="write the report here (else stdout)")
     args = ap.parse_args()
-    model_rows = load_latest_per_model(args.results)
-    report = build_report(model_rows)
+    model_rows = load_latest_per_model(args.results, kind="oneshot")
+    multiturn_rows = load_latest_per_model(args.results, kind="multiturn")
+    report = build_report(model_rows, multiturn_rows or None)
     if args.out:
         args.out.write_text(report, encoding="utf-8")
         print(f"Wrote {args.out}")

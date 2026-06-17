@@ -1,0 +1,66 @@
+{
+  "oneshot": [],
+  "multiturn": [
+    {
+      "id": "mt_gene_recall", "category": "multi_turn",
+      "context": { "route": "/", "assistant_surface": "workspace" },
+      "turns": [
+        { "prompt": "Tell me about gene dnaA.", "expect_tools": ["inspect_gene"] },
+        { "prompt": "Now switch to crp instead.", "expect_tools": ["inspect_gene"],
+          "assertions": [{ "kind": "contains", "value": "crp" }] },
+        { "prompt": "Which gene did I ask you about FIRST in this chat?", "is_probe": true,
+          "assertions": [{ "kind": "contains", "value": "dnaA" }] },
+        { "prompt": "Go back to that first gene and give me its knockout index.", "is_probe": true,
+          "expect_tools": ["inspect_gene"], "assertions": [{ "kind": "contains", "value": "dnaA" }] }
+      ]
+    },
+    {
+      "id": "mt_results_reference", "category": "multi_turn",
+      "context": { "route": "/results", "assistant_surface": "results" },
+      "turns": [
+        { "prompt": "List my completed results.", "expect_tools": ["list_results"] },
+        { "prompt": "Which condition grew fastest?" },
+        { "prompt": "What was the very first thing I asked you in this chat?", "is_probe": true,
+          "assertions": [{ "kind": "contains", "value": "result" }] },
+        { "prompt": "Refer to the fastest one by its job id and tell me its doubling time.", "is_probe": true,
+          "expect_tools": ["list_results"] }
+      ]
+    },
+    {
+      "id": "mt_override_persistence", "category": "multi_turn",
+      "context": { "route": "/?gene=aaaE", "selected_gene": "aaaE", "assistant_surface": "workspace" },
+      "turns": [
+        { "prompt": "Pick a random DIFFERENT gene and summarize it.", "expect_tools": ["gene_catalog"],
+          "assertions": [{ "kind": "not_contains", "value": "aaaE" }] },
+        { "prompt": "Now inspect the gene I had selected on the page.", "expect_tools": ["inspect_gene"],
+          "assertions": [{ "kind": "contains", "value": "aaaE" }] },
+        { "prompt": "Earlier you picked a random gene — was it the same as my selected one?", "is_probe": true,
+          "assertions": [{ "kind": "not_contains", "value": "aaaE was" }] }
+      ]
+    },
+    {
+      "id": "mt_modeling_consistency", "category": "multi_turn",
+      "context": { "route": "/assistant", "assistant_surface": "central" },
+      "turns": [
+        { "prompt": "What is Flux Balance Analysis?", "expect_tools": ["explain_modeling"],
+          "forbid_tools": ["create_experiment"] },
+        { "prompt": "So is it an optimization or a time-integration?",
+          "assertions": [{ "kind": "regex", "value": "optimi" }] },
+        { "prompt": "Without repeating the explanation, just name the concept you described two messages ago.",
+          "is_probe": true, "assertions": [{ "kind": "regex", "value": "FBA|flux balance" }] }
+      ]
+    },
+    {
+      "id": "mt_number_consistency", "category": "multi_turn",
+      "context": { "route": "/assistant", "assistant_surface": "central" },
+      "turns": [
+        { "prompt": "How many genes does the platform support?", "expect_tools": ["gene_catalog"],
+          "assertions": [{ "kind": "contains", "value": "4749" }] },
+        { "prompt": "And how many of those are knockout-ready?",
+          "assertions": [{ "kind": "contains", "value": "4371" }] },
+        { "prompt": "What number did you give me for the TOTAL gene count?", "is_probe": true,
+          "assertions": [{ "kind": "contains", "value": "4749" }] }
+      ]
+    }
+  ]
+}

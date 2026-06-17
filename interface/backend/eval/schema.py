@@ -19,6 +19,7 @@ Category = Literal[
     "multi_step",         # needs >1 tool / chained reasoning
     "adversarial",        # ambiguous / under-specified / asks for something that needs a selection
     "context_override",   # explicit "a different/random gene" over the page selection
+    "multi_turn",         # threaded conversation: recall/drift, reference resolution, consistency
 ]
 
 AssertionKind = Literal["contains", "not_contains", "regex", "not_regex"]
