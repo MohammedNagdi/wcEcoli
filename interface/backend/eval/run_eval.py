@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -121,34 +122,46 @@ def main() -> None:
     (out_dir / f"runconfig-{stamp}.json").write_text(json.dumps(runconfig, indent=2), encoding="utf-8")
 
     engine = make_sqlite_engine(args.db)
-    results: list[dict] = []
-    for target in targets:
-        print(f"\n=== {target.label} ===")
-        with Session(engine) as session:
-            for sample in range(args.repeats):
-                for case in dataset.oneshot:
-                    r = run_oneshot(session, case, target)
-                    r["sample"] = sample  # so the analysis can aggregate per-item across repeats
-                    results.append(r)
-                    tag = f" s{sample}" if args.repeats > 1 else ""
-                    print(f"  [oneshot{tag}] {case.id:<26} {'PASS' if r['passed'] else 'FAIL'}  {r['latency_ms']}ms")
-                for scenario in dataset.multiturn:
-                    r = run_multiturn(session, scenario, target)
-                    r["sample"] = sample
-                    results.append(r)
-                    print(f"  [multi ] {scenario.id:<28} {'PASS' if r['passed'] else 'FAIL'}  ~{r['avg_latency_ms']}ms/turn")
-        _unload_ollama(target)  # free RAM before the next model loads
-
     raw_path = out_dir / f"results-{stamp}.jsonl"
-    with raw_path.open("w", encoding="utf-8") as handle:
-        for r in results:
-            handle.write(json.dumps(r, default=str) + "\n")
     scorecard_path = out_dir / f"scorecard-{stamp}.md"
-    scorecard_path.write_text(build_scorecard(results), encoding="utf-8")
     transcript_path = out_dir / f"transcript-{stamp}.md"
-    transcript_path.write_text(build_transcript(results), encoding="utf-8")
+    results: list[dict] = []
 
-    print(f"\nWrote {raw_path}\nWrote {scorecard_path}\nWrote {transcript_path}  <- paste this to Claude for judging")
+    # Checkpoint each result to the JSONL as it is produced (flush + fsync) so a crash mid-run loses
+    # at most the in-flight case, not the whole run. The JSONL is the source of truth; analyze.py
+    # reads it directly, so a partial file is still fully analyzable. Scorecard/transcript are
+    # rebuilt from whatever completed, even on an exception (finally).
+    def checkpoint(r: dict, handle) -> None:
+        handle.write(json.dumps(r, default=str) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+        results.append(r)
+
+    try:
+        with raw_path.open("w", encoding="utf-8") as handle:
+            for target in targets:
+                print(f"\n=== {target.label} ===")
+                with Session(engine) as session:
+                    for sample in range(args.repeats):
+                        for case in dataset.oneshot:
+                            r = run_oneshot(session, case, target)
+                            r["sample"] = sample  # lets the analysis aggregate per-item across repeats
+                            checkpoint(r, handle)
+                            tag = f" s{sample}" if args.repeats > 1 else ""
+                            print(f"  [oneshot{tag}] {case.id:<26} {'PASS' if r['passed'] else 'FAIL'}  {r['latency_ms']}ms")
+                        for scenario in dataset.multiturn:
+                            r = run_multiturn(session, scenario, target)
+                            r["sample"] = sample
+                            checkpoint(r, handle)
+                            print(f"  [multi ] {scenario.id:<28} {'PASS' if r['passed'] else 'FAIL'}  ~{r['avg_latency_ms']}ms/turn")
+                _unload_ollama(target)  # free RAM before the next model loads
+    finally:
+        # Always emit the human-readable artifacts from whatever completed (full run OR partial crash).
+        if results:
+            scorecard_path.write_text(build_scorecard(results), encoding="utf-8")
+            transcript_path.write_text(build_transcript(results), encoding="utf-8")
+            print(f"\nWrote {raw_path} ({len(results)} results)"
+                  f"\nWrote {scorecard_path}\nWrote {transcript_path}  <- paste this to Claude for judging")
 
 
 if __name__ == "__main__":
