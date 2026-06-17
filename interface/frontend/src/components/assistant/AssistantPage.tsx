@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import {
   clearAssistantProviderConfig,
@@ -1720,6 +1721,10 @@ function GroundedToolResults({ entries }: { entries: ToolResultEntry[] }) {
   )
 }
 
+const MODEL_POPOVER_WIDTH = 256
+const MODEL_POPOVER_MARGIN = 8
+const LOCAL_MODEL_PROVIDER_IDS = ['ollama', 'lmstudio', 'lm_studio', 'vllm']
+
 /** Compact provider+model selector for the chat header. A single pill (provider · model) that opens
  * a small popover — the per-chat override lives here without two dropdowns cluttering every chat.
  * The global default is set in Provider settings; new chats inherit it. */
@@ -1734,25 +1739,90 @@ function ModelPill({
   onSelect: (providerId: string, model: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 })
   const ref = useRef<HTMLDivElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  function updatePopoverPosition() {
+    const button = ref.current
+    if (!button) return
+    const rect = button.getBoundingClientRect()
+    const maxLeft = window.innerWidth - MODEL_POPOVER_WIDTH - MODEL_POPOVER_MARGIN
+    setPopoverPosition({
+      top: Math.max(MODEL_POPOVER_MARGIN, rect.bottom + 6),
+      left: Math.max(MODEL_POPOVER_MARGIN, Math.min(rect.right - MODEL_POPOVER_WIDTH, maxLeft)),
+    })
+  }
+
   useEffect(() => {
     if (!open) return
     const onDoc = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      if (ref.current?.contains(target) || popoverRef.current?.contains(target)) return
+      setOpen(false)
     }
+    updatePopoverPosition()
     document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
+    window.addEventListener('resize', updatePopoverPosition)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('resize', updatePopoverPosition)
+    }
   }, [open])
 
   const providerOption = options.find((option) => option.provider_id === providerId)
   const label = `${providerOption?.label ?? providerId ?? 'No provider'}${model ? ` · ${model}` : ''}`
+  const showLocalModelWarning = LOCAL_MODEL_PROVIDER_IDS.includes(providerId.toLowerCase())
+  const popover = open ? createPortal(
+    <div
+      ref={popoverRef}
+      data-testid="model-popover"
+      className="fixed z-[100] w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
+      style={{ top: popoverPosition.top, left: popoverPosition.left }}
+    >
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Provider</div>
+      <select
+        value={providerId}
+        disabled={disabled}
+        onChange={(event) => {
+          const option = options.find((item) => item.provider_id === event.target.value)
+          onSelect(event.target.value, option?.models[0] ?? '')
+        }}
+        className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 disabled:bg-gray-50"
+      >
+        {!available && providerId && <option value={providerId}>{providerId} (unavailable)</option>}
+        {options.map((option) => <option key={option.provider_id} value={option.provider_id}>{option.label}</option>)}
+      </select>
+      <div className="mb-1 mt-3 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Model</div>
+      <select
+        value={model}
+        disabled={disabled || !providerOption}
+        onChange={(event) => onSelect(providerId, event.target.value)}
+        className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 disabled:bg-gray-50"
+      >
+        {!available && model && <option value={model}>{model} (unavailable)</option>}
+        {(providerOption?.models ?? []).map((item) => <option key={item} value={item}>{item}</option>)}
+      </select>
+      <p className="mt-2 text-[10px] leading-4 text-gray-400">Per-chat. The default is set in Provider settings.</p>
+      {showLocalModelWarning && (
+        <p className="mt-1 text-[10px] leading-4 text-amber-600">
+          Local models need free RAM ≈ their size (8B ≈ 6 GB, 14B ≈ 12 GB). Large models can crash on
+          low-RAM machines — see Guide → Assistant.
+        </p>
+      )}
+    </div>,
+    document.body,
+  ) : null
 
   return (
     <div className="relative" ref={ref}>
       <button
         type="button"
         data-testid="model-pill"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          if (!open) updatePopoverPosition()
+          setOpen((value) => !value)
+        }}
         title="Change provider / model for this chat"
         className={`inline-flex max-w-[260px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
           available
@@ -1764,38 +1834,7 @@ function ModelPill({
         <span className="truncate">{available ? label : `${label} · unavailable`}</span>
         <svg viewBox="0 0 20 20" className="h-3 w-3 shrink-0 text-gray-400" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 8l4 4 4-4" /></svg>
       </button>
-      {open && (
-        <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Provider</div>
-          <select
-            value={providerId}
-            disabled={disabled}
-            onChange={(event) => {
-              const option = options.find((item) => item.provider_id === event.target.value)
-              onSelect(event.target.value, option?.models[0] ?? '')
-            }}
-            className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 disabled:bg-gray-50"
-          >
-            {!available && providerId && <option value={providerId}>{providerId} (unavailable)</option>}
-            {options.map((option) => <option key={option.provider_id} value={option.provider_id}>{option.label}</option>)}
-          </select>
-          <div className="mb-1 mt-3 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Model</div>
-          <select
-            value={model}
-            disabled={disabled || !providerOption}
-            onChange={(event) => onSelect(providerId, event.target.value)}
-            className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 disabled:bg-gray-50"
-          >
-            {!available && model && <option value={model}>{model} (unavailable)</option>}
-            {(providerOption?.models ?? []).map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-          <p className="mt-2 text-[10px] leading-4 text-gray-400">Per-chat. The default is set in Provider settings.</p>
-          <p className="mt-1 text-[10px] leading-4 text-amber-600">
-            Local models need free RAM ≈ their size (8B ≈ 6 GB, 14B ≈ 12 GB). Large models can crash on
-            low-RAM machines — see Guide → Assistant.
-          </p>
-        </div>
-      )}
+      {popover}
     </div>
   )
 }
@@ -2036,13 +2075,13 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
 
         <div className={`relative flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm`}>
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-gray-900">
                 {activeConversation?.title ?? 'New chat'}
               </div>
               <div className="mt-0.5 truncate text-xs leading-5 text-gray-500">{contextSummary(context)}</div>
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
               <ModelPill
                 options={providerModelOptions}
                 providerId={selectedProviderId}

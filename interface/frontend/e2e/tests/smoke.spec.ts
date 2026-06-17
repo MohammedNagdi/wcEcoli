@@ -219,6 +219,41 @@ test.describe('Assistant smoke', () => {
     await expect(page.getByText('provider error')).toBeVisible() // friendly status badge
   })
 
+  test('keeps the model selector popover visible and local-provider specific', async ({ page }) => {
+    await mockAssistantApi(page, {
+      providerModelOptions: [
+        { provider_id: 'openai', label: 'OpenAI', models: ['gpt-4.1-mini'] },
+        { provider_id: 'ollama', label: 'Ollama', models: ['llama3.1'] },
+      ],
+    })
+    await page.goto('/assistant')
+
+    await page.getByTestId('model-pill').click()
+    const popover = page.getByTestId('model-popover')
+    await expect(popover).toBeVisible()
+
+    const box = await popover.boundingBox()
+    expect(box).not.toBeNull()
+    const viewport = page.viewportSize()
+    expect(viewport).not.toBeNull()
+    expect(box!.x).toBeGreaterThanOrEqual(0)
+    expect(box!.y).toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width)
+
+    const topElementIsPopover = await page.evaluate(() => {
+      const popover = document.querySelector('[data-testid="model-popover"]')
+      if (!popover) return false
+      const rect = popover.getBoundingClientRect()
+      const element = document.elementFromPoint(rect.left + rect.width / 2, rect.top + 8)
+      return Boolean(element?.closest('[data-testid="model-popover"]'))
+    })
+    expect(topElementIsPopover).toBe(true)
+    await expect(popover).not.toContainText('Local models need free RAM')
+
+    await popover.locator('select').first().selectOption('ollama')
+    await expect(popover).toContainText('Local models need free RAM')
+  })
+
   test('docked panel: summon from another page, chat, Esc to close', async ({ page }) => {
     // Quiet other pages' own data calls. Anchor to the API origin so we don't intercept the app's
     // own /src/api/* module scripts.

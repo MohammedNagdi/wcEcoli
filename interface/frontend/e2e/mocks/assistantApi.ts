@@ -147,29 +147,32 @@ interface MockOptions {
   thinking?: string
   /** authoritative read-only tool outputs to attach to the `done` event (grounded data cards) */
   toolResults?: { tool_name: string; result: Record<string, unknown> }[]
+  /** configured provider/model options for the chat header selector */
+  providerModelOptions?: { provider_id: string; label: string; models: string[] }[]
 }
 
 export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Promise<void> {
   const reply = opts.reply ?? 'Hello there.'
   const proposals = opts.proposals ?? []
-  const userMsg = { id: 1, conversation_id: 1, role: 'user', content: 'hi', context: CTX, status: 'stored', provider_id: '', model: '', created_at: '' }
-  const asstMsg = { id: 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: opts.assistantStatus ?? 'completed', provider_id: 'openai', model: 'gpt-4.1-mini', created_at: '' }
-
-  const streamEvents: unknown[] = [
-    { type: 'meta', provider_id: 'openai', model: 'gpt-4.1-mini' },
-    { type: 'user', message: userMsg },
-  ]
-  if (opts.thinking) {
-    // Reasoning, then a tool runs (folds the reasoning into the thinking trail), then the answer.
-    streamEvents.push({ type: 'delta', text: opts.thinking })
-    streamEvents.push({ type: 'status', status: 'running_tool', tool: 'list_conditions' })
-    streamEvents.push({ type: 'delta', text: reply })
-  } else {
-    streamEvents.push({ type: 'delta', text: reply.slice(0, Math.ceil(reply.length / 2)) })
-    streamEvents.push({ type: 'delta', text: reply.slice(Math.ceil(reply.length / 2)) })
+  const streamBody = (content: string) => {
+    const userMsg = { id: 1, conversation_id: 1, role: 'user', content, context: CTX, status: 'stored', provider_id: '', model: '', created_at: '' }
+    const asstMsg = { id: 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: opts.assistantStatus ?? 'completed', provider_id: 'openai', model: 'gpt-4.1-mini', created_at: '' }
+    const streamEvents: unknown[] = [
+      { type: 'meta', provider_id: 'openai', model: 'gpt-4.1-mini' },
+      { type: 'user', message: userMsg },
+    ]
+    if (opts.thinking) {
+      // Reasoning, then a tool runs (folds the reasoning into the thinking trail), then the answer.
+      streamEvents.push({ type: 'delta', text: opts.thinking })
+      streamEvents.push({ type: 'status', status: 'running_tool', tool: 'list_conditions' })
+      streamEvents.push({ type: 'delta', text: reply })
+    } else {
+      streamEvents.push({ type: 'delta', text: reply.slice(0, Math.ceil(reply.length / 2)) })
+      streamEvents.push({ type: 'delta', text: reply.slice(Math.ceil(reply.length / 2)) })
+    }
+    streamEvents.push({ type: 'done', conversation: CONVERSATION, user_message: userMsg, assistant_message: asstMsg, proposals, tool_results: opts.toolResults ?? [] })
+    return sse(streamEvents)
   }
-  streamEvents.push({ type: 'done', conversation: CONVERSATION, user_message: userMsg, assistant_message: asstMsg, proposals, tool_results: opts.toolResults ?? [] })
-  const streamBody = sse(streamEvents)
 
   // Catch-all FIRST so the specific handlers below (registered later) take precedence — Playwright
   // invokes the most recently registered matching handler first.
@@ -181,7 +184,7 @@ export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Prom
   await page.route('**/api/assistant/providers', (r) => r.fulfill({ json: STATUS.providers }))
   await page.route('**/api/assistant/provider-configs', (r) => r.fulfill({ json: [] }))
   await page.route('**/api/assistant/provider-model-options', (r) =>
-    r.fulfill({ json: [{ provider_id: 'openai', label: 'OpenAI', models: ['gpt-4.1-mini'] }] }),
+    r.fulfill({ json: opts.providerModelOptions ?? [{ provider_id: 'openai', label: 'OpenAI', models: ['gpt-4.1-mini'] }] }),
   )
   await page.route('**/api/assistant/tools', (r) => r.fulfill({ json: [] }))
   await page.route('**/api/assistant/runtime-settings', (r) =>
@@ -209,9 +212,10 @@ export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Prom
     return r.fulfill({ json: CONVERSATION })
   })
   await page.route('**/api/assistant/conversations/*/memory', (r) => r.fulfill({ json: MEMORY }))
-  await page.route('**/api/assistant/conversations/*/messages/stream', (r) =>
-    r.fulfill({ contentType: 'text/event-stream', body: streamBody }),
-  )
+  await page.route('**/api/assistant/conversations/*/messages/stream', (r) => {
+    const body = (r.request().postDataJSON() ?? {}) as { content?: string }
+    return r.fulfill({ contentType: 'text/event-stream', body: streamBody(body.content ?? 'hi') })
+  })
   await page.route('**/api/assistant/conversations/*/messages', (r) => r.fulfill({ json: [] }))
 
   // Audit trail (AssistantAuditPanel mounts even while collapsed and expects arrays)
