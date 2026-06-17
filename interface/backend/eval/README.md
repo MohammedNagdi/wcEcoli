@@ -57,13 +57,13 @@ Run where the backend imports and providers are configured (the API container ha
 
 ```bash
 # inside the running api container (providers already configured in its DB):
-docker exec interface-api-1 python -m eval.run_eval \
+docker exec interface-api-1 python -u -m eval.run_eval \
   --dataset eval/datasets/oneshot.example.json \
   --models "ollama:qwen3:8b,ollama:llama3.1:8b" \
   --out /tmp/eval
 
 # or locally from interface/backend with the backend env + a DB path:
-python -m eval.run_eval --dataset eval/datasets/oneshot.example.json \
+python -u -m eval.run_eval --dataset eval/datasets/oneshot.example.json \
   --models "ollama:qwen3:8b" --db /path/to/wcecoli.db --out eval/results
 ```
 
@@ -82,7 +82,7 @@ self-consistency (re-state a number/concept given earlier). Probe turns carry `i
 deterministic assertion, so the drift signal is graded without a judge.
 
 ```bash
-docker exec interface-api-1 python -m eval.run_eval \
+docker exec interface-api-1 python -u -m eval.run_eval \
   --dataset eval/datasets/multiturn.v1.json \
   --models "ollama:llama3.1:8b,ollama:qwen3:8b,ollama:llama3.2:latest" \
   --out eval/results --repeats 3
@@ -99,7 +99,7 @@ includes, per case: prompt, page context, rubric, **tool output (ground truth)**
 and the pre-computed deterministic checks — everything needed to grade without re-running.
 
 Workflow:
-1. `python -m eval.run_eval --dataset … --models "ollama:qwen3:8b,ollama:llama3.1:8b,ollama:qwen2.5-coder:14b,ollama:llama3.2:latest" --out eval/results`
+1. `python -u -m eval.run_eval --dataset … --models "ollama:qwen3:8b,ollama:llama3.1:8b,ollama:qwen2.5-coder:14b,ollama:llama3.2:latest" --out eval/results`
 2. Open the run's `transcript-<ts>.md` and ask Claude: *"Judge this eval transcript with the JUDGE rubric."*
 3. Claude returns per-case scores + a model-comparison scorecard you save next to the run.
 
@@ -133,6 +133,23 @@ methods — no hand-waving.
 - **`python -m eval.datasheet --dataset <file> --out <file>.DATASHEET.md`** — a Datasheets-for-Datasets
   record (provenance, composition, uses, limitations, content hash).
 - Primitives + analysis are unit-tested: `pytest eval/test_stats.py eval/test_analyze.py`.
+
+### Calibrated blinded judge (subjective axes)
+
+`analyze.py` deliberately omits the subjective axes (correctness, helpfulness). The judge layer scores
+them with bias controls so the result is trustworthy, not asserted:
+
+1. **`python -m eval.judge_blind --results eval/results --out eval/results/judge --models "…"`** builds
+   `judge_worksheet.md` — per-prompt **panels** of all models' answers with **identities hidden, order
+   randomized**, plus a **reliability round** that re-presents a random subset isolated/reshuffled. The
+   id→model map is written to a *separate* `judge_key.json` not opened while scoring.
+2. The judge (a Claude Code session) scores every `resp_id` (correctness/helpfulness 1-5 + flags) into
+   `judge_scores.jsonl`, grading correctness **against the captured tool output**, not world knowledge.
+3. **`python -m eval.judge_analyze --judge eval/results/judge --out eval/results/judge/judge_report.md`**
+   un-blinds and reports per-model means (bootstrap CIs) plus three diagnostics: **verbosity bias**
+   (length↔score Pearson r), **position bias** (mean score by slot), and **test-retest reliability**
+   (Round 1 vs Round 2). Self-preference bias is structurally low (no judged model is Claude) and
+   identities are blinded regardless. Tested in `test_judge.py`.
 
 ## Extending
 
