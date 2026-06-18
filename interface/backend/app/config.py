@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Context window sent to Ollama. Bounded (not the model's 32k max) so the KV cache stays small
     # and predictable; large enough for our system prompt + tool results + a few turns.
     assistant_ollama_num_ctx: int = 8192
+    # Cap the size of a tool result fed BACK to the model in-loop (chars of serialized JSON). The
+    # user still sees the full grounded card; this only bounds what re-enters the prompt each round,
+    # cutting hosted-token cost on big adapter payloads. Generous so it only trims genuinely large ones.
+    assistant_max_tool_result_chars: int = 8000
     # Cap on observe->act->observe iterations per user turn.
     assistant_max_agent_turns: int = 6
     # Context compaction: keep this many recent turns verbatim; summarize older ones once at least

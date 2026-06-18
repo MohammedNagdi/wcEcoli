@@ -151,6 +151,13 @@ them with bias controls so the result is trustworthy, not asserted:
    (Round 1 vs Round 2). Self-preference bias is structurally low (no judged model is Claude) and
    identities are blinded regardless. Tested in `test_judge.py`.
 
+For an **automated second judge** (inter-rater reliability vs the human/Claude pass), `judge_blind`
+also emits a structured `judge_items.jsonl`, and **`python -m eval.judge_batch --judge eval/results/judge
+[--submit --model claude-sonnet-4-6]`** scores every answer via a hosted model's **Batches API** (50%
+off; each scoring is a single independent request — the ideal batch fit). It reads the key from the
+encrypted provider config; without `--submit` it's a dry run (writes the batch + cost estimate, no
+spend). Output is `judge_scores.jsonl` in the same shape `judge_analyze` consumes.
+
 ## Extending
 
 - **Add cases**: copy a starter dataset, add entries (aim for ~100 one-shot across the 6 categories,

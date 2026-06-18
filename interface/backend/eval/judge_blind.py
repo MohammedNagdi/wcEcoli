@@ -75,11 +75,18 @@ def build(results_dir: Path, out_dir: Path, models: list[str], *, sample: int = 
                             "n_chars": len(ans), "n_words": len(ans.split())})
 
     key: dict[str, dict[str, Any]] = {}
+    items: list[dict[str, Any]] = []   # structured per-answer judge inputs (for the batch judge)
     counter = [0]
 
     def new_id() -> str:
         counter[0] += 1
         return f"r{counter[0]:04d}"
+
+    def record_item(rid: str, cid: str, answer: str) -> None:
+        c = cases[cid]
+        items.append({"resp_id": rid, "prompt": c["prompt"], "answer": answer,
+                      "tool_output": c.get("tool_output"), "rubric": c.get("rubric", ""),
+                      "gold": c.get("gold", "")})
 
     # --- Round 1: panels (all models' answers to one prompt, shuffled) ---
     panels: list[dict[str, Any]] = []
@@ -95,6 +102,7 @@ def build(results_dir: Path, out_dir: Path, models: list[str], *, sample: int = 
             key[rid] = {"model": a["model"], "case_id": cid, "round": 1, "slot": slot,
                         "n_chars": a["n_chars"], "n_words": a["n_words"], "dup_of": None}
             entries.append({"resp_id": rid, "answer": a["answer"]})
+            record_item(rid, cid, a["answer"])
         panels.append({"case_id": cid, **cases[cid], "responses": entries})
 
     # --- Round 2: reliability — isolated re-presentation of a random subset ---
@@ -111,11 +119,15 @@ def build(results_dir: Path, out_dir: Path, models: list[str], *, sample: int = 
                     "n_chars": a["n_chars"], "n_words": a["n_words"], "dup_of": orig}
         rel_items.append({"resp_id": rid, "case_id": a["case_id"], **cases[a["case_id"]],
                           "answer": a["answer"]})
+        record_item(rid, a["case_id"], a["answer"])
 
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "judge_key.json").write_text(json.dumps(key, indent=2), encoding="utf-8")
     (out_dir / "judge_worksheet.md").write_text(
         _render(panels, rel_items, n_models=len(wanted)), encoding="utf-8")
+    # Structured inputs for the batch judge (eval.judge_batch); the worksheet is for a human/Claude judge.
+    (out_dir / "judge_items.jsonl").write_text(
+        "\n".join(json.dumps(it, default=str) for it in items), encoding="utf-8")
     return {"models": wanted, "cases": len(panels), "round1_answers": sum(len(p["responses"]) for p in panels),
             "round2_reliability": len(rel_items), "total_to_judge": len(key)}
 

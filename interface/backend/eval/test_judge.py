@@ -3,6 +3,7 @@
 import json
 
 from eval.judge_analyze import _pearson, build_report
+from eval.judge_batch import build_requests, parse_score
 from eval.judge_blind import build
 
 
@@ -38,6 +39,21 @@ def test_blinding_and_reliability_pairing(tmp_path):
     for rid, v in r2:
         base = key[v["dup_of"]]
         assert base["round"] == 1 and base["model"] == v["model"] and base["case_id"] == v["case_id"]
+
+
+def test_batch_requests_and_score_parsing():
+    items = [{"resp_id": "r0001", "prompt": "How many genes?", "answer": "4749",
+              "tool_output": [{"genes": 4749}], "rubric": "", "gold": ""}]
+    reqs = build_requests(items, "claude-haiku-4-5")
+    assert reqs[0]["custom_id"] == "r0001"
+    assert reqs[0]["params"]["model"] == "claude-haiku-4-5"
+    body = reqs[0]["params"]["messages"][0]["content"]
+    assert "How many genes?" in body and "4749" in body          # question + answer embedded
+
+    # tolerant JSON extraction from a judge completion (prose around the object, float scores)
+    s = parse_score("r0001", 'Here: {"correctness": 5.0, "helpfulness": 4, "flags": ["x"], "why": "ok"} done')
+    assert s == {"resp_id": "r0001", "flags": ["x"], "why": "ok", "correctness": 5, "helpfulness": 4}
+    assert parse_score("r0001", "no json here") is None
 
 
 def test_pearson_known_values():

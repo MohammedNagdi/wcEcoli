@@ -364,6 +364,10 @@ def _call_provider(
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
         }
+        # Cache the conversation prefix too (system + tools are already cached via build_system): a
+        # single moving breakpoint on the most recent block lets each later round/turn replay the
+        # prior history at ~0.1x input price instead of full price.
+        _mark_history_cacheable(native_messages)
         payload: dict[str, Any] = {
             "model": model,
             "max_tokens": DEFAULT_MAX_TOKENS,
@@ -569,6 +573,25 @@ def _parse_openai_tool_calls(raw: Any, *, prefix: str) -> list[NormalizedToolCal
     return tool_calls
 
 
+def _mark_history_cacheable(messages: list[dict[str, Any]]) -> None:
+    """Keep exactly one Anthropic cache breakpoint on the most recent block-list message.
+
+    Clears any stale ``cache_control`` first so a long agent loop can't accumulate breakpoints past
+    the 4-per-request limit. String-content messages (the opening user turn) are skipped — a breakpoint
+    must sit on a content *block*. Combined with the cached system block that is 2 breakpoints total.
+    """
+    last_block: dict[str, Any] | None = None
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    block.pop("cache_control", None)
+                    last_block = block
+    if last_block is not None:
+        last_block["cache_control"] = {"type": "ephemeral"}
+
+
 def _append_tool_results(
     kind: str,
     native_messages: list[dict[str, Any]],
@@ -710,10 +733,15 @@ def _run_tool_call(
 
 
 def _tool_result(call: NormalizedToolCall, payload: dict[str, Any], *, is_error: bool = False) -> dict[str, Any]:
+    content = json.dumps(payload, default=str)
+    cap = int(settings.assistant_max_tool_result_chars or 0)
+    if cap and len(content) > cap:
+        # Trim what re-enters the model's context each round (the grounded card the user sees is full).
+        content = content[:cap] + f'… [truncated {len(content) - cap} chars; full data shown in the card]"'
     return {
         "id": call.id,
         "name": call.name,
-        "content": json.dumps(payload, default=str),
+        "content": content,
         "is_error": is_error,
     }
 
