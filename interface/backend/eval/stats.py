@@ -90,6 +90,35 @@ def bootstrap_mean_ci(values: list[float], *, n_boot: int = 10000, seed: int = 0
     return point, means[int((alpha / 2) * n_boot)], means[int((1 - alpha / 2) * n_boot) - 1]
 
 
+def cohen_weighted_kappa(a: list[int], b: list[int]) -> float:
+    """Quadratic-weighted Cohen's kappa for two raters' ordinal scores (e.g. 1-5).
+
+    1.0 = perfect agreement, 0 = chance-level, <0 = worse than chance. Quadratic weights make
+    near-misses (off-by-one) count far less than large disagreements — the right choice for ordinal
+    rating scales. Returns 1.0 when there is no variance to disagree on.
+    """
+    if len(a) != len(b) or not a:
+        raise ValueError("rater arrays must be equal length and non-empty")
+    cats = sorted(set(a) | set(b))
+    if len(cats) < 2:
+        return 1.0
+    idx = {c: i for i, c in enumerate(cats)}
+    k, n = len(cats), len(a)
+    observed = [[0] * k for _ in range(k)]
+    for x, y in zip(a, b):
+        observed[idx[x]][idx[y]] += 1
+    row = [sum(observed[i]) for i in range(k)]
+    col = [sum(observed[i][j] for i in range(k)) for j in range(k)]
+    span = (cats[-1] - cats[0]) ** 2
+
+    def w(i: int, j: int) -> float:
+        return ((cats[i] - cats[j]) ** 2) / span
+
+    num = sum(w(i, j) * observed[i][j] for i in range(k) for j in range(k))
+    den = sum(w(i, j) * row[i] * col[j] / n for i in range(k) for j in range(k))
+    return 1.0 if den == 0 else 1.0 - num / den
+
+
 def holm(pvalues: dict[str, float]) -> dict[str, float]:
     """Holm–Bonferroni step-down adjusted p-values for a family of comparisons."""
     items = sorted(pvalues.items(), key=lambda kv: kv[1])

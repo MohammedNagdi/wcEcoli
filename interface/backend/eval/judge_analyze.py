@@ -21,7 +21,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-from .stats import bootstrap_mean_ci
+from .stats import bootstrap_mean_ci, cohen_weighted_kappa
 
 AXES = ("correctness", "helpfulness")
 
@@ -152,11 +152,55 @@ def build_report(judge_dir: Path) -> str:
     return "\n".join(L) + "\n"
 
 
+def _load_scores_file(path: Path) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            s = json.loads(line)
+            out[s["resp_id"]] = s
+    return out
+
+
+def build_interrater_report(judge_dir: Path, label_a: str, label_b: str) -> str:
+    """Agreement between two judges' scores on the answers they BOTH rated (κ + exact/±1 + Pearson r)."""
+    a = _load_scores_file(judge_dir / f"judge_scores.{label_a}.jsonl")
+    b = _load_scores_file(judge_dir / f"judge_scores.{label_b}.jsonl")
+    shared = sorted(set(a) & set(b))
+    L = [f"# Inter-rater agreement — {label_a} vs {label_b}", "",
+         f"Computed on **{len(shared)}** answers both judges scored.", "",
+         "| Axis | n | weighted κ | exact | within ±1 | Pearson r | mean Δ ({} − {}) |".format(label_a, label_b),
+         "|---|---|---|---|---|---|---|"]
+    for axis in AXES:
+        xs = [int(a[r][axis]) for r in shared if a[r].get(axis) is not None and b[r].get(axis) is not None]
+        ys = [int(b[r][axis]) for r in shared if a[r].get(axis) is not None and b[r].get(axis) is not None]
+        if not xs:
+            L.append(f"| {axis} | 0 | — | — | — | — | — |")
+            continue
+        kappa = cohen_weighted_kappa(xs, ys)
+        exact = sum(1 for x, y in zip(xs, ys) if x == y) / len(xs)
+        within1 = sum(1 for x, y in zip(xs, ys) if abs(x - y) <= 1) / len(xs)
+        r = _pearson([float(x) for x in xs], [float(y) for y in ys])
+        bias = sum(x - y for x, y in zip(xs, ys)) / len(xs)
+        rs = f"{r:+.2f}" if r is not None else "n/a"
+        L.append(f"| {axis} | {len(xs)} | {kappa:.2f} | {exact*100:.0f}% | {within1*100:.0f}% | {rs} | {bias:+.2f} |")
+    L += ["", "_Quadratic-weighted κ: ≥0.8 near-perfect, 0.6–0.8 substantial, 0.4–0.6 moderate. "
+          "`mean Δ` is the systematic-leniency gap between the two judges (0 = no bias)._", ""]
+    return "\n".join(L) + "\n"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--judge", default="eval/results/judge", type=Path)
     ap.add_argument("--out", default=None, type=Path)
+    ap.add_argument("--interrater", nargs=2, metavar=("A", "B"),
+                    help="compare two judge_scores.<label>.jsonl files for inter-rater κ")
     args = ap.parse_args()
+    if args.interrater:
+        report = build_interrater_report(args.judge, *args.interrater)
+        (args.out.write_text(report, encoding="utf-8") if args.out else print(report))
+        if args.out:
+            print(f"Wrote {args.out}")
+        return
     report = build_report(args.judge)
     if args.out:
         args.out.write_text(report, encoding="utf-8")

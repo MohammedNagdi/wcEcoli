@@ -121,8 +121,23 @@ def build(results_dir: Path, out_dir: Path, models: list[str], *, sample: int = 
                           "answer": a["answer"]})
         record_item(rid, a["case_id"], a["answer"])
 
+    # Structured per-answer items so an automated (hosted) judge can rebuild the same prompt the
+    # human/Claude judge reads in the worksheet. Identity stays only in judge_key.json.
+    items: list[dict[str, Any]] = []
+    for p in panels:
+        for e in p["responses"]:
+            items.append({"resp_id": e["resp_id"], "case_id": p["case_id"], "category": p["category"],
+                          "prompt": p["prompt"], "rubric": p.get("rubric", ""), "gold": p.get("gold", ""),
+                          "tool_output": p.get("tool_output"), "answer": e["answer"]})
+    for e in rel_items:
+        items.append({"resp_id": e["resp_id"], "case_id": e["case_id"], "category": e.get("category", ""),
+                      "prompt": e["prompt"], "rubric": e.get("rubric", ""), "gold": e.get("gold", ""),
+                      "tool_output": e.get("tool_output"), "answer": e["answer"]})
+
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "judge_key.json").write_text(json.dumps(key, indent=2), encoding="utf-8")
+    (out_dir / "judge_items.jsonl").write_text(
+        "\n".join(json.dumps(it, default=str) for it in items), encoding="utf-8")
     (out_dir / "judge_worksheet.md").write_text(
         _render(panels, rel_items, n_models=len(wanted)), encoding="utf-8")
     # Structured inputs for the batch judge (eval.judge_batch); the worksheet is for a human/Claude judge.

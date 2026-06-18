@@ -2,7 +2,18 @@
 
 import math
 
-from eval.stats import holm, mcnemar_exact, paired_bootstrap_diff, wilson
+import pytest
+
+from eval.stats import cohen_weighted_kappa, holm, mcnemar_exact, paired_bootstrap_diff, wilson
+
+
+def test_cohen_weighted_kappa():
+    assert cohen_weighted_kappa([1, 2, 3, 4, 5], [1, 2, 3, 4, 5]) == 1.0   # perfect agreement
+    assert cohen_weighted_kappa([3, 3, 3], [3, 3, 3]) == 1.0               # no variance -> 1.0
+    assert cohen_weighted_kappa([1, 2, 4, 5], [5, 4, 2, 1]) < -0.5         # systematic reversal
+    assert cohen_weighted_kappa([5, 5, 1, 1, 5], [4, 5, 2, 1, 4]) > 0.6    # off-by-one stays high
+    with pytest.raises(ValueError):
+        cohen_weighted_kappa([1, 2], [1])
 
 
 def test_wilson_known_values():

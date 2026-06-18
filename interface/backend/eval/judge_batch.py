@@ -86,8 +86,39 @@ def _anthropic_creds(provider_id: str, db_path) -> tuple[str, str, str]:
     key = reveal(cfg.secret_value or "", bool(getattr(cfg, "secret_encrypted", False))).strip()
     if not key:
         raise SystemExit(f"'{provider_id}' provider has no usable API key.")
-    base = (getattr(cfg, "base_url", "") or "https://api.anthropic.com/v1").rstrip("/")
+    base = (getattr(cfg, "endpoint_url", "") or "https://api.anthropic.com/v1").rstrip("/")
     return key, base, getattr(cfg, "model", "") or "claude-haiku-4-5"
+
+
+def _run_sync(items: list[dict[str, Any]], key: str, base_url: str, model: str,
+              out_path: Path) -> dict[str, int]:  # pragma: no cover (live API)
+    """One HTTPS call per answer — immediate (no batch latency). Writes scores as they land."""
+    import httpx
+
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    ok = bad = 0
+    with httpx.Client(timeout=90) as client, out_path.open("w", encoding="utf-8") as handle:
+        for i, item in enumerate(items, 1):
+            try:
+                r = client.post(f"{base_url}/messages", headers=headers,
+                                json={"model": model, "max_tokens": _JUDGE_MAX_TOKENS, "system": _SYSTEM,
+                                      "messages": [{"role": "user", "content": build_prompt(item)}]})
+                r.raise_for_status()
+                text = "\n".join(b.get("text", "") for b in r.json().get("content", [])
+                                 if b.get("type") == "text")
+                score = parse_score(item["resp_id"], text)
+            except httpx.HTTPError as exc:
+                print(f"  [{i}/{len(items)}] {item['resp_id']} HTTP error: {exc}")
+                score = None
+            if score:
+                handle.write(json.dumps(score) + "\n")
+                handle.flush()
+                ok += 1
+            else:
+                bad += 1
+            if i % 25 == 0:
+                print(f"  judged {i}/{len(items)} (ok={ok} unparsed={bad})")
+    return {"ok": ok, "unparsed": bad}
 
 
 def _submit_and_collect(requests: list[dict[str, Any]], key: str, base_url: str,
@@ -129,17 +160,29 @@ def main() -> None:
     ap.add_argument("--provider", default="anthropic")
     ap.add_argument("--model", default="", help="judge model (default: the configured provider model)")
     ap.add_argument("--db", default="/app/data/wcecoli.db")
+    ap.add_argument("--label", default="judge2", help="output is judge_scores.<label>.jsonl")
+    ap.add_argument("--limit", type=int, default=None, help="judge only the first N items")
+    ap.add_argument("--sync", action="store_true", help="one live call per item (immediate; no 50%% batch discount)")
     ap.add_argument("--submit", action="store_true", help="actually submit the batch (costs money)")
     args = ap.parse_args()
 
     items = [json.loads(l) for l in (args.judge / "judge_items.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    if args.limit:
+        items = items[: args.limit]
     model = args.model
     key = base = ""
-    if args.submit or not args.model:
+    if args.submit or args.sync or not args.model:
         key, base, cfg_model = _anthropic_creds(args.provider, args.db)
         model = args.model or cfg_model
-    requests = build_requests(items, model)
 
+    if args.sync:
+        out = args.judge / f"judge_scores.{args.label}.jsonl"
+        print(f"Judging {len(items)} items live with {args.provider}:{model} (sync) -> {out}")
+        summary = _run_sync(items, key, base, model, out)
+        print(json.dumps({**summary, "out": str(out)}, indent=2))
+        return
+
+    requests = build_requests(items, model)
     if not args.submit:
         out = args.judge / "judge_batch_requests.jsonl"
         out.write_text("\n".join(json.dumps(r) for r in requests), encoding="utf-8")
@@ -151,9 +194,9 @@ def main() -> None:
         return
 
     scores = _submit_and_collect(requests, key, base)
-    out = args.judge / "judge_scores.jsonl"
+    out = args.judge / f"judge_scores.{args.label}.jsonl"
     out.write_text("\n".join(json.dumps(s) for s in scores), encoding="utf-8")
-    print(f"Wrote {out} ({len(scores)}/{len(requests)} parsed). Now run: python -m eval.judge_analyze --judge {args.judge}")
+    print(f"Wrote {out} ({len(scores)}/{len(requests)} parsed).")
 
 
 if __name__ == "__main__":
