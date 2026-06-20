@@ -17,6 +17,7 @@ import type {
   StoichiometryMolecule,
   StoichiometryNeighborhoodResponse,
 } from '../../types'
+import { useTheme } from '../theme/ThemeProvider'
 
 // Constants
 const TYPE_LABELS: Record<string, string> = {
@@ -258,6 +259,22 @@ function buildChartData(timeseries: MoleculeTimeseries[]) {
 }
 
 function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
+  const { resolvedTheme } = useTheme()
+  const chartTheme = resolvedTheme === 'dark'
+    ? {
+      text: '#cbd5e1',
+      muted: '#94a3b8',
+      grid: 'rgba(148,163,184,0.18)',
+      tooltipBg: '#0f172a',
+      tooltipBorder: '#334155',
+    }
+    : {
+      text: '#374151',
+      muted: '#6b7280',
+      grid: 'rgba(0,0,0,0.04)',
+      tooltipBg: '#ffffff',
+      tooltipBorder: '#e5e7eb',
+    }
   if (datasets.length === 0) return null
   return (
     <div className="h-72">
@@ -268,8 +285,13 @@ function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
           maintainAspectRatio: false,
           interaction: { mode: 'index' as const, intersect: false },
           plugins: {
-            legend: { display: true, position: 'top' as const, labels: { boxWidth: 12, font: { size: 11 } } },
+            legend: { display: true, position: 'top' as const, labels: { boxWidth: 12, font: { size: 11 }, color: chartTheme.text } },
             tooltip: {
+              backgroundColor: chartTheme.tooltipBg,
+              borderColor: chartTheme.tooltipBorder,
+              borderWidth: 1,
+              titleColor: chartTheme.text,
+              bodyColor: chartTheme.text,
               callbacks: {
                 title: (items: any[]) => 't = ' + (items[0]?.parsed?.x?.toFixed(1) ?? '') + ' min',
                 label: (item: any) => item.dataset.label + ': ' + (item.parsed.y ?? 0).toPrecision(4) + ' ' + unit,
@@ -279,14 +301,14 @@ function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
           scales: {
             x: {
               type: 'linear' as const,
-              title: { display: true, text: 'Time (min)', font: { size: 11 } },
-              grid: { color: 'rgba(0,0,0,0.04)' },
-              ticks: { font: { size: 10 } },
+              title: { display: true, text: 'Time (min)', font: { size: 11 }, color: chartTheme.muted },
+              grid: { color: chartTheme.grid },
+              ticks: { font: { size: 10 }, color: chartTheme.muted },
             },
             y: {
-              title: { display: true, text: unit, font: { size: 11 } },
-              grid: { color: 'rgba(0,0,0,0.04)' },
-              ticks: { font: { size: 10 } },
+              title: { display: true, text: unit, font: { size: 11 }, color: chartTheme.muted },
+              grid: { color: chartTheme.grid },
+              ticks: { font: { size: 10 }, color: chartTheme.muted },
             },
           },
         }}

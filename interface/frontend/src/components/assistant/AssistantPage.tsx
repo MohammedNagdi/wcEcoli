@@ -51,10 +51,10 @@ import { RuntimeSettingsCard, ConnectionTestCard } from './AssistantSettings'
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'ready' | 'blocked' | 'planned' }) {
   const classes = {
-    neutral: 'border-gray-200 bg-gray-50 text-gray-600',
-    ready: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    blocked: 'border-amber-200 bg-amber-50 text-amber-800',
-    planned: 'border-blue-200 bg-blue-50 text-blue-700',
+    neutral: 'border-gray-200 bg-gray-50 text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    ready: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
+    blocked: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
+    planned: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-cyan-400/30 dark:bg-cyan-400/10 dark:text-cyan-200',
   }
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${classes[tone]}`}>
@@ -1465,7 +1465,7 @@ function AssistantProposalCard({
   }
 
   return (
-    <div data-testid="proposal-card" data-tool={proposal.tool_name} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+    <div data-testid="proposal-card" data-tool={proposal.tool_name} className="rounded-lg border border-gray-100 bg-gray-50 p-3 shadow-sm dark:border-slate-700 dark:bg-[#0b0f16] dark:shadow-none">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="break-words text-sm font-semibold text-gray-900">{title}</div>
@@ -1476,11 +1476,11 @@ function AssistantProposalCard({
         </StatusPill>
       </div>
       {facts.length > 0 && !preview && (
-        <dl className="mt-3 grid gap-2 rounded-md border border-gray-100 bg-white p-3 text-xs sm:grid-cols-2">
+        <dl className="mt-3 grid gap-2 rounded-md border border-gray-100 bg-white p-3 text-xs sm:grid-cols-2 dark:border-slate-700 dark:bg-slate-900/60">
           {facts.map((fact) => (
             <div key={`${proposal.id}-${fact.label}`} className="min-w-0">
               <dt className="font-semibold uppercase tracking-wide text-gray-500">{fact.label}</dt>
-              <dd className={`mt-1 truncate text-gray-800 ${fact.mono ? 'font-mono' : ''}`}>{fact.value}</dd>
+              <dd className={`mt-1 truncate text-gray-800 dark:text-slate-200 ${fact.mono ? 'font-mono' : ''}`}>{fact.value}</dd>
             </div>
           ))}
         </dl>
@@ -1503,7 +1503,7 @@ function AssistantProposalCard({
             data-testid="proposal-preview"
             onClick={previewProposal}
             disabled={Boolean(cardBusy)}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             {cardBusy === 'preview' ? 'Previewing...' : preview ? 'Refresh preview' : isCreateExperiment ? 'Preview draft' : 'Preview'}
           </button>
@@ -1511,7 +1511,7 @@ function AssistantProposalCard({
         {isCreateExperiment && (
           <Link
             to={`/experiments/new${gene ? `?gene=${encodeURIComponent(gene)}` : ''}`}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Open Experiment Designer
           </Link>
@@ -1519,14 +1519,14 @@ function AssistantProposalCard({
         {isRunSimulation && experimentId != null && (
           <Link
             to={`/experiments?experiment=${experimentId}`}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Review experiment
           </Link>
         )}
       </div>
       {preview && (
-        <div className="mt-3 rounded-md border border-gray-100 bg-white p-3">
+        <div className="mt-3 rounded-md border border-gray-100 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/60">
           <ToolReviewPanel title="Proposal preview" preview={preview} execution={execution} embedded />
         </div>
       )}
@@ -1546,7 +1546,7 @@ function AssistantProposalCard({
             data-testid="proposal-reject"
             onClick={rejectProposal}
             disabled={Boolean(cardBusy) || confirmation?.status === 'rejected' || Boolean(execution?.executed)}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             {cardBusy === 'reject' ? 'Rejecting...' : 'Reject'}
           </button>
@@ -1583,14 +1583,14 @@ function ThinkingBlock({ segments, live = false }: { segments: string[]; live?: 
   if (segments.length === 0) return null
   return (
     <div className="flex justify-start">
-      <details className="max-w-[80%] rounded-xl border border-gray-200 bg-gray-50/70" open={live}>
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[11px] font-medium text-gray-500">
+      <details className="max-w-[80%] overflow-hidden rounded-xl border border-gray-200 bg-gray-50/70 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:shadow-none" open={live}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[11px] font-medium text-gray-500 dark:bg-slate-800/60 dark:text-slate-300">
           {live && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" />}
           <span>{live ? 'Thinking…' : `Thought process · ${segments.length} step${segments.length === 1 ? '' : 's'}`}</span>
         </summary>
-        <div className="space-y-2 border-t border-gray-200 px-3 py-2">
+        <div className="space-y-2 border-t border-gray-200 px-3 py-2 dark:border-slate-700">
           {segments.map((seg, i) => (
-            <p key={i} className="whitespace-pre-wrap break-words text-xs italic leading-5 text-gray-500">{seg}</p>
+            <p key={i} className="whitespace-pre-wrap break-words text-xs italic leading-5 text-gray-500 dark:text-slate-400">{seg}</p>
           ))}
         </div>
       </details>
@@ -1691,15 +1691,15 @@ function GroundedTable({ rows, columns }: { rows: unknown[]; columns: GroundedCo
       <thead>
         <tr>
           {columns.map((c) => (
-            <th key={c.key} className="border-b border-gray-200 px-2 py-1 text-left font-semibold text-gray-600">{c.label}</th>
+            <th key={c.key} className="border-b border-gray-200 px-2 py-1.5 text-left font-semibold text-gray-600 dark:border-slate-700 dark:text-slate-300">{c.label}</th>
           ))}
         </tr>
       </thead>
       <tbody>
         {rows.slice(0, 25).map((row, ri) => (
-          <tr key={ri} className="even:bg-gray-50/60">
+          <tr key={ri} className="border-b border-transparent even:bg-gray-50/60 last:border-b-0 dark:border-slate-800 dark:even:bg-transparent dark:hover:bg-slate-800/40">
             {columns.map((c) => (
-              <td key={c.key} className={`px-2 py-1 align-top text-gray-800 ${c.mono ? 'font-mono' : ''}`}>{fmtGrounded(getPath(row, c.key))}</td>
+              <td key={c.key} className={`px-2 py-1.5 align-top text-gray-800 dark:text-slate-300 ${c.mono ? 'font-mono' : ''}`}>{fmtGrounded(getPath(row, c.key))}</td>
             ))}
           </tr>
         ))}
@@ -1716,17 +1716,17 @@ function GroundedToolResults({ entries }: { entries: ToolResultEntry[] }) {
       {cards.map((entry, idx) => {
         const spec = GROUNDED_TOOLS[entry.tool_name]
         return (
-          <div key={`${entry.tool_name}-${idx}`} className="rounded-xl border border-gray-200 bg-white">
-            <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">{spec.label}</span>
-              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">from platform data</span>
+          <div key={`${entry.tool_name}-${idx}`} className="rounded-xl border border-gray-200 bg-white dark:border-slate-700 dark:bg-[#0d1118]">
+            <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 dark:border-slate-700">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-slate-200">{spec.label}</span>
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300 dark:ring-1 dark:ring-emerald-400/20">from platform data</span>
             </div>
             <div className="overflow-x-auto p-2">
               {spec.mode === 'totals' && (
                 <div className="flex flex-wrap gap-1.5 px-1 py-1">
                   {Object.entries((getPath(entry.result, spec.totalsKey) as Record<string, unknown>) ?? {}).map(([k, v]) => (
-                    <span key={k} className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-700">
-                      <span className="text-gray-500">{k.replace(/_/g, ' ')}:</span> <span className="font-mono font-medium">{fmtGrounded(v)}</span>
+                    <span key={k} className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                      <span className="text-gray-500 dark:text-slate-500">{k.replace(/_/g, ' ')}:</span> <span className="font-mono font-medium">{fmtGrounded(v)}</span>
                     </span>
                   ))}
                 </div>
@@ -1734,9 +1734,9 @@ function GroundedToolResults({ entries }: { entries: ToolResultEntry[] }) {
               {spec.mode === 'fields' && (
                 <div className="grid gap-1.5 px-1 py-1 sm:grid-cols-2">
                   {spec.fields.map((f) => (
-                    <div key={f.key} className="flex items-baseline justify-between gap-2 rounded-md border border-gray-100 bg-gray-50 px-2 py-1 text-[11px]">
-                      <span className="text-gray-500">{f.label}</span>
-                      <span className="font-mono font-medium text-gray-800">{fmtGrounded(getPath(getPath(entry.result, spec.objectKey), f.key))}</span>
+                    <div key={f.key} className="flex items-baseline justify-between gap-2 rounded-md border border-gray-100 bg-gray-50 px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-900/60">
+                      <span className="text-gray-500 dark:text-slate-500">{f.label}</span>
+                      <span className="font-mono font-medium text-gray-800 dark:text-slate-300">{fmtGrounded(getPath(getPath(entry.result, spec.objectKey), f.key))}</span>
                     </div>
                   ))}
                 </div>
@@ -2026,7 +2026,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
   return (
     <section className="h-full min-h-0">
       <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className={`${heightClass} min-h-[560px] space-y-3 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3`}>
+        <aside className={`${heightClass} min-h-[560px] space-y-3 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3 dark:bg-app`}>
           <div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Conversations</div>
             <button
@@ -2114,8 +2114,8 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
           />
         </aside>
 
-        <div className={`relative flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm`}>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+        <div className={`relative flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:bg-surface`}>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-white/80 px-4 py-3 dark:bg-surface/90">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-gray-900">
                 {activeConversation?.title ?? 'New chat'}
@@ -2140,7 +2140,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             </div>
           )}
 
-          <div ref={scrollRef} onScroll={onMessagesScroll} className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5">
+          <div ref={scrollRef} onScroll={onMessagesScroll} className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5 dark:from-[#0b1019] dark:to-[#111827]">
             {(inspectPreview || inspectExecution) && (
               <ToolReviewPanel
                 title="Read-only result inspection"
@@ -2199,7 +2199,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                       className={`overflow-hidden break-words [overflow-wrap:anywhere] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
                         isUser
                           ? 'whitespace-pre-wrap rounded-br-sm bg-brand-600 text-white'
-                          : 'rounded-bl-sm border border-gray-200 bg-white text-gray-800 shadow-sm'
+                          : 'rounded-bl-sm border border-gray-200 bg-white text-gray-800 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
                       } ${message.status === 'failed' ? 'opacity-60' : ''}`}
                     >
                       {isUser ? (
@@ -2224,12 +2224,12 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             })}
             {/* Proposed actions appear inline at the end of the conversation (Claude-style). */}
             {proposals.length > 0 && (
-              <div className="space-y-2 rounded-xl border border-blue-200 bg-blue-50/50 p-3" data-testid="chat-proposals">
-                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+              <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3 shadow-sm dark:border-cyan-400/25 dark:bg-[#0d1420] dark:shadow-none dark:ring-1 dark:ring-white/5" data-testid="chat-proposals">
+                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-cyan-200">
                   <span>Actions awaiting your review</span>
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-blue-700">{proposals.length}</span>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-blue-700 dark:bg-cyan-400/10 dark:text-cyan-200 dark:ring-1 dark:ring-cyan-400/20">{proposals.length}</span>
                 </div>
-                <p className="text-xs leading-5 text-gray-600">
+                <p className="text-xs leading-5 text-gray-600 dark:text-slate-400">
                   The assistant proposed these. Nothing runs until you preview and confirm.
                 </p>
                 {proposals.slice(0, 5).map((proposal) => (
@@ -2244,7 +2244,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                   />
                 ))}
                 {proposals.length > 5 && (
-                  <div className="rounded-md border border-dashed border-blue-200 bg-white/60 px-3 py-2 text-xs text-blue-700">
+                  <div className="rounded-md border border-dashed border-blue-200 bg-white/60 px-3 py-2 text-xs text-blue-700 dark:border-cyan-400/20 dark:bg-slate-900/50 dark:text-cyan-200">
                     +{proposals.length - 5} more proposed action{proposals.length - 5 === 1 ? '' : 's'} — refine your request to narrow these down.
                   </div>
                 )}
@@ -2256,7 +2256,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
               <div className="flex justify-start">
                 <div className="max-w-[80%]">
                   <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Assistant</div>
-                  <div className="overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-2.5 text-sm leading-6 text-gray-800 shadow-sm">
+                  <div className="overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-2.5 text-sm leading-6 text-gray-800 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                     {streamingText}
                     <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-brand-400 align-middle" />
                   </div>
@@ -2267,7 +2267,7 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
               <div className="flex justify-start">
                 <div className="max-w-[80%]">
                   <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Assistant</div>
-                  <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                  <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
@@ -2301,9 +2301,9 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             </button>
           )}
 
-          <div className="border-t border-gray-100 bg-white p-3">
+          <div className="border-t border-gray-100 bg-white p-3 dark:bg-[#0f172a]">
             {error && <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</div>}
-            <div className="flex items-end gap-2 rounded-xl border border-gray-200 bg-white p-2 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200">
+            <div className="flex items-end gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 dark:border-slate-700 dark:bg-slate-800 dark:shadow-none dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/30">
               <label htmlFor="assistant-chat-input" className="sr-only">Assistant message</label>
               <textarea
                 id="assistant-chat-input"
@@ -2318,14 +2318,14 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                 }}
                 rows={2}
                 placeholder="Ask what to inspect next…"
-                className="max-h-40 min-h-[44px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-0"
+                className="max-h-40 min-h-[44px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-0 dark:bg-transparent dark:text-slate-100 dark:placeholder-slate-500"
               />
               {sending ? (
                 <button
                   type="button"
                   data-testid="assistant-stop"
                   onClick={stopStreaming}
-                  className="mb-0.5 flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                  className="mb-0.5 flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                   <span className="h-2.5 w-2.5 rounded-[2px] bg-gray-700" />
                   Stop

@@ -20,6 +20,7 @@ import { HelpTip, HelpNote } from '../common/HelpTip'
 import type { SimulationJob, ResultsResponse, ResultsSummary, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { statusLabel, variantLabel } from '../../utils/labels'
+import { useTheme } from '../theme/ThemeProvider'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -278,6 +279,22 @@ function TimeseriesChart({
   channel: string
   series: TimeseriesData[]
 }) {
+  const { resolvedTheme } = useTheme()
+  const chartTheme = resolvedTheme === 'dark'
+    ? {
+      text: '#cbd5e1',
+      muted: '#94a3b8',
+      grid: 'rgba(148,163,184,0.18)',
+      tooltipBg: '#0f172a',
+      tooltipBorder: '#334155',
+    }
+    : {
+      text: '#374151',
+      muted: '#6b7280',
+      grid: 'rgba(0,0,0,0.04)',
+      tooltipBg: '#ffffff',
+      tooltipBorder: '#e5e7eb',
+    }
   const config = CHANNEL_CONFIG[channel] ?? { title: channel, color: '#6b7280', fillColor: 'rgba(107,114,128,0.08)', group: 'Other' }
   const multiSeed = series.length > 1
 
@@ -308,8 +325,13 @@ function TimeseriesChart({
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-              legend: { display: multiSeed, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+              legend: { display: multiSeed, position: 'top', labels: { boxWidth: 12, font: { size: 11 }, color: chartTheme.text } },
               tooltip: {
+                backgroundColor: chartTheme.tooltipBg,
+                borderColor: chartTheme.tooltipBorder,
+                borderWidth: 1,
+                titleColor: chartTheme.text,
+                bodyColor: chartTheme.text,
                 callbacks: {
                   title: (items) => 't = ' + (items[0]?.parsed?.x?.toFixed(1) ?? '') + ' min',
                   label: (item) => (item.dataset.label ?? '') + ': ' + (item.parsed.y ?? 0).toPrecision(4) + ' ' + (series[0]?.unit ?? ''),
@@ -319,14 +341,14 @@ function TimeseriesChart({
             scales: {
               x: {
                 type: 'linear',
-                title: { display: true, text: 'Time (min)', font: { size: 11 } },
-                grid: { color: 'rgba(0,0,0,0.04)' },
-                ticks: { font: { size: 10 } },
+                title: { display: true, text: 'Time (min)', font: { size: 11 }, color: chartTheme.muted },
+                grid: { color: chartTheme.grid },
+                ticks: { font: { size: 10 }, color: chartTheme.muted },
               },
               y: {
-                title: { display: true, text: series[0]?.unit ?? '', font: { size: 11 } },
-                grid: { color: 'rgba(0,0,0,0.04)' },
-                ticks: { font: { size: 10 } },
+                title: { display: true, text: series[0]?.unit ?? '', font: { size: 11 }, color: chartTheme.muted },
+                grid: { color: chartTheme.grid },
+                ticks: { font: { size: 10 }, color: chartTheme.muted },
               },
             },
           }}

@@ -10,6 +10,7 @@ import { SkeletonLine } from '../common/Skeleton'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { CircularGenomeMap } from './CircularGenomeMap'
 import { ASSISTANT_GENE_SAMPLE_LIMIT, makeAssistantContextKey, summarizeGene, truncateText } from '../../utils/assistantContext'
+import { useTheme } from '../theme/ThemeProvider'
 
 interface CategorySummary {
   category: string
@@ -24,6 +25,7 @@ interface GenomeViewerPageProps {
 
 export function GenomeViewerPage({ embedded = false, compact = false, onAssistantSnapshot }: GenomeViewerPageProps) {
   const location = useLocation()
+  const { resolvedTheme } = useTheme()
   const {
     selectedGene,
     genomeSearch,
@@ -34,11 +36,15 @@ export function GenomeViewerPage({ embedded = false, compact = false, onAssistan
   const [genes, setGenes] = useState<Gene[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [darkMode, setDarkMode] = useState(true)
+  const [darkMode, setDarkMode] = useState(() => resolvedTheme === 'dark')
   const [showStats, setShowStats] = useState(true)
   const assistantCapturedAt = useRef(new Date().toISOString()).current
   const highlightedCategories = useMemo(() => new Set(genomeHighlight ?? []), [genomeHighlight])
   const mapSearchTerm = genomeSearch ?? selectedGene ?? ''
+
+  useEffect(() => {
+    setDarkMode(resolvedTheme === 'dark')
+  }, [resolvedTheme])
 
   useEffect(() => {
     const controller = new AbortController()

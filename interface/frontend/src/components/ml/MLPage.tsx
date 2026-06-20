@@ -229,6 +229,7 @@ export function MLPage() {
       ? `need at least 10 samples; currently ${features.total_rows}`
       : ''
   const canTrain = Boolean(features && features.total_rows >= 10 && !training)
+  const trainUnavailable = !features || features.total_rows < 10
   const assistantPageState = useMemo(() => ({
     kind: 'ml_modeling_workspace',
     surface: 'ml',
@@ -530,9 +531,14 @@ export function MLPage() {
           {/* Actions */}
           <div className="flex gap-2">
             <button
+              data-testid="ml-train-button"
               onClick={handleTrain}
-              disabled={training || !features || features.total_rows < 10}
-              className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 disabled:bg-gray-300 rounded-lg transition-colors flex items-center justify-center gap-2"
+              disabled={training || trainUnavailable}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                trainUnavailable
+                  ? 'cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-subtle dark:text-slate-500'
+                  : 'bg-brand-600 text-white hover:bg-brand-700 disabled:cursor-wait disabled:opacity-75'
+              }`}
             >
               {training ? (
                 <>
@@ -546,7 +552,7 @@ export function MLPage() {
             <a
               href={csvUrl}
               download
-              className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
+              className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               CSV
             </a>

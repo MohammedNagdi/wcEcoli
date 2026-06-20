@@ -8,6 +8,7 @@ import {
   summarizeAAPathway,
   summarizeKOSummary,
 } from '../../utils/assistantContext'
+import { useTheme } from '../theme/ThemeProvider'
 
 interface Props {
   pathways: AAPathway[]
@@ -73,9 +74,13 @@ const AA_CODES: Record<string, string> = {
 
 export function AAPathwayDiagram({ pathways, genes, onAssistantSnapshot }: Props) {
   const { setWorkspaceUrlState } = useUrlWorkspaceState()
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const palette = resolvedTheme === 'dark'
+    ? { grid: '#334155', edge: '#64748b', selected: '#e2e8f0' }
+    : { grid: '#d1d5db', edge: '#9ca3af', selected: '#111827' }
 
   const model = useMemo(() => buildDiagram(pathways, genes), [pathways, genes])
 
@@ -174,7 +179,7 @@ export function AAPathwayDiagram({ pathways, genes, onAssistantSnapshot }: Props
       ref={containerRef}
       className="relative overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-4"
       style={{
-        backgroundImage: 'radial-gradient(circle, #d1d5db 1px, transparent 1px)',
+        backgroundImage: `radial-gradient(circle, ${palette.grid} 1px, transparent 1px)`,
         backgroundSize: '18px 18px',
       }}
       onMouseLeave={() => setTooltip(null)}
@@ -190,7 +195,7 @@ export function AAPathwayDiagram({ pathways, genes, onAssistantSnapshot }: Props
             orient="auto"
             markerUnits="strokeWidth"
           >
-            <path d="M 0 0 L 8 4 L 0 8 z" fill="#9ca3af" />
+            <path d="M 0 0 L 8 4 L 0 8 z" fill={palette.edge} />
           </marker>
         </defs>
 
@@ -208,7 +213,7 @@ export function AAPathwayDiagram({ pathways, genes, onAssistantSnapshot }: Props
               <path
                 d={edgePath(source, target)}
                 fill="none"
-                stroke="#9ca3af"
+                stroke={palette.edge}
                 strokeWidth="1.5"
                 markerEnd="url(#aa-pathway-arrow)"
               />
@@ -238,7 +243,7 @@ export function AAPathwayDiagram({ pathways, genes, onAssistantSnapshot }: Props
                 cy={node.y}
                 r={NODE_R}
                 fill={style.fill}
-                stroke={selected ? '#111827' : style.stroke}
+                stroke={selected ? palette.selected : style.stroke}
                 strokeWidth={selected ? 3 : 2}
                 className="cursor-pointer transition-opacity hover:opacity-90"
                 onMouseEnter={(event) => updateTooltip(event, node)}

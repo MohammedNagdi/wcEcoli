@@ -9,6 +9,7 @@ import { SearchInput } from '../common/SearchInput'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { type RegulationEffect, regulationEffect } from '../../utils/regulation'
 import { ASSISTANT_EDGE_SAMPLE_LIMIT, makeAssistantContextKey, truncateText } from '../../utils/assistantContext'
+import { useTheme } from '../theme/ThemeProvider'
 
 const FULL_LAYOUT = {
   name: 'cose',
@@ -128,7 +129,8 @@ function networkModeLabel(mode: NetworkViewMode): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const STYLESHEET: any[] = [
+function networkStylesheet(darkMode: boolean): any[] {
+  return [
   {
     selector: 'node',
     style: {
@@ -146,26 +148,26 @@ const STYLESHEET: any[] = [
   {
     selector: 'node[role="tf"]',
     style: {
-      'background-color': '#534AB7',
-      'border-color': '#3D3690',
+      'background-color': darkMode ? '#7C6FE8' : '#534AB7',
+      'border-color': darkMode ? '#A78BFA' : '#3D3690',
       'font-size': '9px',
     },
   },
   {
     selector: 'node[role="target"]',
     style: {
-      'background-color': '#1D9E75',
+      'background-color': darkMode ? '#10B981' : '#1D9E75',
       'font-size': '7px',
       'border-width': 1,
-      'border-color': '#157A5A',
+      'border-color': darkMode ? '#6EE7B7' : '#157A5A',
     },
   },
   {
     selector: 'node[role="both"]',
     style: {
-      'background-color': '#2563EB',
+      'background-color': darkMode ? '#3B82F6' : '#2563EB',
       'border-width': 3,
-      'border-color': '#16A34A',
+      'border-color': darkMode ? '#86EFAC' : '#16A34A',
       'font-size': '9px',
       'font-weight': 'bold',
     },
@@ -173,12 +175,12 @@ const STYLESHEET: any[] = [
   {
     selector: 'edge[edgeType="activation"]',
     style: {
-      'line-color': '#22C55E',
-      'target-arrow-color': '#22C55E',
+      'line-color': darkMode ? '#4ADE80' : '#22C55E',
+      'target-arrow-color': darkMode ? '#4ADE80' : '#22C55E',
       'target-arrow-shape': 'triangle',
       'curve-style': 'bezier',
       width: 'data(width)',
-      opacity: 0.5,
+      opacity: darkMode ? 0.7 : 0.5,
     },
   },
   {
@@ -192,27 +194,27 @@ const STYLESHEET: any[] = [
   {
     selector: 'edge[edgeType="repression"]',
     style: {
-      'line-color': '#EF4444',
-      'target-arrow-color': '#EF4444',
+      'line-color': darkMode ? '#F87171' : '#EF4444',
+      'target-arrow-color': darkMode ? '#F87171' : '#EF4444',
       'target-arrow-shape': 'tee',
       'curve-style': 'bezier',
       width: 'data(width)',
-      opacity: 0.5,
+      opacity: darkMode ? 0.7 : 0.5,
     },
   },
   {
     selector: 'node:selected',
     style: {
       'border-width': 3,
-      'border-color': '#F59E0B',
+      'border-color': darkMode ? '#FBBF24' : '#F59E0B',
     },
   },
   {
     selector: 'node.highlighted',
     style: {
       'border-width': 3,
-      'border-color': '#F59E0B',
-      'background-color': '#F59E0B',
+      'border-color': darkMode ? '#FBBF24' : '#F59E0B',
+      'background-color': darkMode ? '#FBBF24' : '#F59E0B',
     },
   },
   {
@@ -233,7 +235,8 @@ const STYLESHEET: any[] = [
       display: 'none',
     },
   },
-]
+  ]
+}
 
 interface TFNetworkPageProps {
   embedded?: boolean
@@ -242,6 +245,7 @@ interface TFNetworkPageProps {
 
 export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetworkPageProps) {
   const { selectedGene, setSelectedGene } = useUrlWorkspaceState()
+  const { resolvedTheme } = useTheme()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const initialMode = networkViewModeFromParam(searchParams.get('mode')) ?? 'full'
@@ -258,6 +262,7 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
   const viewportHeightClass = embedded
     ? 'h-[calc(100vh-215px)] min-h-[520px]'
     : 'h-[calc(100vh-65px)]'
+  const cytoscapeStylesheet = useMemo(() => networkStylesheet(resolvedTheme === 'dark'), [resolvedTheme])
 
   useEffect(() => {
     getTFNetwork()
@@ -885,7 +890,7 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
               key={graphKey}
               elements={graphElements}
               layout={graphLayout as any}
-              stylesheet={STYLESHEET as any}
+              stylesheet={cytoscapeStylesheet as any}
               cy={handleCyInit}
               style={{ width: '100%', height: '100%' }}
               maxZoom={3}
