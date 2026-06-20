@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { cancelBatch, deleteBatch, deleteExperiment, getBatches, getBatchDetail, resumeBatch, runBatch } from '../../api/client'
 import { statusLabel, variantLabel } from '../../utils/labels'
@@ -29,7 +29,28 @@ function batchSearchText(batch: BatchSummary): string {
   ].filter(Boolean).join(' ').toLowerCase()
 }
 
-export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: string }) {
+function summarizeExperiment(exp: Experiment) {
+  return {
+    id: exp.id,
+    name: exp.name,
+    variant_type: exp.variant_type,
+    variant_label: variantLabel(exp.variant_type),
+    variant_index: exp.variant_index,
+    condition: exp.condition,
+    timeline: exp.timeline,
+    status: exp.status,
+    gene_symbol: exp.gene_symbol,
+    batch_id: exp.batch_id,
+  }
+}
+
+export function BatchDashboard({
+  initialExpandedId,
+  onAssistantSnapshot,
+}: {
+  initialExpandedId?: string
+  onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
+}) {
   const [batches, setBatches] = useState<BatchSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [runningBatchId, setRunningBatchId] = useState<string | null>(null)
@@ -41,6 +62,7 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BatchSummary | null>(null)
   const [selectedExperiment, setSelectedExperiment] = useState<Experiment | null>(null)
+  const [selectedExperimentDetailSnapshot, setSelectedExperimentDetailSnapshot] = useState<Record<string, unknown> | null>(null)
   const [deleteExperimentTarget, setDeleteExperimentTarget] = useState<Experiment | null>(null)
   const [deletingExperimentId, setDeletingExperimentId] = useState<number | null>(null)
   const [query, setQuery] = useState('')
@@ -76,6 +98,10 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
     const timer = setTimeout(() => setRunResult(null), 5000)
     return () => clearTimeout(timer)
   }, [runResult])
+
+  useEffect(() => {
+    if (!selectedExperiment) setSelectedExperimentDetailSnapshot(null)
+  }, [selectedExperiment])
 
   // Poll while any batch has active experiments
   useEffect(() => {
@@ -221,9 +247,103 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
   }
 
   const normalizedQuery = query.trim().toLowerCase()
-  const visibleBatches = normalizedQuery
-    ? batches.filter((batch) => batchSearchText(batch).includes(normalizedQuery))
-    : batches
+  const visibleBatches = useMemo(() => (
+    normalizedQuery
+      ? batches.filter((batch) => batchSearchText(batch).includes(normalizedQuery))
+      : batches
+  ), [batches, normalizedQuery])
+
+  const assistantSnapshot = useMemo(() => {
+    const expandedBatch = expandedDetail ?? visibleBatches.find((batch) => batch.batch_id === expandedId) ?? null
+    return {
+      kind: 'batch_dashboard',
+      query,
+      total_batches: batches.length,
+      visible_batches: visibleBatches.length,
+      expanded_batch_id: expandedId,
+      expanded_batch: expandedBatch
+        ? {
+          batch_id: expandedBatch.batch_id,
+          name: expandedBatch.name,
+          total: expandedBatch.total,
+          targets: expandedBatch.targets,
+          variant_types: expandedBatch.variant_types,
+          conditions: expandedBatch.conditions,
+          timelines: expandedBatch.timelines,
+          status_counts: {
+            draft: expandedBatch.draft,
+            queued: expandedBatch.queued,
+            running: expandedBatch.running,
+            done: expandedBatch.done,
+            failed: expandedBatch.failed,
+            cancelled: expandedBatch.cancelled,
+          },
+          expanded_experiment_count: 'experiments' in expandedBatch && Array.isArray(expandedBatch.experiments)
+            ? expandedBatch.experiments.length
+            : 0,
+        }
+        : null,
+      selected_experiment: selectedExperiment ? summarizeExperiment(selectedExperiment) : null,
+      selected_experiment_detail: selectedExperimentDetailSnapshot,
+      busy: {
+        running_batch_id: runningBatchId,
+        cancelling_batch_id: cancellingBatchId,
+        resuming_batch_id: resumingBatchId,
+        deleting_batch_id: deletingBatchId,
+        deleting_experiment_id: deletingExperimentId,
+      },
+      latest_action_result: runResult,
+      delete_target: deleteTarget
+        ? {
+          batch_id: deleteTarget.batch_id,
+          name: deleteTarget.name,
+          total: deleteTarget.total,
+          draft: deleteTarget.draft,
+          queued: deleteTarget.queued,
+          running: deleteTarget.running,
+        }
+        : null,
+      delete_experiment_target: deleteExperimentTarget ? summarizeExperiment(deleteExperimentTarget) : null,
+      visible_batch_sample: visibleBatches.slice(0, 20).map((batch) => ({
+        batch_id: batch.batch_id,
+        name: batch.name,
+        total: batch.total,
+        targets: batch.targets.slice(0, 8),
+        variant_types: batch.variant_types,
+        conditions: batch.conditions,
+        timelines: batch.timelines,
+        status_counts: {
+          draft: batch.draft,
+          queued: batch.queued,
+          running: batch.running,
+          done: batch.done,
+          failed: batch.failed,
+          cancelled: batch.cancelled,
+        },
+      })),
+      sample_truncated: visibleBatches.length > 20,
+    }
+  }, [
+    batches.length,
+    cancellingBatchId,
+    deleteExperimentTarget,
+    deleteTarget,
+    deletingBatchId,
+    deletingExperimentId,
+    expandedDetail,
+    expandedId,
+    query,
+    resumingBatchId,
+    runResult,
+    runningBatchId,
+    selectedExperiment,
+    selectedExperimentDetailSnapshot,
+    visibleBatches,
+  ])
+
+  useEffect(() => {
+    onAssistantSnapshot?.(assistantSnapshot)
+  }, [assistantSnapshot, onAssistantSnapshot])
 
   if (loading) {
     return (
@@ -340,6 +460,7 @@ export function BatchDashboard({ initialExpandedId }: { initialExpandedId?: stri
           experiment={selectedExperiment}
           onClose={() => setSelectedExperiment(null)}
           onUpdated={handleExperimentUpdated}
+          onAssistantSnapshot={setSelectedExperimentDetailSnapshot}
         />
       )}
     </div>

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { makeAssistantContextKey, summarizeText } from '../../utils/assistantContext'
 import {
   createBuilderDraft,
   getBuilderDrafts,
@@ -781,6 +782,7 @@ function getSectionSummaries({
 
 export function EnvironmentBuilderPage() {
   const location = useLocation()
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const [catalog, setCatalog] = useState<ConditionCatalog | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -1047,12 +1049,14 @@ export function EnvironmentBuilderPage() {
   }, [allMediaRecipes, currentMediaStockName])
 
   const selectedExistingMediaRecipe = compatibleMediaRecipes.find((recipe) => recipe.media_id === selectedMediaRecipeId) || null
-  const effectiveMediaRecipe = mediaRecipeMode === 'existing'
-    ? selectedExistingMediaRecipe
-    : {
-      ...draftMediaRecipe,
-      base_media: draftMediaRecipe.base_media || currentMediaStockName,
-    }
+  const effectiveMediaRecipe = useMemo(() => (
+    mediaRecipeMode === 'existing'
+      ? selectedExistingMediaRecipe
+      : {
+        ...draftMediaRecipe,
+        base_media: draftMediaRecipe.base_media || currentMediaStockName,
+      }
+  ), [currentMediaStockName, draftMediaRecipe, mediaRecipeMode, selectedExistingMediaRecipe])
 
   const builderMediaRecipes = useMemo(
     () => toComposerMediaRecipes(catalog, mediaRecipeMode === 'create' ? effectiveMediaRecipe : null),
@@ -1068,12 +1072,14 @@ export function EnvironmentBuilderPage() {
   }, [allConditions, currentMediaRecipeId])
 
   const selectedExistingCondition = compatibleConditions.find((condition) => condition.condition === selectedConditionName) || null
-  const effectiveCondition = conditionMode === 'existing'
-    ? selectedExistingCondition
-    : {
-      ...draftCondition,
-      nutrients: draftCondition.nutrients || currentMediaRecipeId,
-    }
+  const effectiveCondition = useMemo(() => (
+    conditionMode === 'existing'
+      ? selectedExistingCondition
+      : {
+        ...draftCondition,
+        nutrients: draftCondition.nutrients || currentMediaRecipeId,
+      }
+  ), [conditionMode, currentMediaRecipeId, draftCondition, selectedExistingCondition])
 
   const builderConditions = useMemo(
     () => toComposerConditions(catalog, conditionMode === 'create' ? effectiveCondition : null),
@@ -1087,12 +1093,17 @@ export function EnvironmentBuilderPage() {
     ))
   }, [allTfConditions, currentMediaRecipeId])
 
-  const selectedTfRows = compatibleTfConditions.filter((row) => selectedExistingTfKeys.includes(tfRuleKey(row)))
-  const effectiveTfRows: Array<TfConditionRecord | DraftTfConditionRow> = tfConditionMode === 'existing'
-    ? selectedTfRows
-    : compactRows(draftTfRows, (row) => (
-      Boolean(row.tf.trim() || row.active_tf.trim() || row.active_nutrients.trim() || row.inactive_nutrients.trim())
-    ))
+  const selectedTfRows = useMemo(
+    () => compatibleTfConditions.filter((row) => selectedExistingTfKeys.includes(tfRuleKey(row))),
+    [compatibleTfConditions, selectedExistingTfKeys],
+  )
+  const effectiveTfRows: Array<TfConditionRecord | DraftTfConditionRow> = useMemo(() => (
+    tfConditionMode === 'existing'
+      ? selectedTfRows
+      : compactRows(draftTfRows, (row) => (
+        Boolean(row.tf.trim() || row.active_tf.trim() || row.active_nutrients.trim() || row.inactive_nutrients.trim())
+      ))
+  ), [draftTfRows, selectedTfRows, tfConditionMode])
 
   const compatibleTimelines = useMemo(() => {
     if (!currentMediaRecipeId) return allTimelines
@@ -1842,23 +1853,38 @@ export function EnvironmentBuilderPage() {
   const hasDraftEnvironmentMolecules = draftEnvironmentRows.some((row) => row.molecule_id.trim())
   const dependencyMainSteps = DEPENDENCY_STEPS.filter((step) => !step.branch)
   const dependencyBranchStep = DEPENDENCY_STEPS.find((step) => step.branch) || null
-  const dependencyMappings: Record<DependencyStepId, string[]> = {
+  const dependencyMappings: Record<DependencyStepId, string[]> = useMemo(() => ({
     media: [`base medium = ${currentMediumReference}`],
     environment: [`new ID = ${currentEnvironmentReference}`],
     mediaRecipe: [`recipe = ${currentFormulationReference}`, `protocol start = ${currentFormulationReference}`],
     condition: [`condition = ${currentConditionReference}`, `nutrients = ${effectiveCondition?.nutrients || currentFormulationReference}`],
     tfCondition: [`TF nutrients = ${currentTfReference}`],
     timeline: [`start = 0 ${currentScheduleStartReference}`],
-  }
-  const dependencyAnswers: Record<DependencyStepId, string> = {
+  }), [
+    currentConditionReference,
+    currentEnvironmentReference,
+    currentFormulationReference,
+    currentMediumReference,
+    currentScheduleStartReference,
+    currentTfReference,
+    effectiveCondition?.nutrients,
+  ])
+  const dependencyAnswers: Record<DependencyStepId, string> = useMemo(() => ({
     media: currentMediumReference,
     environment: currentEnvironmentReference,
     mediaRecipe: currentFormulationReference,
     condition: currentConditionReference,
     tfCondition: effectiveTfRows.length > 0 ? `${effectiveTfRows.length} rule${effectiveTfRows.length === 1 ? '' : 's'}` : 'no rule selected',
     timeline: currentScheduleStartReference,
-  }
-  const sectionSummaries = getSectionSummaries({
+  }), [
+    currentConditionReference,
+    currentEnvironmentReference,
+    currentFormulationReference,
+    currentMediumReference,
+    currentScheduleStartReference,
+    effectiveTfRows.length,
+  ])
+  const sectionSummaries = useMemo(() => getSectionSummaries({
     mediaMode,
     currentMediaStockName,
     draftMediaStockName,
@@ -1869,12 +1895,138 @@ export function EnvironmentBuilderPage() {
     effectiveTimelineName,
     effectiveTimelineEvents,
     currentScheduleStartReference,
-  })
+  }), [
+    currentMediaStockName,
+    currentScheduleStartReference,
+    draftMediaRows,
+    draftMediaStockName,
+    effectiveCondition,
+    effectiveMediaRecipe,
+    effectiveTfRows,
+    effectiveTimelineEvents,
+    effectiveTimelineName,
+    mediaMode,
+  ])
+  const assistantPageState = useMemo(() => {
+    const protocolSummary = summarizeMediaProtocol(effectiveTimelineEvents)
+    const protocolEvents = parseTimelineEvents(effectiveTimelineEvents)
+    const dirtySections = MAIN_SECTION_KEYS.filter((section) => isDirty(section))
+    const savedSections = MAIN_SECTION_KEYS.filter((section) => isSaved(section))
+    const sectionStatus = Object.fromEntries(MAIN_SECTION_KEYS.map((section) => [
+      section,
+      {
+        label: SECTION_LABELS[section],
+        summary: sectionSummaries[section],
+        saved: isSaved(section),
+        dirty: isDirty(section),
+        publishable: canPublishSection(section),
+      },
+    ]))
+    return {
+      kind: 'conditions_builder_draft',
+      surface: 'conditions_builder',
+      summary: `Conditions Builder draft with ${dirtySections.length} dirty section${dirtySections.length === 1 ? '' : 's'}; protocol ${protocolSummary.label.toLowerCase()}; current recipe ${currentFormulationReference || 'none'}.`,
+      dirty: dirtySections.length > 0,
+      captured_at: assistantCapturedAt,
+      highlighted_section: highlightedSection,
+      section_status: sectionStatus,
+      dirty_sections: dirtySections,
+      saved_sections: savedSections,
+      compatibility_warnings: compatibilityWarnings,
+      dependency_answers: dependencyAnswers,
+      dependency_mappings: dependencyMappings,
+      media: {
+        mode: mediaMode,
+        selected_stock: selectedMediaStockName,
+        current_stock: currentMediaStockName,
+        draft_stock: draftMediaStockName,
+        draft_molecule_count: compactRows(draftMediaRows, (row) => Boolean(row.molecule_id.trim())).length,
+        draft_environment_molecule_count: compactRows(draftEnvironmentRows, (row) => Boolean(row.molecule_id.trim())).length,
+      },
+      media_recipe: {
+        mode: mediaRecipeMode,
+        selected_media_id: selectedMediaRecipeId,
+        effective_media_id: effectiveMediaRecipe?.media_id || '',
+        base_media: effectiveMediaRecipe?.base_media || '',
+        added_media: effectiveMediaRecipe?.added_media || '',
+      },
+      condition: {
+        mode: conditionMode,
+        selected_condition: selectedConditionName,
+        effective_condition: effectiveCondition?.condition || '',
+        nutrients: effectiveCondition?.nutrients || '',
+        doubling_time: effectiveCondition?.doubling_time || '',
+        active_tfs: effectiveCondition?.active_tfs || '',
+        inactive_tfs: effectiveCondition?.inactive_tfs || '',
+      },
+      tf_rules: {
+        mode: tfConditionMode,
+        count: effectiveTfRows.length,
+        tfs: effectiveTfRows.slice(0, 12).map((row) => row.tf).filter(Boolean),
+      },
+      timeline: {
+        mode: timelineMode,
+        selected_timeline: selectedTimelineId,
+        effective_name: effectiveTimelineName,
+        effective_events: summarizeText(effectiveTimelineEvents),
+        summary: protocolSummary,
+        event_count: protocolEvents.length,
+        starts_at: currentScheduleStartReference,
+      },
+    }
+  }, [
+    compatibilityWarnings,
+    assistantCapturedAt,
+    conditionMode,
+    currentConditionReference,
+    currentFormulationReference,
+    currentMediaStockName,
+    currentScheduleStartReference,
+    dependencyAnswers,
+    dependencyMappings,
+    draftEnvironmentRows,
+    draftMediaRows,
+    draftMediaStockName,
+    effectiveCondition,
+    effectiveMediaRecipe,
+    effectiveTfRows,
+    effectiveTimelineEvents,
+    effectiveTimelineName,
+    highlightedSection,
+    mediaMode,
+    mediaRecipeMode,
+    savedSnapshots,
+    sectionSnapshots,
+    sectionSummaries,
+    selectedConditionName,
+    selectedMediaRecipeId,
+    selectedMediaStockName,
+    selectedTimelineId,
+    tfConditionMode,
+    timelineMode,
+  ])
   useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'conditions_builder_draft',
+      location.pathname,
+      location.search,
+      highlightedSection,
+      MAIN_SECTION_KEYS.map((section) => `${section}:${isDirty(section) ? 1 : 0}:${isSaved(section) ? 1 : 0}`).join(','),
+      selectedMediaStockName,
+      selectedMediaRecipeId,
+      selectedConditionName,
+      selectedTimelineId,
+      timelineMode,
+      mediaMode,
+      mediaRecipeMode,
+      conditionMode,
+      tfConditionMode,
+    ]),
     context: {
       assistant_surface: 'conditions_builder',
       route: `${location.pathname}${location.search}`,
       selected_builder_section: highlightedSection,
+      page_state: assistantPageState,
     },
     suggestedPrompt: 'Help me review this Conditions Builder draft. Check the five-step dependency chain, saved versus dirty sections, valid publish order, and whether the media recipe, growth condition, TF rules, and media protocol are internally consistent.',
   })

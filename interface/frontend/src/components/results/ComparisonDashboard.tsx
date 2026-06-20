@@ -1,6 +1,8 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { compareExperiments, compareBatch, getExperiments, getBatches, createExperiment } from '../../api/client'
+import { makeAssistantContextKey } from '../../utils/assistantContext'
 import type { ComparisonResponse, ComparisonExperiment, ComparisonDelta, Experiment, BatchSummary, WildtypeSuggestion } from '../../types'
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -8,6 +10,74 @@ import type { ComparisonResponse, ComparisonExperiment, ComparisonDelta, Experim
 function fmt(val: number | null | undefined, decimals = 1): string {
   if (val == null) return '-'
   return val.toFixed(decimals)
+}
+
+function summarizeExperiment(exp: Experiment) {
+  return {
+    id: exp.id,
+    name: exp.name,
+    variant_type: exp.variant_type,
+    variant_index: exp.variant_index,
+    condition: exp.condition,
+    status: exp.status,
+    gene_symbol: exp.gene_symbol,
+    batch_id: exp.batch_id,
+  }
+}
+
+function summarizeBatch(batch: BatchSummary) {
+  return {
+    batch_id: batch.batch_id,
+    name: batch.name,
+    total: batch.total,
+    done: batch.done,
+    failed: batch.failed,
+    running: batch.running,
+    queued: batch.queued,
+    targets: batch.targets.slice(0, 8),
+    conditions: batch.conditions,
+    variant_types: batch.variant_types,
+  }
+}
+
+function summarizeComparisonExperiment(exp: ComparisonExperiment) {
+  return {
+    experiment_id: exp.experiment_id,
+    experiment_name: exp.experiment_name,
+    gene_symbol: exp.gene_symbol,
+    variant_type: exp.variant_type,
+    variant_index: exp.variant_index,
+    condition: exp.condition,
+    is_wildtype: exp.is_wildtype,
+    total_seeds: exp.total_seeds,
+    completed_seeds: exp.completed_seeds,
+    divided_seeds: exp.divided_seeds,
+    metrics: {
+      division_time_min: exp.division_time_min,
+      final_mass_fg: exp.final_mass_fg,
+      growth_rate: exp.growth_rate,
+      doubling_time_min: exp.doubling_time_min,
+    },
+  }
+}
+
+function summarizeDelta(delta: ComparisonDelta) {
+  const metrics = [
+    { label: 'division_time_pct', value: delta.division_time_pct },
+    { label: 'final_mass_pct', value: delta.final_mass_pct },
+    { label: 'growth_rate_pct', value: delta.growth_rate_pct },
+    { label: 'doubling_time_pct', value: delta.doubling_time_pct },
+  ].filter((item): item is { label: string; value: number } => item.value != null)
+  const strongest = metrics.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0] ?? null
+  return {
+    experiment_id: delta.experiment_id,
+    gene_symbol: delta.gene_symbol,
+    division_time_pct: delta.division_time_pct,
+    final_mass_pct: delta.final_mass_pct,
+    growth_rate_pct: delta.growth_rate_pct,
+    doubling_time_pct: delta.doubling_time_pct,
+    strongest_delta: strongest,
+  }
 }
 
 function DeltaBadge({ pct }: { pct: number | null }) {
@@ -407,6 +477,7 @@ function WildtypeSuggestionBanner({
 // ── Main page ────────────────────────────────────────────────────────
 
 export function ComparisonDashboard() {
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [batches, setBatches] = useState<BatchSummary[]>([])
@@ -417,6 +488,7 @@ export function ComparisonDashboard() {
   const [sortKey, setSortKey] = useState<SortKey>('gene')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [creatingWt, setCreatingWt] = useState(false)
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
 
   // Load experiments and batches for the selector
   useEffect(() => {
@@ -523,6 +595,136 @@ export function ComparisonDashboard() {
       setSortDir('asc')
     }
   }
+
+  const selectedIds = useMemo(() => [...selected], [selected])
+  const doneExperiments = useMemo(() => experiments.filter((exp) => exp.status === 'done'), [experiments])
+  const doneBatches = useMemo(() => batches.filter((batch) => batch.done > 0), [batches])
+  const sortedComparisonRows = useMemo(() => {
+    if (!data) return []
+    const rows = [...data.experiments]
+    rows.sort((a, b) => {
+      let av: number | string | null = null
+      let bv: number | string | null = null
+      if (sortKey === 'gene') {
+        av = a.gene_symbol || a.experiment_name
+        bv = b.gene_symbol || b.experiment_name
+      } else if (sortKey === 'division_time') {
+        av = a.division_time_min.mean
+        bv = b.division_time_min.mean
+      } else if (sortKey === 'final_mass') {
+        av = a.final_mass_fg.mean
+        bv = b.final_mass_fg.mean
+      } else if (sortKey === 'growth_rate') {
+        av = a.growth_rate.mean
+        bv = b.growth_rate.mean
+      } else if (sortKey === 'doubling_time') {
+        av = a.doubling_time_min.mean
+        bv = b.doubling_time_min.mean
+      }
+      if (typeof av === 'string' || typeof bv === 'string') {
+        return sortDir === 'asc'
+          ? String(av ?? '').localeCompare(String(bv ?? ''))
+          : String(bv ?? '').localeCompare(String(av ?? ''))
+      }
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      return sortDir === 'asc' ? av - bv : bv - av
+    })
+    return rows
+  }, [data, sortDir, sortKey])
+  const sourceMode = searchParams.get('batch') ? 'batch' : searchParams.get('ids') ? 'ids' : 'manual'
+  const comparePageState = useMemo(() => {
+    const rowSample = sortedComparisonRows.slice(0, 20).map(summarizeComparisonExperiment)
+    const deltaSample = (data?.deltas ?? []).slice(0, 20).map(summarizeDelta)
+    return {
+      kind: 'results_compare',
+      surface: 'results',
+      summary: `Compare results view with ${selected.size} selected experiment${selected.size === 1 ? '' : 's'} and ${data?.experiments.length ?? 0} comparison row${data?.experiments.length === 1 ? '' : 's'}.`,
+      dirty: Boolean(loading || creatingWt || error),
+      captured_at: assistantCapturedAt,
+      route: `${location.pathname}${location.search}`,
+      source_mode: sourceMode,
+      route_params: {
+        batch: searchParams.get('batch') || '',
+        ids: searchParams.get('ids') || '',
+      },
+      loading,
+      error,
+      creating_wildtype: creatingWt,
+      selected: {
+        count: selected.size,
+        ids: selectedIds.slice(0, 50),
+        ids_truncated: selected.size > 50,
+      },
+      selector: {
+        completed_experiment_count: doneExperiments.length,
+        completed_experiment_sample: doneExperiments.slice(0, 25).map(summarizeExperiment),
+        completed_experiment_sample_truncated: doneExperiments.length > 25,
+        done_batch_count: doneBatches.length,
+        done_batch_sample: doneBatches.slice(0, 20).map(summarizeBatch),
+        done_batch_sample_truncated: doneBatches.length > 20,
+      },
+      sort: {
+        key: sortKey,
+        direction: sortDir,
+      },
+      comparison: data
+        ? {
+          experiment_count: data.experiments.length,
+          wildtype_present: Boolean(data.wildtype),
+          wildtype: data.wildtype ? summarizeComparisonExperiment(data.wildtype) : null,
+          wildtype_suggestion: data.wildtype_suggestion,
+          delta_count: data.deltas.length,
+          rows: rowSample,
+          rows_truncated: data.experiments.length > rowSample.length,
+          strongest_deltas: deltaSample,
+          deltas_truncated: data.deltas.length > deltaSample.length,
+        }
+        : null,
+    }
+  }, [
+    creatingWt,
+    assistantCapturedAt,
+    data,
+    doneBatches,
+    doneExperiments,
+    error,
+    loading,
+    location.pathname,
+    location.search,
+    searchParams,
+    selected.size,
+    selectedIds,
+    sortDir,
+    sortKey,
+    sortedComparisonRows,
+    sourceMode,
+  ])
+  useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'comparison_dashboard',
+      location.pathname,
+      location.search,
+      sourceMode,
+      selectedIds.join(','),
+      selected.size,
+      sortKey,
+      sortDir,
+      creatingWt,
+      Boolean(data?.wildtype),
+      data?.experiments.length,
+      data?.deltas.length,
+      error,
+    ]),
+    context: {
+      assistant_surface: 'results',
+      route: `${location.pathname}${location.search}`,
+      selected_experiment: selected.size === 1 ? selectedIds[0] : null,
+      page_state: comparePageState,
+    },
+    suggestedPrompt: 'Help me interpret this experiment comparison. Explain the selected experiments, wildtype baseline state, strongest phenotype deltas, and which result should be inspected next.',
+  })
 
   return (
     <div className="max-w-6xl mx-auto">

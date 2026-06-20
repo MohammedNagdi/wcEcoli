@@ -985,8 +985,10 @@ function surfaceName(context: AssistantContext): string {
   if (context.assistant_surface === 'workspace' || route === '/' || route.includes('workspace')) return 'Workspace'
   if (context.assistant_surface === 'conditions_builder' || route.includes('environment-builder')) return 'Conditions Builder'
   if (context.assistant_surface === 'experiments' || route.includes('/experiments')) return 'Experiments'
+  if (context.assistant_surface === 'genes' || route.includes('/genes')) return 'Genes'
   if (context.assistant_surface === 'network' || route.includes('/network')) return 'Network'
   if (context.assistant_surface === 'genome' || route.includes('/genome')) return 'Genome Map'
+  if (context.assistant_surface === 'pathways' || route.includes('/pathways')) return 'Pathways'
   if (context.assistant_surface === 'ml' || route.includes('/ml')) return 'Machine Learning'
   if (context.assistant_surface === 'design' || route.includes('/design')) return 'Genome Design'
   return 'Assistant'
@@ -1014,6 +1016,10 @@ function contextSummary(context: AssistantContext): string {
     const variant = context.selected_variant_type ? ` as ${context.selected_variant_type.replace(/_/g, ' ')}` : ''
     return `You are designing or reviewing an experiment${gene}${variant}.`
   }
+  if (surface === 'Genes') {
+    const gene = context.selected_gene ? ` with ${context.selected_gene} selected` : ''
+    return `You are browsing the gene catalog${gene}.`
+  }
   if (surface === 'Network') {
     const gene = context.selected_gene ? ` focused on ${context.selected_gene}` : ''
     return `You are inspecting the transcription-factor network${gene}.`
@@ -1021,6 +1027,9 @@ function contextSummary(context: AssistantContext): string {
   if (surface === 'Genome Map') {
     const gene = context.selected_gene ? ` focused on ${context.selected_gene}` : ''
     return `You are inspecting the chromosome map${gene}.`
+  }
+  if (surface === 'Pathways') {
+    return 'You are exploring knockout essentiality and amino-acid pathway context.'
   }
   if (surface === 'Machine Learning') {
     const condition = context.selected_condition ? ` for ${context.selected_condition}` : ''
@@ -1118,6 +1127,23 @@ function suggestedActions(context: AssistantContext): Array<{
       },
     ]
   }
+  if (surface === 'Genes') {
+    return [
+      {
+        title: 'Explain selected gene',
+        description: 'Summarize model IDs, KO phenotype, category, position, and regulation context for the current selection.',
+        kind: 'proposal',
+      },
+      ...(gene
+        ? [{
+            title: 'Open gene in Workspace',
+            description: `Review linked biological context for ${gene}.`,
+            kind: 'link' as const,
+            path: `/?gene=${encodeURIComponent(gene)}`,
+          }]
+        : []),
+    ]
+  }
   if (surface === 'Network') {
     return [
       {
@@ -1150,6 +1176,21 @@ function suggestedActions(context: AssistantContext): Array<{
             path: `/network?gene=${encodeURIComponent(gene)}`,
           }]
         : []),
+    ]
+  }
+  if (surface === 'Pathways') {
+    return [
+      {
+        title: 'Summarize pathway patterns',
+        description: 'Explain essentiality distribution, selected amino-acid pathway nodes, and likely follow-up genes.',
+        kind: 'proposal',
+      },
+      {
+        title: 'Open gene catalog',
+        description: 'Inspect gene-level KO phenotype and model-state details.',
+        kind: 'link',
+        path: '/genes',
+      },
     ]
   }
   if (surface === 'Machine Learning') {

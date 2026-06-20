@@ -50,8 +50,10 @@ AssistantSurface = Literal[
     "conditions_builder",
     "experiments",
     "results",
+    "genes",
     "network",
     "genome",
+    "pathways",
     "ml",
     "design",
 ]
@@ -85,6 +87,7 @@ CONTEXT_CONTRACT = [
     "selected_variant_type",
     "selected_builder_section",
     "assistant_surface",
+    "page_state",
 ]
 
 VISIBLE_ARTIFACTS = [
@@ -305,6 +308,57 @@ class AssistantContext(BaseModel):
     selected_variant_type: str | None = None
     selected_builder_section: str | None = None
     assistant_surface: AssistantSurface = "central"
+    page_state: dict[str, Any] | None = None
+
+
+_PERSISTED_PAGE_STATE_KEYS = {
+    "kind",
+    "surface",
+    "summary",
+    "dirty",
+    "captured_at",
+    "route",
+    "route_params",
+    "view",
+    "active_view",
+    "filters",
+    "selected_gene",
+    "selected_experiment",
+    "selected_condition",
+    "selected_variant_type",
+}
+_PERSISTED_PAGE_STATE_TEXT_LIMIT = 500
+_PERSISTED_PAGE_STATE_ARRAY_LIMIT = 8
+
+
+def _compact_persisted_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value[:_PERSISTED_PAGE_STATE_TEXT_LIMIT]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        sample = [_compact_persisted_value(item) for item in value[:_PERSISTED_PAGE_STATE_ARRAY_LIMIT]]
+        return {
+            "count": len(value),
+            "sample": sample,
+            "truncated": len(value) > len(sample),
+        }
+    if isinstance(value, dict):
+        return {str(key): _compact_persisted_value(item) for key, item in value.items()}
+    return str(value)[:_PERSISTED_PAGE_STATE_TEXT_LIMIT]
+
+
+def persistable_context(context: AssistantContext) -> dict[str, Any]:
+    """Return a compact context suitable for durable chat history storage."""
+    data = context.model_dump()
+    page_state = data.get("page_state")
+    if isinstance(page_state, dict) and page_state:
+        data["page_state"] = {
+            key: _compact_persisted_value(page_state[key])
+            for key in _PERSISTED_PAGE_STATE_KEYS
+            if key in page_state
+        }
+    return data
 
 
 class AssistantConversationCreate(BaseModel):
@@ -4576,7 +4630,7 @@ def store_message(
         conversation_id=conversation.id or 0,
         role=role,
         content=content.strip(),
-        context_json=to_json(context.model_dump()),
+        context_json=to_json(persistable_context(context)),
         status=status,
         created_at=timestamp,
     )

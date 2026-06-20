@@ -898,6 +898,17 @@ export interface AssistantToolSpec {
   result_schema: Record<string, unknown>
 }
 
+export interface AssistantPageStateBase {
+  kind: string
+  surface: string
+  summary: string
+  dirty: boolean
+  captured_at: string
+  [key: string]: unknown
+}
+
+export type AssistantPageState = AssistantPageStateBase | null
+
 export interface AssistantContext {
   route: string
   selected_gene: string | null
@@ -908,6 +919,7 @@ export interface AssistantContext {
   selected_variant_type: string | null
   selected_builder_section: string | null
   assistant_surface: string
+  page_state: AssistantPageState
 }
 
 export interface AssistantConversation {

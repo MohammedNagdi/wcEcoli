@@ -15,6 +15,7 @@ const CTX = {
   selected_variant_type: null,
   selected_builder_section: null,
   assistant_surface: 'central',
+  page_state: null,
 }
 
 const STATUS = {

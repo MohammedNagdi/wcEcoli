@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { updateExperiment, runExperiment, getJobs, getExperiment, cancelJob } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
@@ -25,9 +25,10 @@ interface Props {
   experiment: Experiment
   onClose: () => void
   onUpdated: (exp: Experiment) => void
+  onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }
 
-export function ExperimentDetailPanel({ experiment, onClose, onUpdated }: Props) {
+export function ExperimentDetailPanel({ experiment, onClose, onUpdated, onAssistantSnapshot }: Props) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(experiment.name)
   const [description, setDescription] = useState(experiment.description)
@@ -124,6 +125,70 @@ export function ExperimentDetailPanel({ experiment, onClose, onUpdated }: Props)
     ['pending', 'running_parca', 'running_sim', 'ingesting'].includes(s)
 
   const canRun = experiment.status === 'draft' || experiment.status === 'failed' || experiment.status === 'done'
+  const assistantSnapshot = useMemo(() => {
+    const jobStatusCounts = jobs.reduce<Record<string, number>>((acc, job) => {
+      acc[job.status] = (acc[job.status] || 0) + 1
+      return acc
+    }, {})
+    return {
+      kind: 'experiment_detail',
+      experiment: {
+        id: experiment.id,
+        name: experiment.name,
+        variant_type: experiment.variant_type,
+        variant_label: variantLabel(experiment.variant_type),
+        variant_index: experiment.variant_index,
+        condition: experiment.condition,
+        timeline: experiment.timeline,
+        status: experiment.status,
+        gene_symbol: experiment.gene_symbol,
+        batch_id: experiment.batch_id,
+      },
+      editing,
+      unsaved_edits: editing
+        ? {
+          name_changed: name.trim() !== experiment.name,
+          description_changed: description.trim() !== experiment.description,
+          draft_name: name.trim(),
+          draft_description: description.trim(),
+        }
+        : null,
+      saving,
+      submitting,
+      can_run: canRun,
+      visible_logs_job_id: showLogs,
+      jobs: {
+        total: jobs.length,
+        active: jobs.filter((job) => isActive(job.status)).length,
+        by_status: jobStatusCounts,
+        sample: jobs.slice(0, 10).map((job) => ({
+          id: job.id,
+          status: job.status,
+          phase: job.phase,
+          seed: job.seed,
+          generations: job.generations,
+          condition: job.condition,
+          timeline: job.timeline,
+          has_log_tail: Boolean(job.log_tail),
+          has_error: Boolean(job.error_message),
+        })),
+      },
+    }
+  }, [
+    canRun,
+    description,
+    editing,
+    experiment,
+    jobs,
+    name,
+    saving,
+    showLogs,
+    submitting,
+  ])
+
+  useEffect(() => {
+    onAssistantSnapshot?.(assistantSnapshot)
+  }, [assistantSnapshot, onAssistantSnapshot])
 
   return (
     <div className="border-l border-gray-200 bg-white w-[420px] flex-shrink-0 overflow-y-auto p-5">

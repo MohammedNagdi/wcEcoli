@@ -43,6 +43,38 @@ export interface ToolResultEntry {
 export interface PageAssistantRegistration {
   context: Partial<AssistantContext>
   suggestedPrompt?: string
+  enabled?: boolean
+  contextKey?: string
+}
+
+function assistantRegistrationFallbackKey(registration: PageAssistantRegistration): string {
+  const pageState = registration.context.page_state && typeof registration.context.page_state === 'object'
+    ? registration.context.page_state
+    : null
+  return JSON.stringify({
+    enabled: registration.enabled !== false,
+    suggestedPrompt: registration.suggestedPrompt || '',
+    context: {
+      route: registration.context.route || '',
+      selected_gene: registration.context.selected_gene ?? null,
+      selected_experiment: registration.context.selected_experiment ?? null,
+      selected_job: registration.context.selected_job ?? null,
+      selected_result: registration.context.selected_result ?? null,
+      selected_condition: registration.context.selected_condition ?? null,
+      selected_variant_type: registration.context.selected_variant_type ?? null,
+      selected_builder_section: registration.context.selected_builder_section ?? null,
+      assistant_surface: registration.context.assistant_surface || '',
+      page_state: pageState
+        ? {
+          kind: pageState.kind,
+          surface: pageState.surface,
+          summary: pageState.summary,
+          dirty: pageState.dirty,
+          captured_at: pageState.captured_at,
+        }
+        : null,
+    },
+  })
 }
 
 function parseOptionalNumber(value: string | null): number | null {
@@ -208,6 +240,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       selected_variant_type: params.get('variant_type') || null,
       selected_builder_section: params.get('builder_section') || null,
       assistant_surface: params.get('surface') || 'central',
+      page_state: null,
     }
   }, [location.pathname, location.search])
 
@@ -746,8 +779,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
  */
 export function useRegisterAssistantContext(registration: PageAssistantRegistration) {
   const { registerContext, clearContext } = useAssistant()
-  const key = JSON.stringify(registration)
+  const key = registration.contextKey || assistantRegistrationFallbackKey(registration)
   useEffect(() => {
+    if (registration.enabled === false) return
     registerContext(registration)
     return () => clearContext()
     // eslint-disable-next-line react-hooks/exhaustive-deps

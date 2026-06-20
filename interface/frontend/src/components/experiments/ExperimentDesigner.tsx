@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useNavigate, useSearchParams, Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import {
@@ -11,6 +11,7 @@ import type {
 import { SearchInput } from '../common/SearchInput'
 import { HelpTip } from '../common/HelpTip'
 import { variantLabel } from '../../utils/labels'
+import { makeAssistantContextKey } from '../../utils/assistantContext'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { TimelineComposer } from './TimelineComposer'
 
@@ -1104,6 +1105,7 @@ function TechnicalDetails({
 export function ExperimentDesigner() {
   const navigate = useNavigate()
   const location = useLocation()
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const [searchParams] = useSearchParams()
   const {
     selectedGene,
@@ -1192,8 +1194,8 @@ export function ExperimentDesigner() {
     environmentLocked,
   )
   const effectiveProtocolTimeline = effectiveExperimentEnvironment.timeline || effectiveTimelinePreview || ''
-  const mediaProtocolEvents = parseProtocolEvents(effectiveProtocolTimeline)
-  const mediaProtocolSummary = summarizeProtocol(effectiveProtocolTimeline)
+  const mediaProtocolEvents = useMemo(() => parseProtocolEvents(effectiveProtocolTimeline), [effectiveProtocolTimeline])
+  const mediaProtocolSummary = useMemo(() => summarizeProtocol(effectiveProtocolTimeline), [effectiveProtocolTimeline])
   const maxProtocolEventSec = Math.max(60, ...mediaProtocolEvents.map((event) => event.timeSec))
   const estimatedLineageLimitHr = (generations * lengthSec / 3600).toFixed(1)
   const parameterSectionTitle = getParameterSectionTitle(variantType)
@@ -1209,9 +1211,10 @@ export function ExperimentDesigner() {
     'sinusoidal_media',
   ].includes(variantType)
   const variantsByName = useMemo(() => new Map(variants.map((variant) => [variant.name, variant])), [variants])
+  const selectedGeneList = useMemo(() => selectedGenes.map((gene) => gene.symbol), [selectedGenes])
   const selectedGeneSymbols = useMemo(
-    () => new Set(selectedGenes.map((gene) => gene.symbol)),
-    [selectedGenes],
+    () => new Set(selectedGeneList),
+    [selectedGeneList],
   )
   const saveBlocked = saving
     || !variantType
@@ -1229,13 +1232,106 @@ export function ExperimentDesigner() {
       }))
       .filter((group) => group.options.length > 0)
   }, [showAdvancedVariants, variantsByName])
+  const assistantPageState = useMemo(() => ({
+    kind: 'experiment_draft',
+    surface: 'experiments',
+    summary: `${variantType ? variantLabel(variantType) : 'Unselected experiment type'} draft under ${effectiveExperimentEnvironment.condition || 'unknown condition'}; media protocol ${mediaProtocolSummary.label.toLowerCase()}; ${seeds} seed${seeds === 1 ? '' : 's'}, ${generations} generation${generations === 1 ? '' : 's'}, ${estimatedLineageLimitHr} hr lineage limit.`,
+    dirty: Boolean(
+      name.trim()
+      || description.trim()
+      || variantType
+      || geneSymbol
+      || selectedGeneList.length
+      || timeline
+      || condition !== prefillCondition
+    ),
+    captured_at: assistantCapturedAt,
+    draft: {
+      name: name.trim(),
+      description: description.trim(),
+      variant_type: variantType,
+      variant_label: variantType ? variantLabel(variantType) : '',
+      variant_index: variantIndex,
+      variant_index_guide: parameterIndexGuide?.current ?? null,
+      variant_index_invalid: Boolean(parameterIndexGuide?.invalid),
+      gene_symbol: geneSymbol,
+      gene_symbols: selectedGeneList,
+      condition: effectiveExperimentEnvironment.condition,
+      requested_condition: condition,
+      timeline: effectiveExperimentEnvironment.timeline,
+      effective_protocol_timeline: effectiveProtocolTimeline,
+      media_protocol_summary: mediaProtocolSummary,
+      media_protocol_events: mediaProtocolEvents.slice(0, 12),
+      environment_source: environmentSourceLabel,
+      environment_status: environmentStatusText,
+      environment_locked: environmentLocked,
+      timeline_behavior: timelineBehavior,
+      timeline_notice: timelineNotice,
+      seeds,
+      generations,
+      length_sec: lengthSec,
+      estimated_lineage_limit_hr: estimatedLineageLimitHr,
+      save_blocked: saveBlocked,
+      save_blockers: [
+        !variantType ? 'missing variant type' : '',
+        !name.trim() ? 'missing experiment name' : '',
+        variantType === 'gene_knockout' && !geneSymbol ? 'missing knockout gene' : '',
+        variantType === 'multi_gene_knockout' && selectedGeneList.length < 2 ? 'multi-gene knockout needs at least two genes' : '',
+      ].filter(Boolean),
+    },
+  }), [
+    condition,
+    assistantCapturedAt,
+    description,
+    effectiveExperimentEnvironment.condition,
+    effectiveExperimentEnvironment.timeline,
+    effectiveProtocolTimeline,
+    environmentLocked,
+    environmentSourceLabel,
+    environmentStatusText,
+    estimatedLineageLimitHr,
+    geneSymbol,
+    generations,
+    lengthSec,
+    mediaProtocolEvents,
+    mediaProtocolSummary,
+    name,
+    parameterIndexGuide?.current,
+    parameterIndexGuide?.invalid,
+    prefillCondition,
+    saveBlocked,
+    seeds,
+    selectedGeneList,
+    timeline,
+    timelineBehavior,
+    timelineNotice,
+    variantIndex,
+    variantType,
+  ])
   useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'experiment_draft',
+      location.pathname,
+      location.search,
+      variantType,
+      geneSymbol,
+      selectedGeneList.join(','),
+      effectiveExperimentEnvironment.condition,
+      condition,
+      seeds,
+      generations,
+      lengthSec,
+      Boolean(saveBlocked),
+      name.trim(),
+      description.trim(),
+    ]),
     context: {
       assistant_surface: 'experiments',
       route: `${location.pathname}${location.search}`,
-      selected_gene: geneSymbol || selectedGenes.map((gene) => gene.symbol).join(',') || null,
+      selected_gene: geneSymbol || selectedGeneList.join(',') || null,
       selected_condition: effectiveExperimentEnvironment.condition || null,
       selected_variant_type: variantType || null,
+      page_state: assistantPageState,
     },
     suggestedPrompt: 'Help me review this experiment draft before saving. Check whether the experiment type, parameter index, condition, media protocol, seeds, generations, and max cell time are biologically consistent.',
   })

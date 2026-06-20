@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getAllGenes } from '../../api/client'
@@ -9,6 +9,7 @@ import { SearchInput } from '../common/SearchInput'
 import { SkeletonLine } from '../common/Skeleton'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { CircularGenomeMap } from './CircularGenomeMap'
+import { ASSISTANT_GENE_SAMPLE_LIMIT, makeAssistantContextKey, summarizeGene, truncateText } from '../../utils/assistantContext'
 
 interface CategorySummary {
   category: string
@@ -18,9 +19,10 @@ interface CategorySummary {
 interface GenomeViewerPageProps {
   embedded?: boolean
   compact?: boolean
+  onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }
 
-export function GenomeViewerPage({ embedded = false, compact = false }: GenomeViewerPageProps) {
+export function GenomeViewerPage({ embedded = false, compact = false, onAssistantSnapshot }: GenomeViewerPageProps) {
   const location = useLocation()
   const {
     selectedGene,
@@ -34,16 +36,9 @@ export function GenomeViewerPage({ embedded = false, compact = false }: GenomeVi
   const [error, setError] = useState<string | null>(null)
   const [darkMode, setDarkMode] = useState(true)
   const [showStats, setShowStats] = useState(true)
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const highlightedCategories = useMemo(() => new Set(genomeHighlight ?? []), [genomeHighlight])
   const mapSearchTerm = genomeSearch ?? selectedGene ?? ''
-  useRegisterAssistantContext({
-    context: {
-      assistant_surface: 'genome',
-      route: `${location.pathname}${location.search}`,
-      selected_gene: selectedGene || mapSearchTerm || null,
-    },
-    suggestedPrompt: 'Help me interpret the genome map. Focus on the selected gene or search term, visible functional-category highlights, genomic position, and what linked Workspace or Network views would clarify next.',
-  })
 
   useEffect(() => {
     const controller = new AbortController()
@@ -87,6 +82,122 @@ export function GenomeViewerPage({ embedded = false, compact = false }: GenomeVi
       return b.count - a.count
     })
   }, [mappedGenes])
+
+  const assistantPageState = useMemo(() => {
+    const normalizedSearch = mapSearchTerm.trim().toLowerCase()
+    const selectedGeneSummary = selectedGene
+      ? genes.find((gene) => gene.symbol.toLowerCase() === selectedGene.toLowerCase()) ?? null
+      : null
+    const sortedMappedGenes = [...mappedGenes].sort((a, b) => (a.left_end_pos ?? 0) - (b.left_end_pos ?? 0))
+    const selectedIndex = selectedGeneSummary
+      ? sortedMappedGenes.findIndex((gene) => gene.symbol.toLowerCase() === selectedGeneSummary.symbol.toLowerCase())
+      : -1
+    const nearbySample = selectedIndex >= 0
+      ? sortedMappedGenes
+          .slice(Math.max(0, selectedIndex - 12), selectedIndex + 13)
+          .map(summarizeGene)
+      : []
+    const searchMatches = normalizedSearch
+      ? genes
+          .filter((gene) =>
+            gene.symbol.toLowerCase().includes(normalizedSearch)
+            || gene.ecoli_id.toLowerCase().includes(normalizedSearch)
+            || gene.synonyms.toLowerCase().includes(normalizedSearch)
+          )
+          .slice(0, ASSISTANT_GENE_SAMPLE_LIMIT)
+          .map(summarizeGene)
+      : []
+    return {
+      kind: 'genome_map',
+      surface: 'genome',
+      summary: `Genome map with ${mappedGenes.length} mapped genes, ${highlightedCategories.size} highlighted category${highlightedCategories.size === 1 ? '' : 'ies'}, and ${selectedGene || mapSearchTerm ? 'a selected/search focus' : 'no active focus'}.`,
+      dirty: false,
+      captured_at: assistantCapturedAt,
+      route: `${location.pathname}${location.search}`,
+      embedded,
+      compact,
+      selected_gene: selectedGene,
+      search_term: genomeSearch ?? '',
+      map_search_term: mapSearchTerm,
+      highlighted_categories: Array.from(highlightedCategories),
+      controls: {
+        dark_mode: darkMode,
+        stats_visible: showStats && !embedded,
+      },
+      loading,
+      error: truncateText(error),
+      counts: {
+        genes: genes.length,
+        mapped: mappedGenes.length,
+        unmapped: genes.length - mappedGenes.length,
+        forward_strand: forwardCount,
+        reverse_strand: reverseCount,
+      },
+      selected_gene_summary: summarizeGene(selectedGeneSummary),
+      nearby_gene_sample: nearbySample,
+      nearby_gene_sample_truncated: selectedIndex >= 0 && sortedMappedGenes.length > nearbySample.length,
+      search_match_sample: searchMatches,
+      search_match_sample_truncated: normalizedSearch
+        ? genes.filter((gene) =>
+            gene.symbol.toLowerCase().includes(normalizedSearch)
+            || gene.ecoli_id.toLowerCase().includes(normalizedSearch)
+            || gene.synonyms.toLowerCase().includes(normalizedSearch)
+          ).length > searchMatches.length
+        : false,
+      category_summary_sample: categorySummary.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map((item) => ({
+        category: item.category,
+        label: categoryLabel(item.category),
+        count: item.count,
+      })),
+      category_summary_truncated: categorySummary.length > ASSISTANT_GENE_SAMPLE_LIMIT,
+    }
+  }, [
+    categorySummary,
+    assistantCapturedAt,
+    compact,
+    darkMode,
+    embedded,
+    error,
+    forwardCount,
+    genes,
+    genomeSearch,
+    highlightedCategories,
+    loading,
+    location.pathname,
+    location.search,
+    mapSearchTerm,
+    mappedGenes,
+    reverseCount,
+    selectedGene,
+    showStats,
+  ])
+
+  useEffect(() => {
+    onAssistantSnapshot?.(assistantPageState)
+  }, [assistantPageState, onAssistantSnapshot])
+
+  useRegisterAssistantContext({
+    enabled: !embedded,
+    contextKey: makeAssistantContextKey([
+      'genome_map',
+      location.pathname,
+      location.search,
+      selectedGene,
+      mapSearchTerm,
+      Array.from(highlightedCategories).join(','),
+      showStats,
+      darkMode,
+      mappedGenes.length,
+      genes.length - mappedGenes.length,
+    ]),
+    context: {
+      assistant_surface: 'genome',
+      route: `${location.pathname}${location.search}`,
+      selected_gene: selectedGene || mapSearchTerm || null,
+      page_state: assistantPageState,
+    },
+    suggestedPrompt: 'Help me interpret the genome map. Focus on the selected gene or search term, visible functional-category highlights, genomic position, and what linked Workspace or Network views would clarify next.',
+  })
 
   function toggleCategory(category: string) {
     const next = new Set(highlightedCategories)

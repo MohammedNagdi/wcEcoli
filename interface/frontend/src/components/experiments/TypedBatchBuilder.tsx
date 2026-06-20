@@ -1,9 +1,11 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { createBatchExperiments, getConditions, getGenes, getMediaRecipes, getVariantDetail, getVariants } from '../../api/client'
 import type { Condition, Gene, MediaRecipe, Variant, VariantDetail } from '../../types'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { HelpTip } from '../common/HelpTip'
 import { categoryLabel, variantLabel } from '../../utils/labels'
+import { makeAssistantContextKey, summarizeSample, summarizeText } from '../../utils/assistantContext'
 import { TimelineComposer } from './TimelineComposer'
 
 type TimelineChoice = {
@@ -288,6 +290,8 @@ function TechnicalDetails({
 
 export function TypedBatchBuilder() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const [variants, setVariants] = useState<Variant[]>([])
   const [variantDetail, setVariantDetail] = useState<VariantDetail | null>(null)
   const [conditions, setConditions] = useState<Condition[]>([])
@@ -401,6 +405,7 @@ export function TypedBatchBuilder() {
     () => new Set(selectedGenes.map((gene) => gene.symbol)),
     [selectedGenes],
   )
+  const selectedGeneList = useMemo(() => selectedGenes.map((gene) => gene.symbol), [selectedGenes])
 
   const timelineOptions = batchTimelines
 
@@ -544,6 +549,153 @@ export function TypedBatchBuilder() {
     return errors
   }, [name, previewRecords.length, seedParse.error, selectedGenes.length, selectedIndexes.length, variantType])
 
+  const variationCount = variantType === 'gene_knockout'
+    ? selectedGenes.length
+    : variantType === 'multi_gene_knockout'
+      ? (selectedGenes.length >= 2 ? 1 : 0)
+      : selectedIndexes.length
+  const timelineCount = timelineChoicesForExpansion.length
+  const seedCount = seedParse.values.length
+
+  const assistantPageState = useMemo(() => {
+    const selectedProtocolValues = selectedTimelineChoices.map((timeline) => ({
+      label: timeline.label,
+      timeline: timeline.value,
+      custom: timeline.custom,
+    }))
+    const recordSample = previewRecords.slice(0, 25).map((record) => ({
+      variant_index: record.variant_index,
+      gene_symbol: record.gene_symbol,
+      gene_symbols: record.gene_symbols,
+      timeline: record.timeline || '',
+      timeline_label: record.timeline_label || '',
+      seed: record.seed,
+      generations: record.generations,
+      index_hint: record.index_hint,
+    }))
+    const estimatedLineageLimitHr = (generations * lengthSec / 3600).toFixed(1)
+    return {
+      kind: 'batch_draft',
+      surface: 'experiments',
+      summary: `${variantType ? variantLabel(variantType) : 'Unselected experiment type'} batch with ${previewRecords.length} preview record${previewRecords.length === 1 ? '' : 's'} from ${variationCount} variation${variationCount === 1 ? '' : 's'}, ${timelineCount} timeline option${timelineCount === 1 ? '' : 's'}, and ${seedCount} seed${seedCount === 1 ? '' : 's'}.`,
+      dirty: Boolean(
+        name.trim() !== 'Batch preview'
+        || description.trim()
+        || selectedGeneList.length
+        || selectedIndexes.length !== 1
+        || selectedIndexes[0] !== 0
+        || selectedTimelineIds.length
+        || batchTimelines.length
+        || seedText !== '0'
+        || generations !== 1
+        || lengthSec !== 10800
+        || includeWildtype
+        || removedRows.size
+        || Object.keys(rowOverrides).length
+      ),
+      captured_at: assistantCapturedAt,
+      draft: {
+        name: name.trim(),
+        description: description.trim(),
+        variant_type: variantType,
+        variant_label: variantType ? variantLabel(variantType) : '',
+        variant_group: selectedVariantGroup?.label || '',
+        include_wildtype: includeWildtype,
+        selected_genes: selectedGeneList,
+        selected_indexes: summarizeSample(selectedIndexes),
+        current_index: variantIndex,
+        current_index_guide: indexGuide?.current ?? null,
+        current_index_invalid: Boolean(indexGuide?.invalid),
+        media_protocol_summary: mediaProtocolSummary,
+        selected_protocols: selectedProtocolValues,
+        composed_protocol_draft: {
+          name: composedTimelineName,
+          events: summarizeText(composedTimelineEvents),
+          preset_name: loadedPresetTimelineName,
+        },
+        seeds: summarizeSample(seedParse.values),
+        seed_text: seedText,
+        seed_error: seedParse.error,
+        generations,
+        length_sec: lengthSec,
+        estimated_lineage_limit_hr: estimatedLineageLimitHr,
+        expansion: {
+          variation_count: variationCount,
+          timeline_count: timelineCount,
+          seed_count: seedCount,
+          generated_record_count: generatedRecords.length,
+          preview_record_count: previewRecords.length,
+          removed_record_count: removedRows.size,
+          overridden_record_count: Object.keys(rowOverrides).length,
+        },
+        form_errors: formErrors,
+        record_sample: recordSample,
+        records_truncated: previewRecords.length > recordSample.length,
+        backend_condition_resolution: 'Each batch record resolves condition from its timeline at create time; records without explicit timelines default to basal.',
+      },
+    }
+  }, [
+    batchTimelines.length,
+    assistantCapturedAt,
+    composedTimelineEvents,
+    composedTimelineName,
+    description,
+    formErrors,
+    generatedRecords.length,
+    generations,
+    includeWildtype,
+    indexGuide?.current,
+    indexGuide?.invalid,
+    lengthSec,
+    loadedPresetTimelineName,
+    mediaProtocolSummary,
+    name,
+    previewRecords,
+    removedRows.size,
+    rowOverrides,
+    seedParse.error,
+    seedParse.values,
+    seedText,
+    seedCount,
+    selectedGeneList,
+    selectedIndexes,
+    selectedTimelineChoices,
+    selectedTimelineIds.length,
+    selectedVariantGroup?.label,
+    timelineCount,
+    variantIndex,
+    variantType,
+    variationCount,
+  ])
+  useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'batch_draft',
+      location.pathname,
+      location.search,
+      variantType,
+      selectedGeneList.join(','),
+      selectedIndexes.join(','),
+      selectedTimelineChoices.map((timeline) => timeline.id).join(','),
+      seedText,
+      seedParse.error,
+      generations,
+      lengthSec,
+      previewRecords.length,
+      generatedRecords.length,
+      removedRows.size,
+      Object.keys(rowOverrides).length,
+    ]),
+    context: {
+      assistant_surface: 'experiments',
+      route: `${location.pathname}${location.search}`,
+      selected_gene: selectedGeneList.join(',') || null,
+      selected_condition: selectedTimelineChoices.length === 0 ? 'basal' : null,
+      selected_variant_type: variantType || null,
+      page_state: assistantPageState,
+    },
+    suggestedPrompt: 'Help me review this batch draft before creating it. Check the experiment type, selected genes or indexes, media protocols, seeds, generations, row overrides, and whether the preview expansion is internally consistent.',
+  })
+
   function toggleGene(gene: Gene) {
     if (gene.ko_index < 1) return
     setSelectedGenes((current) => {
@@ -630,13 +782,6 @@ export function TypedBatchBuilder() {
     }
   }
 
-  const variationCount = variantType === 'gene_knockout'
-    ? selectedGenes.length
-    : variantType === 'multi_gene_knockout'
-      ? (selectedGenes.length >= 2 ? 1 : 0)
-      : selectedIndexes.length
-  const timelineCount = timelineChoicesForExpansion.length
-  const seedCount = seedParse.values.length
   const removedCount = generatedRecords.length - previewRecords.length
   const editedCount = Object.keys(rowOverrides).length
 

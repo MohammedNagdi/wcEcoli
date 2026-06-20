@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getJobs, getExperiments, getExperimentResults, compareExperiments, deleteExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
+import { makeAssistantContextKey } from '../../utils/assistantContext'
 import { SearchInput } from '../common/SearchInput'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { BatchDashboard } from '../experiments/BatchDashboard'
@@ -21,6 +22,7 @@ type ViewMode = 'experiments' | 'jobs' | 'batches'
 type DatePreset = 'any' | 'today' | '7d' | '30d' | 'custom'
 
 const NO_TIMELINE = '__no_timeline__'
+const ACTIVE_JOB_STATUSES = ['pending', 'running_parca', 'running_sim', 'ingesting']
 
 function validView(value: string | null): ViewMode {
   if (value === 'jobs' || value === 'batches') return value
@@ -162,16 +164,79 @@ function DeltaIndicator({ pct, label }: { pct: number | null; label: string }) {
   )
 }
 
+function truncate(value: string, max = 500): string {
+  if (value.length <= max) return value
+  return `${value.slice(0, max - 3)}...`
+}
+
+function summarizeMetric(metric: { mean: number | null; std: number | null; ci_lower: number | null; ci_upper: number | null; n: number } | null | undefined, transform?: (value: number) => number) {
+  const convert = transform ?? ((value: number) => value)
+  return metric
+    ? {
+      mean: metric.mean == null ? null : convert(metric.mean),
+      std: metric.std == null ? null : convert(metric.std),
+      ci_lower: metric.ci_lower == null ? null : convert(metric.ci_lower),
+      ci_upper: metric.ci_upper == null ? null : convert(metric.ci_upper),
+      n: metric.n,
+    }
+    : null
+}
+
+function summarizeExperiment(exp: Experiment) {
+  return {
+    id: exp.id,
+    name: exp.name,
+    identity: resultIdentity(exp),
+    variant_type: exp.variant_type,
+    variant_label: variantLabel(exp.variant_type),
+    variant_index: exp.variant_index,
+    condition: exp.condition,
+    timeline: exp.timeline,
+    protocol_label: protocolLabel(exp),
+    status: exp.status,
+    gene_symbol: exp.gene_symbol,
+    batch_id: exp.batch_id,
+    batch_label: exp.batch_id ? batchLabel(exp) : '',
+  }
+}
+
+function summarizeJob(job: SimulationJob, exp?: Experiment | null) {
+  return {
+    id: job.id,
+    experiment_id: job.experiment_id,
+    experiment_name: exp?.name ?? null,
+    experiment_identity: exp ? resultIdentity(exp) : `Experiment #${job.experiment_id}`,
+    status: job.status,
+    status_label: statusLabel(job.status),
+    phase: job.phase,
+    variant_type: exp?.variant_type || job.variant_type,
+    variant_label: variantLabel(exp?.variant_type || job.variant_type),
+    variant_index: exp?.variant_index ?? job.variant_index,
+    condition: exp?.condition || job.condition,
+    timeline: job.timeline || exp?.timeline || '',
+    gene_symbol: exp?.gene_symbol || '',
+    seed: job.seed,
+    generations: job.generations,
+    started_at: job.started_at,
+    finished_at: job.finished_at,
+    has_error: Boolean(job.error_message),
+    error_message: job.error_message ? truncate(job.error_message) : '',
+    error_truncated: Boolean(job.error_message && job.error_message.length > 500),
+  }
+}
+
 function ExperimentCard({
   exp,
   jobs,
   showExperimentId,
   onDelete,
+  onAssistantSnapshot,
 }: {
   exp: Experiment
   jobs: SimulationJob[]
   showExperimentId: boolean
   onDelete: (experiment: Experiment) => void
+  onAssistantSnapshot?: (experimentId: number, snapshot: Record<string, unknown> | null) => void
 }) {
   const [agg, setAgg] = useState<ExperimentAggregation | null>(null)
   const [wtDelta, setWtDelta] = useState<ComparisonDelta | null>(null)
@@ -194,6 +259,67 @@ function ExperimentCard({
     activeJobs.length > 0 ? `${activeJobs.length} active` : '',
     failedJobs.length > 0 ? `${failedJobs.length} failed` : '',
   ].filter(Boolean).join(' / ') || 'No jobs'
+
+  const assistantSnapshot = useMemo(() => {
+    if (!expanded) return null
+    return {
+      kind: 'result_experiment_card',
+      expanded,
+      menu_open: menuOpen,
+      loading,
+      experiment: summarizeExperiment(exp),
+      job_counts: {
+        total: jobs.length,
+        done: doneJobs.length,
+        active: activeJobs.length,
+        failed: failedJobs.length,
+      },
+      latest_job: latestJob ? summarizeJob(latestJob, exp) : null,
+      aggregation: agg
+        ? {
+          experiment_id: agg.experiment_id,
+          experiment_name: agg.experiment_name,
+          total_seeds: agg.total_seeds,
+          completed_seeds: agg.completed_seeds,
+          failed_seeds: agg.failed_seeds,
+          division_rate: agg.division_rate,
+          metrics: {
+            division_time_min: summarizeMetric(agg.division_time, (value) => value / 60),
+            final_mass_fg: summarizeMetric(agg.final_mass),
+            growth_rate_x10_3_per_s: summarizeMetric(agg.growth_rate, (value) => value * 1000),
+            doubling_time_min: summarizeMetric(agg.doubling_time),
+          },
+          seed_sample: agg.seeds.slice(0, 10).map((seed) => ({
+            job_id: seed.job_id,
+            seed: seed.seed,
+            status: seed.status,
+            division_time_min: seed.division_time_sec == null ? null : seed.division_time_sec / 60,
+            final_mass_fg: seed.final_mass_fg,
+            growth_rate_x10_3_per_s: seed.growth_rate == null ? null : seed.growth_rate * 1000,
+            doubling_time_min: seed.doubling_time_min,
+          })),
+          seed_sample_truncated: agg.seeds.length > 10,
+        }
+        : null,
+      wt_delta: wtDelta
+        ? {
+          experiment_id: wtDelta.experiment_id,
+          gene_symbol: wtDelta.gene_symbol,
+          division_time_pct: wtDelta.division_time_pct,
+          final_mass_pct: wtDelta.final_mass_pct,
+          growth_rate_pct: wtDelta.growth_rate_pct,
+          doubling_time_pct: wtDelta.doubling_time_pct,
+        }
+        : null,
+    }
+  }, [activeJobs.length, agg, doneJobs.length, exp, expanded, failedJobs.length, jobs.length, latestJob, loading, menuOpen, wtDelta])
+
+  useEffect(() => {
+    onAssistantSnapshot?.(exp.id, assistantSnapshot)
+  }, [assistantSnapshot, exp.id, onAssistantSnapshot])
+  useEffect(() => {
+    return () => onAssistantSnapshot?.(exp.id, null)
+  }, [exp.id, onAssistantSnapshot])
 
   useEffect(() => {
     if (doneJobs.length === 0) return
@@ -436,6 +562,9 @@ export function ResultsBrowserPage() {
   const [deleteTarget, setDeleteTarget] = useState<Experiment | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [expandedCardSnapshots, setExpandedCardSnapshots] = useState<Record<number, Record<string, unknown>>>({})
+  const [batchAssistantSnapshot, setBatchAssistantSnapshot] = useState<Record<string, unknown> | null>(null)
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
 
   useEffect(() => {
     setLoading(true)
@@ -454,8 +583,7 @@ export function ResultsBrowserPage() {
     setViewMode(validView(searchParams.get('view')))
   }, [searchParams])
 
-  const isActive = (status: string) =>
-    ['pending', 'running_parca', 'running_sim', 'ingesting'].includes(status)
+  const isActive = (status: string) => ACTIVE_JOB_STATUSES.includes(status)
 
   const setView = (nextView: ViewMode) => {
     setViewMode(nextView)
@@ -487,6 +615,15 @@ export function ResultsBrowserPage() {
     setDeleteError(null)
   }
 
+  const handleExperimentCardSnapshot = (experimentId: number, snapshot: Record<string, unknown> | null) => {
+    setExpandedCardSnapshots((current) => {
+      const next = { ...current }
+      if (snapshot) next[experimentId] = snapshot
+      else delete next[experimentId]
+      return next
+    })
+  }
+
   const confirmDelete = async () => {
     if (!deleteTarget) return
     const experiment = deleteTarget
@@ -509,37 +646,44 @@ export function ResultsBrowserPage() {
     }
   }
 
-  const doneCount = jobs.filter((job) => job.status === 'done').length
-  const activeCount = jobs.filter((job) => isActive(job.status)).length
-  const failedCount = jobs.filter((job) => job.status === 'failed').length
+  const doneCount = useMemo(() => jobs.filter((job) => job.status === 'done').length, [jobs])
+  const activeCount = useMemo(() => jobs.filter((job) => isActive(job.status)).length, [jobs])
+  const failedCount = useMemo(() => jobs.filter((job) => job.status === 'failed').length, [jobs])
   const normalizedQuery = query.trim().toLowerCase()
+  const jobStatusCounts = useMemo(() => jobs.reduce<Record<string, number>>((acc, job) => {
+    acc[job.status] = (acc[job.status] || 0) + 1
+    return acc
+  }, {}), [jobs])
 
-  const experimentGroups = new Map<number, SimulationJob[]>()
-  for (const job of jobs) {
-    const list = experimentGroups.get(job.experiment_id) ?? []
-    list.push(job)
-    experimentGroups.set(job.experiment_id, list)
-  }
+  const experimentGroups = useMemo(() => {
+    const groups = new Map<number, SimulationJob[]>()
+    for (const job of jobs) {
+      const list = groups.get(job.experiment_id) ?? []
+      list.push(job)
+      groups.set(job.experiment_id, list)
+    }
+    return groups
+  }, [jobs])
 
-  const sortedExpIds = [...experimentGroups.keys()].sort((a, b) => {
+  const sortedExpIds = useMemo(() => [...experimentGroups.keys()].sort((a, b) => {
     const aJobs = experimentGroups.get(a) ?? []
     const bJobs = experimentGroups.get(b) ?? []
     const aMax = Math.max(...aJobs.map((job) => job.id))
     const bMax = Math.max(...bJobs.map((job) => job.id))
     return bMax - aMax
-  })
+  }), [experimentGroups])
 
-  const seedOptions = [...new Set(jobs.map((job) => job.seed))].sort((a, b) => a - b)
-  const timelineOptions = [...new Set([
+  const seedOptions = useMemo(() => [...new Set(jobs.map((job) => job.seed))].sort((a, b) => a - b), [jobs])
+  const timelineOptions = useMemo(() => [...new Set([
     ...[...experiments.values()].map((exp) => timelineValue(exp.timeline)),
     ...jobs.map((job) => timelineValue(job.timeline)),
-  ])].sort((a, b) => timelineLabel(a === NO_TIMELINE ? '' : a).localeCompare(timelineLabel(b === NO_TIMELINE ? '' : b)))
-  const typeOptions = [...new Set([
+  ])].sort((a, b) => timelineLabel(a === NO_TIMELINE ? '' : a).localeCompare(timelineLabel(b === NO_TIMELINE ? '' : b))), [experiments, jobs])
+  const typeOptions = useMemo(() => [...new Set([
     ...[...experiments.values()].map((exp) => exp.variant_type),
     ...jobs.map((job) => job.variant_type),
-  ])].sort((a, b) => variantLabel(a).localeCompare(variantLabel(b)))
-  const statusOptions = [...new Set(jobs.map((job) => job.status))]
-    .sort((a, b) => statusLabel(a).localeCompare(statusLabel(b)))
+  ])].sort((a, b) => variantLabel(a).localeCompare(variantLabel(b))), [experiments, jobs])
+  const statusOptions = useMemo(() => [...new Set(jobs.map((job) => job.status))]
+    .sort((a, b) => statusLabel(a).localeCompare(statusLabel(b))), [jobs])
 
   const experimentMatchesFilters = (exp: Experiment, expJobs: SimulationJob[]) => {
     if (normalizedQuery && !experimentSearchText(exp, expJobs).includes(normalizedQuery)) return false
@@ -576,12 +720,12 @@ export function ResultsBrowserPage() {
     return matchesDatePreset(parseDate(job.started_at) ?? parseDate(job.created_at), datePreset, customDate)
   }
 
-  const filteredExpIds = sortedExpIds.filter((expId) => {
+  const filteredExpIds = useMemo(() => sortedExpIds.filter((expId) => {
     const exp = experiments.get(expId)
     if (!exp) return false
     return experimentMatchesFilters(exp, experimentGroups.get(expId) ?? [])
-  })
-  const filteredJobs = jobs.filter(jobMatchesFilters)
+  }), [customDate, datePreset, experimentGroups, experiments, normalizedQuery, seedFilter, sortedExpIds, statusFilter, timelineFilter, typeFilter])
+  const filteredJobs = useMemo(() => jobs.filter(jobMatchesFilters), [customDate, datePreset, experiments, jobs, normalizedQuery, seedFilter, statusFilter, timelineFilter, typeFilter])
   const filtersActive = Boolean(
     normalizedQuery
     || seedFilter !== 'all'
@@ -590,13 +734,17 @@ export function ResultsBrowserPage() {
     || statusFilter !== 'all'
     || datePreset !== 'any'
   )
-  const filteredIdentityCounts = new Map<string, number>()
-  for (const expId of filteredExpIds) {
-    const exp = experiments.get(expId)
-    if (!exp) continue
-    const identity = resultIdentity(exp)
-    filteredIdentityCounts.set(identity, (filteredIdentityCounts.get(identity) ?? 0) + 1)
-  }
+  const filteredIdentityCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const expId of filteredExpIds) {
+      const exp = experiments.get(expId)
+      if (!exp) continue
+      const identity = resultIdentity(exp)
+      counts.set(identity, (counts.get(identity) ?? 0) + 1)
+    }
+    return counts
+  }, [experiments, filteredExpIds])
+  const viewParam = searchParams.get('view') || ''
 
   const formatDate = (iso: string) => {
     if (!iso) return '-'
@@ -619,11 +767,135 @@ export function ResultsBrowserPage() {
     return s + 's'
   }
 
+  const resultsPageState = useMemo(() => {
+    const experimentSample = filteredExpIds.slice(0, 25).map((expId) => {
+      const exp = experiments.get(expId)
+      const expJobs = experimentGroups.get(expId) ?? []
+      if (!exp) return null
+      return {
+        ...summarizeExperiment(exp),
+        job_counts: {
+          total: expJobs.length,
+          done: expJobs.filter((job) => job.status === 'done').length,
+          active: expJobs.filter((job) => isActive(job.status)).length,
+          failed: expJobs.filter((job) => job.status === 'failed').length,
+        },
+        latest_job_id: expJobs.length ? Math.max(...expJobs.map((job) => job.id)) : null,
+      }
+    }).filter(Boolean)
+    const jobSample = filteredJobs.slice(0, 25).map((job) => summarizeJob(job, experiments.get(job.experiment_id)))
+    const expandedSnapshots = Object.values(expandedCardSnapshots).slice(0, 5)
+    const experimentValues = [...experiments.values()]
+    return {
+      kind: 'results_browser',
+      surface: 'results',
+      summary: `Results ${viewMode} view with ${experimentGroups.size} experiment group${experimentGroups.size === 1 ? '' : 's'}, ${jobs.length} job${jobs.length === 1 ? '' : 's'}, ${doneCount} completed, ${activeCount} active, and ${failedCount} failed.`,
+      dirty: Boolean(deleteTarget || deletingId || deleteError),
+      captured_at: assistantCapturedAt,
+      view: viewMode,
+      route: `${location.pathname}${location.search}`,
+      route_params: {
+        view: viewParam,
+      },
+      loading,
+      error: null,
+      filters: {
+        query,
+        seed: seedFilter,
+        timeline: timelineFilter,
+        variant_type: typeFilter,
+        status: statusFilter,
+        date_preset: datePreset,
+        custom_date: datePreset === 'custom' ? customDate : '',
+        active: filtersActive,
+      },
+      totals: {
+        experiments: experimentGroups.size,
+        known_experiments: experiments.size,
+        jobs: jobs.length,
+        done_jobs: doneCount,
+        active_jobs: activeCount,
+        failed_jobs: failedCount,
+        batch_created_experiments: experimentValues.filter((exp) => Boolean(exp.batch_id)).length,
+        by_job_status: jobStatusCounts,
+      },
+      visible: {
+        experiments: filteredExpIds.length,
+        jobs: filteredJobs.length,
+      },
+      delete_target: deleteTarget ? summarizeExperiment(deleteTarget) : null,
+      deleting_id: deletingId,
+      delete_error: deleteError,
+      experiments_view: viewMode === 'experiments'
+        ? {
+          sample: experimentSample,
+          sample_truncated: filteredExpIds.length > experimentSample.length,
+          expanded_cards: expandedSnapshots,
+          expanded_cards_truncated: Object.values(expandedCardSnapshots).length > expandedSnapshots.length,
+        }
+        : null,
+      jobs_view: viewMode === 'jobs'
+        ? {
+          sample: jobSample,
+          sample_truncated: filteredJobs.length > jobSample.length,
+        }
+        : null,
+      batch_dashboard: viewMode === 'batches' ? batchAssistantSnapshot : null,
+    }
+  }, [
+    activeCount,
+    assistantCapturedAt,
+    batchAssistantSnapshot,
+    customDate,
+    datePreset,
+    deleteError,
+    deleteTarget,
+    deletingId,
+    doneCount,
+    expandedCardSnapshots,
+    experimentGroups,
+    experiments,
+    failedCount,
+    filteredExpIds,
+    filteredJobs,
+    filtersActive,
+    jobStatusCounts,
+    jobs.length,
+    loading,
+    location.pathname,
+    location.search,
+    query,
+    seedFilter,
+    statusFilter,
+    timelineFilter,
+    typeFilter,
+    viewParam,
+    viewMode,
+  ])
+
   useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'results_browser',
+      location.pathname,
+      location.search,
+      viewMode,
+      query,
+      datePreset,
+      customDate,
+      seedFilter,
+      timelineFilter,
+      typeFilter,
+      statusFilter,
+      jobs.length,
+      experimentGroups.size,
+      Boolean(batchAssistantSnapshot),
+      Object.keys(expandedCardSnapshots).sort((a, b) => Number(a) - Number(b)).join(','),
+    ]),
     context: {
       assistant_surface: 'results',
       route: `${location.pathname}${location.search}`,
       selected_variant_type: typeFilter !== 'all' ? typeFilter : null,
+      page_state: resultsPageState,
     },
     suggestedPrompt: `Help me triage the Results browser. Explain the ${viewMode} view, current filters, redundant controls, failed/running jobs, and which result should be opened first for biological interpretation.`,
   })
@@ -771,7 +1043,7 @@ export function ResultsBrowserPage() {
           Loading results...
         </div>
       ) : viewMode === 'batches' ? (
-        <BatchDashboard />
+        <BatchDashboard onAssistantSnapshot={setBatchAssistantSnapshot} />
       ) : jobs.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-500 font-medium mb-1">No simulation jobs yet</p>
@@ -803,9 +1075,10 @@ export function ResultsBrowserPage() {
                     key={expId}
                     exp={exp}
                     jobs={expJobs}
-                    showExperimentId={(filteredIdentityCounts.get(resultIdentity(exp)) ?? 0) > 1}
-                    onDelete={handleDelete}
-                  />
+	                    showExperimentId={(filteredIdentityCounts.get(resultIdentity(exp)) ?? 0) > 1}
+	                    onDelete={handleDelete}
+	                    onAssistantSnapshot={handleExperimentCardSnapshot}
+	                  />
                 )
               })}
             </div>

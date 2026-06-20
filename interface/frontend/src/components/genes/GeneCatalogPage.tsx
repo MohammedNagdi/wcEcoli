@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import type { ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { useGeneDetail, useCategories } from '../../hooks/useGenes'
 import { getDesignOverview, getGenes } from '../../api/client'
 import { SearchInput } from '../common/SearchInput'
@@ -9,6 +9,15 @@ import { CategoryBadge } from '../common/Badge'
 import { GeneDetailPanel } from './GeneDetailPanel'
 import { categoryLabel } from '../../utils/labels'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
+import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import {
+  ASSISTANT_GENE_SAMPLE_LIMIT,
+  makeAssistantContextKey,
+  summarizeGene,
+  summarizeGeneDetail,
+  summarizeKOSummary,
+  truncateText,
+} from '../../utils/assistantContext'
 import type { Gene, GeneKOSummary } from '../../types'
 
 type SortKey = 'symbol' | 'category' | 'left_end_pos' | 'ko_index'
@@ -21,6 +30,7 @@ interface GeneCatalogPageProps {
   hideDetailPanel?: boolean
   heightClass?: string
   showEssentiality?: boolean
+  onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }
 
 function FilterChip({ label, active, dotColor, onClick }: {
@@ -82,7 +92,9 @@ export function GeneCatalogPage({
   hideDetailPanel = false,
   heightClass,
   showEssentiality = true,
+  onAssistantSnapshot,
 }: GeneCatalogPageProps) {
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const {
     selectedGene: selectedGeneSymbol,
@@ -105,6 +117,7 @@ export function GeneCatalogPage({
   const [error, setError] = useState<string | null>(null)
   const [phenotypeMap, setPhenotypeMap] = useState<Map<string, GeneKOSummary>>(new Map())
   const scrollRef = useRef<HTMLDivElement>(null)
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const tableColCount = showEssentiality ? 6 : 5
 
   const { gene: selectedGeneDetail, loading: detailLoading } = useGeneDetail(selectedSymbol)
@@ -245,6 +258,126 @@ export function GeneCatalogPage({
   }, [categories])
 
   const totalCount = categories.reduce((s, c) => s + c.count, 0)
+
+  const assistantPageState = useMemo(() => {
+    const visibleSample = sortedGenes.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map((gene) => ({
+      ...summarizeGene(gene),
+      phenotype: summarizeKOSummary(phenotypeMap.get(gene.symbol)),
+    }))
+    const phenotypeCounts = Array.from(phenotypeMap.values()).reduce(
+      (acc, summary) => {
+        acc[summary.phenotype] += 1
+        return acc
+      },
+      { essential: 0, growth_defect: 0, neutral: 0, unknown: 0 }
+    )
+    return {
+      kind: 'gene_catalog',
+      surface: embedded ? 'workspace' : 'genes',
+      summary: `Gene catalog showing ${sortedGenes.length} loaded row${sortedGenes.length === 1 ? '' : 's'} of ${total} matching gene${total === 1 ? '' : 's'}.`,
+      dirty: false,
+      captured_at: assistantCapturedAt,
+      route: `${location.pathname}${location.search}`,
+      embedded,
+      filters: {
+        query,
+        category: category ?? null,
+        selected_category: selectedCategory,
+        mechanistic: mechanisticFilter ?? null,
+      },
+      sort: {
+        key: sortKey,
+        direction: sortDir,
+      },
+      pagination: {
+        page,
+        page_size: PAGE_SIZE,
+        loaded: allGenes.length,
+        total,
+        has_more: allGenes.length < total,
+      },
+      loading,
+      loading_more: loadingMore,
+      error: truncateText(error),
+      totals: {
+        categories: categories.length,
+        category_gene_count: totalCount,
+        mechanistic_gene_count: mechCount,
+        phenotype_counts: phenotypeCounts,
+      },
+      selected_gene: summarizeGeneDetail(selectedGeneDetail),
+      selected_gene_symbol: selectedSymbol,
+      selected_gene_detail_loading: detailLoading,
+      visible_gene_sample: visibleSample,
+      visible_gene_sample_truncated: sortedGenes.length > visibleSample.length,
+      category_options_sample: categories.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map((cat) => ({
+        category: cat.category,
+        label: categoryLabel(cat.category),
+        count: cat.count,
+      })),
+      category_options_truncated: categories.length > ASSISTANT_GENE_SAMPLE_LIMIT,
+      detail_panel_visible: !hideDetailPanel && Boolean(selectedGeneDetail || (detailLoading && selectedSymbol)),
+      essentiality_visible: showEssentiality,
+    }
+  }, [
+    allGenes.length,
+    assistantCapturedAt,
+    categories,
+    category,
+    detailLoading,
+    embedded,
+    error,
+    hideDetailPanel,
+    loading,
+    loadingMore,
+    location.pathname,
+    location.search,
+    mechCount,
+    mechanisticFilter,
+    page,
+    phenotypeMap,
+    query,
+    selectedCategory,
+    selectedGeneDetail,
+    selectedSymbol,
+    showEssentiality,
+    sortDir,
+    sortKey,
+    sortedGenes,
+    total,
+    totalCount,
+  ])
+
+  useEffect(() => {
+    onAssistantSnapshot?.(assistantPageState)
+  }, [assistantPageState, onAssistantSnapshot])
+
+  useRegisterAssistantContext({
+    enabled: !embedded,
+    contextKey: makeAssistantContextKey([
+      'gene_catalog',
+      location.pathname,
+      location.search,
+      query,
+      selectedCategory,
+      showEssentiality,
+      sortKey,
+      sortDir,
+      page,
+      selectedSymbol,
+      total,
+      totalCount,
+      loading,
+      error,
+    ]),
+    context: {
+      assistant_surface: 'genes',
+      route: `${location.pathname}${location.search}`,
+      selected_gene: selectedSymbol,
+      page_state: assistantPageState,
+    },
+    suggestedPrompt: 'Help me interpret this gene catalog view. Explain the current filters, selected gene detail, KO phenotype context, and useful next Explore views.',
+  })
 
   return (
     <div className={`flex gap-4 ${heightClass ?? (embedded ? 'h-[calc(100vh-215px)] min-h-[520px]' : 'h-[calc(100vh-65px)]')}`}>

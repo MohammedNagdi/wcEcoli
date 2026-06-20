@@ -9,6 +9,12 @@ import { getAAPathways } from '../../api/client'
 import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import {
+  ASSISTANT_PATHWAY_SAMPLE_LIMIT,
+  makeAssistantContextKey,
+  summarizeAAPathway,
+  summarizeGeneDetail,
+} from '../../utils/assistantContext'
 import type { AAPathway, GeneDetail } from '../../types'
 
 export function ExploreWorkspacePage() {
@@ -23,17 +29,80 @@ export function ExploreWorkspacePage() {
   } = useUrlWorkspaceState()
   const { gene: selectedGeneDetail, loading: detailLoading } = useGeneDetail(selectedGene)
   const [aaPathways, setAAPathways] = useState<AAPathway[]>([])
+  const [catalogAssistantSnapshot, setCatalogAssistantSnapshot] = useState<Record<string, unknown> | null>(null)
   const [leftPct, setLeftPct] = useState(57)
   const [isDragging, setIsDragging] = useState(false)
   const dragging = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
+
+  const workspacePageState = useMemo(() => {
+    const pathwayMatches = selectedGeneDetail ? pathwayMatchesForGene(selectedGeneDetail, aaPathways) : []
+    return {
+      kind: 'workspace_gene_explorer',
+      surface: 'workspace',
+      summary: selectedGene
+        ? `Workspace focused on ${selectedGene} with gene catalog, model-state IDs, pathway context, genome context, and TF regulation context.`
+        : 'Workspace gene explorer with catalog filters and linked biological context panels.',
+      dirty: false,
+      captured_at: assistantCapturedAt,
+      route: `${location.pathname}${location.search}`,
+      selected_gene: selectedGene,
+      selected_category: selectedCategory,
+      selected_condition: selectedCondition,
+      split_pane: {
+        left_percent: Math.round(leftPct),
+        dragging: isDragging,
+      },
+      selected_gene_detail_loading: detailLoading,
+      selected_gene_detail: summarizeGeneDetail(selectedGeneDetail),
+      pathway_context: {
+        loaded_pathways: aaPathways.length,
+        selected_gene_match_count: pathwayMatches.length,
+        selected_gene_matches: pathwayMatches.slice(0, ASSISTANT_PATHWAY_SAMPLE_LIMIT).map((match) => ({
+          role: match.role,
+          evidence: match.evidence.slice(0, 8),
+          evidence_truncated: match.evidence.length > 8,
+          pathway: summarizeAAPathway(match.pathway),
+        })),
+        selected_gene_matches_truncated: pathwayMatches.length > ASSISTANT_PATHWAY_SAMPLE_LIMIT,
+      },
+      embedded_gene_catalog: catalogAssistantSnapshot,
+    }
+  }, [
+    aaPathways,
+    assistantCapturedAt,
+    catalogAssistantSnapshot,
+    detailLoading,
+    isDragging,
+    leftPct,
+    location.pathname,
+    location.search,
+    selectedCategory,
+    selectedCondition,
+    selectedGene,
+    selectedGeneDetail,
+  ])
 
   useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'workspace_gene_explorer',
+      location.pathname,
+      location.search,
+      selectedGene,
+      selectedCategory,
+      selectedCondition,
+      Boolean(selectedGeneDetail),
+      Boolean(catalogAssistantSnapshot),
+      Math.round(leftPct),
+      isDragging,
+    ]),
     context: {
       assistant_surface: 'workspace',
       route: `${location.pathname}${location.search}`,
       selected_gene: selectedGene,
       selected_condition: selectedCondition,
+      page_state: workspacePageState,
     },
     suggestedPrompt: 'Help me inspect this selected gene. Summarize its model state IDs, pathway context, regulation, and which experiment or result views would be useful next.',
   })
@@ -92,7 +161,13 @@ export function ExploreWorkspacePage() {
             <span className="text-xs text-gray-400">table</span>
           </div>
           <div className="min-h-0 flex-1 p-3">
-            <GeneCatalogPage embedded hideDetailPanel heightClass="h-full min-h-0" showEssentiality={false} />
+            <GeneCatalogPage
+              embedded
+              hideDetailPanel
+              heightClass="h-full min-h-0"
+              showEssentiality={false}
+              onAssistantSnapshot={setCatalogAssistantSnapshot}
+            />
           </div>
         </section>
 
