@@ -53,6 +53,51 @@ test.describe('Theme', () => {
     expect(composerBackground).not.toBe('rgb(255, 255, 255)')
   })
 
+  test('assistant composer returns to light colors after switching from dark', async ({ page }) => {
+    await page.route(/^https?:\/\/[^/]+\/api\//, (route) => route.fulfill({ json: [] }))
+    await mockAssistantApi(page, {
+      reply: 'Light mode should restore the chat surface.',
+      proposals: [CREATE_EXPERIMENT_PROPOSAL],
+    })
+    await page.addInitScript(() => window.localStorage.setItem('wcecoli.theme', 'dark'))
+    await page.goto('/assistant')
+    await expect(page.locator('html')).toHaveClass(/dark/)
+    await page.getByTestId('assistant-input').fill('check theme switch')
+    await page.getByTestId('assistant-send').click()
+    await expect(page.getByTestId('message-assistant')).toContainText('Light mode should restore')
+    await expect(page.getByTestId('chat-proposals')).toBeVisible()
+
+    await page.getByTestId('theme-light').click({ force: true })
+    await expect(page.locator('html')).not.toHaveClass(/dark/)
+    await expect(page.getByTestId('theme-light')).toHaveAttribute('aria-pressed', 'true')
+
+    const colors = await page.getByTestId('assistant-input').evaluate((input) => {
+      const frame = input.parentElement as HTMLElement | null
+      const footer = frame?.parentElement as HTMLElement | null
+      return {
+        input: getComputedStyle(input).color,
+        frame: frame ? getComputedStyle(frame).backgroundColor : '',
+        footer: footer ? getComputedStyle(footer).backgroundColor : '',
+      }
+    })
+    const chatBackground = await page.getByTestId('assistant-scroll-region').evaluate((region) => getComputedStyle(region).backgroundImage)
+    const assistantBackground = await page.getByTestId('message-assistant').evaluate((message) => getComputedStyle(message).backgroundColor)
+    const proposalBackgrounds = await page.getByTestId('chat-proposals').evaluate((panel) => {
+      const card = panel.querySelector<HTMLElement>('[data-testid="proposal-card"]')
+      return {
+        panel: getComputedStyle(panel).backgroundColor,
+        card: card ? getComputedStyle(card).backgroundColor : '',
+      }
+    })
+    expect(colors.frame).toBe('rgb(255, 255, 255)')
+    expect(colors.footer).toBe('rgb(255, 255, 255)')
+    expect(colors.input).toBe('rgb(31, 41, 55)')
+    expect(chatBackground).toContain('rgb(249, 250, 251)')
+    expect(assistantBackground).toBe('rgb(255, 255, 255)')
+    expect(proposalBackgrounds.panel).toBe('rgba(239, 246, 255, 0.5)')
+    expect(proposalBackgrounds.card).toBe('rgb(249, 250, 251)')
+  })
+
   test('assistant proposal review panel uses a dark surface in dark mode', async ({ page }) => {
     await page.route(/^https?:\/\/[^/]+\/api\//, (route) => route.fulfill({ json: [] }))
     await mockAssistantApi(page, {

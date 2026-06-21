@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -12,6 +12,13 @@ interface ThemeContextValue {
 
 const STORAGE_KEY = 'wcecoli.theme'
 const ThemeContext = createContext<ThemeContextValue | null>(null)
+
+function applyResolvedTheme(resolvedTheme: ResolvedTheme) {
+  const root = document.documentElement
+  root.classList.toggle('dark', resolvedTheme === 'dark')
+  root.dataset.theme = resolvedTheme
+  root.style.colorScheme = resolvedTheme
+}
 
 function prefersDark(): boolean {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -42,14 +49,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const resolvedTheme: ResolvedTheme = mode === 'system' ? systemTheme : mode
 
-  useEffect(() => {
-    const root = document.documentElement
-    root.classList.toggle('dark', resolvedTheme === 'dark')
-    root.dataset.theme = resolvedTheme
-    root.style.colorScheme = resolvedTheme
+  useLayoutEffect(() => {
+    applyResolvedTheme(resolvedTheme)
   }, [resolvedTheme])
 
   const setMode = (nextMode: ThemeMode) => {
+    const nextResolvedTheme = nextMode === 'system' ? systemTheme : nextMode
+    applyResolvedTheme(nextResolvedTheme)
     setModeState(nextMode)
     window.localStorage.setItem(STORAGE_KEY, nextMode)
   }

@@ -48,14 +48,24 @@ import type { AssistantMemory } from '../../api/client'
 import { useAssistant } from './AssistantProvider'
 import type { ToolResultEntry } from './AssistantProvider'
 import { RuntimeSettingsCard, ConnectionTestCard } from './AssistantSettings'
+import { useTheme } from '../theme/ThemeProvider'
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'neutral' | 'ready' | 'blocked' | 'planned' }) {
-  const classes = {
-    neutral: 'border-gray-200 bg-gray-50 text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
-    ready: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
-    blocked: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
-    planned: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-cyan-400/30 dark:bg-cyan-400/10 dark:text-cyan-200',
-  }
+  const { resolvedTheme } = useTheme()
+  const darkMode = resolvedTheme === 'dark'
+  const classes = darkMode
+    ? {
+      neutral: 'border-slate-700 bg-slate-800 text-slate-300',
+      ready: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+      blocked: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+      planned: 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200',
+    }
+    : {
+      neutral: 'border-gray-200 bg-gray-50 text-gray-600',
+      ready: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      blocked: 'border-amber-200 bg-amber-50 text-amber-800',
+      planned: 'border-blue-200 bg-blue-50 text-blue-700',
+    }
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${classes[tone]}`}>
       {children}
@@ -777,11 +787,25 @@ function numberListField(value: unknown): number[] {
   return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number') : []
 }
 
-function ReviewRow({ label, value, mono = false }: { label: string; value: ReactNode; mono?: boolean }) {
+function ReviewRow({
+  label,
+  value,
+  mono = false,
+  darkMode = false,
+}: {
+  label: string
+  value: ReactNode
+  mono?: boolean
+  darkMode?: boolean
+}) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-gray-100 py-2 last:border-b-0">
-      <dt className="shrink-0 text-gray-500">{label}</dt>
-      <dd className={`min-w-0 break-words [overflow-wrap:anywhere] text-right font-medium text-gray-900 ${mono ? 'font-mono' : ''}`}>{value}</dd>
+    <div className={`flex items-start justify-between gap-3 border-b py-2 last:border-b-0 ${
+      darkMode ? 'border-slate-700' : 'border-gray-100'
+    }`}>
+      <dt className={`shrink-0 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>{label}</dt>
+      <dd className={`min-w-0 break-words [overflow-wrap:anywhere] text-right font-medium ${
+        darkMode ? 'text-slate-100' : 'text-gray-900'
+      } ${mono ? 'font-mono' : ''}`}>{value}</dd>
     </div>
   )
 }
@@ -791,12 +815,16 @@ function ToolReviewPanel({
   preview,
   execution,
   embedded = false,
+  darkMode: darkModeOverride,
 }: {
   title: string
   preview: AssistantToolPreview | null
   execution: AssistantToolExecution | null
   embedded?: boolean
+  darkMode?: boolean
 }) {
+  const { resolvedTheme } = useTheme()
+  const darkMode = darkModeOverride ?? resolvedTheme === 'dark'
   if (!preview && !execution) return null
   const previewData = asRecord(preview?.preview)
   const experiment = asRecord(execution?.result.experiment)
@@ -812,12 +840,20 @@ function ToolReviewPanel({
         .map((item) => asRecord(item))
         .filter((item) => typeof item.label === 'string' && typeof item.path === 'string')
     : []
+  const actionLinkClasses = `rounded-md border px-3 py-1.5 text-xs font-medium ${
+    darkMode ? 'border-slate-600 bg-slate-900 text-slate-200 hover:bg-slate-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+  }`
 
   return (
-    <div className={embedded ? 'text-sm' : 'overflow-hidden rounded-md border border-gray-200 bg-white p-4 text-sm'}>
+    <div className={embedded
+      ? 'text-sm'
+      : `overflow-hidden rounded-md border p-4 text-sm ${
+        darkMode ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-gray-200 bg-white text-gray-800'
+      }`}
+    >
       {!embedded && (
         <div className="flex items-center justify-between gap-3">
-          <div className="font-semibold text-gray-900">{title}</div>
+          <div className={`font-semibold ${darkMode ? 'text-slate-100' : 'text-gray-900'}`}>{title}</div>
           {preview && (
             <StatusPill tone={preview.valid ? 'ready' : 'blocked'}>
               {preview.valid ? 'valid preview' : 'needs attention'}
@@ -827,7 +863,7 @@ function ToolReviewPanel({
       )}
       {preview && (
         <div className="mt-3">
-          <p className="text-sm leading-6 text-gray-600">
+          <p className={`text-sm leading-6 ${darkMode ? 'text-slate-300' : 'text-gray-600'}`}>
             {stringField(previewData.summary) || stringField(previewData.action)}
           </p>
           {preview.warnings.map((warning) => (
@@ -836,45 +872,49 @@ function ToolReviewPanel({
           {preview.errors.map((error) => (
             <div key={error} className="mt-2 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">{error}</div>
           ))}
-          <dl className="mt-3 rounded-md border border-gray-100 bg-gray-50 px-3 text-xs">
+          <dl className={`mt-3 rounded-md border px-3 text-xs ${
+            darkMode ? 'border-slate-700 bg-slate-950/40' : 'border-gray-100 bg-gray-50'
+          }`}>
             {isCreate && (
               <>
-                <ReviewRow label="Gene" value={stringField(previewData.gene_symbol) || 'Not selected'} mono />
-                <ReviewRow label="Experiment type" value={stringField(previewData.variant_type) || 'Not selected'} />
-                <ReviewRow label="Condition" value={stringField(previewData.condition) || 'Not selected'} mono />
-                <ReviewRow label="Time-varying protocol" value={stringField(previewData.timeline) || 'No time-varying protocol'} mono />
-                <ReviewRow label="Wildtype control" value={previewData.include_wildtype ? 'Create or reuse' : 'Not requested'} />
+                <ReviewRow label="Gene" value={stringField(previewData.gene_symbol) || 'Not selected'} mono darkMode={darkMode} />
+                <ReviewRow label="Experiment type" value={stringField(previewData.variant_type) || 'Not selected'} darkMode={darkMode} />
+                <ReviewRow label="Condition" value={stringField(previewData.condition) || 'Not selected'} mono darkMode={darkMode} />
+                <ReviewRow label="Time-varying protocol" value={stringField(previewData.timeline) || 'No time-varying protocol'} mono darkMode={darkMode} />
+                <ReviewRow label="Wildtype control" value={previewData.include_wildtype ? 'Create or reuse' : 'Not requested'} darkMode={darkMode} />
               </>
             )}
             {isRun && (
               <>
-                <ReviewRow label="Action" value="Queue one simulation job" />
-                <ReviewRow label="Experiment" value={stringField(previewData.experiment_name) || 'Selected draft'} />
-                <ReviewRow label="Condition" value={stringField(previewData.condition) || 'From experiment'} mono />
+                <ReviewRow label="Action" value="Queue one simulation job" darkMode={darkMode} />
+                <ReviewRow label="Experiment" value={stringField(previewData.experiment_name) || 'Selected draft'} darkMode={darkMode} />
+                <ReviewRow label="Condition" value={stringField(previewData.condition) || 'From experiment'} mono darkMode={darkMode} />
               </>
             )}
             {isInspect && (
               <>
-                <ReviewRow label="Action" value="Inspect result without mutating data" />
-                <ReviewRow label="Job status" value={stringField(previewData.status) || 'Selected result'} mono />
-                <ReviewRow label="Side effect" value={stringField(previewData.side_effect_if_executed) || 'None'} />
+                <ReviewRow label="Action" value="Inspect result without mutating data" darkMode={darkMode} />
+                <ReviewRow label="Job status" value={stringField(previewData.status) || 'Selected result'} mono darkMode={darkMode} />
+                <ReviewRow label="Side effect" value={stringField(previewData.side_effect_if_executed) || 'None'} darkMode={darkMode} />
               </>
             )}
             {isInspectGene && (
               <>
-                <ReviewRow label="Action" value="Read Genes Table metadata" />
-                <ReviewRow label="Gene" value={stringField(previewGene.symbol) || stringField(executionGene.symbol) || 'Selected gene'} mono />
-                <ReviewRow label="Category" value={stringField(previewGene.category) || stringField(executionGene.category) || 'Not cataloged'} />
-                <ReviewRow label="KO index" value={String(previewGene.ko_index ?? executionGene.ko_index ?? 'n/a')} mono />
-                <ReviewRow label="Protein" value={stringField(previewGene.monomer_id) || stringField(executionGene.monomer_id) || 'No linked protein'} mono />
-                <ReviewRow label="Side effect" value={stringField(previewData.side_effect_if_executed) || 'None'} />
+                <ReviewRow label="Action" value="Read Genes Table metadata" darkMode={darkMode} />
+                <ReviewRow label="Gene" value={stringField(previewGene.symbol) || stringField(executionGene.symbol) || 'Selected gene'} mono darkMode={darkMode} />
+                <ReviewRow label="Category" value={stringField(previewGene.category) || stringField(executionGene.category) || 'Not cataloged'} darkMode={darkMode} />
+                <ReviewRow label="KO index" value={String(previewGene.ko_index ?? executionGene.ko_index ?? 'n/a')} mono darkMode={darkMode} />
+                <ReviewRow label="Protein" value={stringField(previewGene.monomer_id) || stringField(executionGene.monomer_id) || 'No linked protein'} mono darkMode={darkMode} />
+                <ReviewRow label="Side effect" value={stringField(previewData.side_effect_if_executed) || 'None'} darkMode={darkMode} />
               </>
             )}
           </dl>
         </div>
       )}
       {execution && (
-        <div className="mt-3 rounded-md border border-gray-100 bg-gray-50 p-3">
+        <div className={`mt-3 rounded-md border p-3 ${
+          darkMode ? 'border-slate-700 bg-slate-950/40' : 'border-gray-100 bg-gray-50'
+        }`}>
           <div className={execution.executed ? 'font-medium text-emerald-700' : 'font-medium text-amber-700'}>
             {execution.executed ? 'Completed' : 'Not executed'}: {execution.status.replace(/_/g, ' ')}
           </div>
@@ -885,13 +925,13 @@ function ToolReviewPanel({
             <div className="mt-3 flex flex-wrap gap-2">
               <Link
                 to={`/experiments?experiment=${numericField(experiment.id) ?? ''}`}
-                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                className={actionLinkClasses}
               >
                 Open experiment
               </Link>
               <Link
                 to={`/experiments/new?variant=${encodeURIComponent(stringField(experiment.variant_type) || 'gene_knockout')}`}
-                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                className={actionLinkClasses}
               >
                 Edit similar
               </Link>
@@ -903,14 +943,14 @@ function ToolReviewPanel({
                 <Link
                   key={jobId}
                   to={`/results/${jobId}`}
-                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  className={actionLinkClasses}
                 >
                   Open job #{jobId}
                 </Link>
               ))}
               <Link
                 to="/experiments"
-                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                className={actionLinkClasses}
               >
                 Monitor queue
               </Link>
@@ -922,7 +962,7 @@ function ToolReviewPanel({
                 <Link
                   key={String(link.path)}
                   to={String(link.path)}
-                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  className={actionLinkClasses}
                 >
                   {String(link.label)}
                 </Link>
@@ -1362,6 +1402,7 @@ function AssistantProposalCard({
   context,
   conversationId,
   busy,
+  darkMode,
   onRunReadOnly,
   onResolved,
 }: {
@@ -1369,6 +1410,7 @@ function AssistantProposalCard({
   context: AssistantContext
   conversationId: number | null
   busy: boolean
+  darkMode: boolean
   onRunReadOnly: (proposal: AssistantToolCall) => void
   onResolved: (proposalId: number, outcome: 'executed' | 'rejected') => void
 }) {
@@ -1464,23 +1506,37 @@ function AssistantProposalCard({
     }
   }
 
+  const secondaryActionClasses = darkMode
+    ? 'border-slate-600 bg-slate-900 text-slate-200 hover:bg-slate-800'
+    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+
   return (
-    <div data-testid="proposal-card" data-tool={proposal.tool_name} className="rounded-lg border border-gray-100 bg-gray-50 p-3 shadow-sm dark:border-slate-700 dark:bg-[#0b0f16] dark:shadow-none">
+    <div
+      data-testid="proposal-card"
+      data-tool={proposal.tool_name}
+      className={`rounded-lg border p-3 ${
+        darkMode
+          ? 'border-slate-700 bg-[#0b0f16] shadow-none'
+          : 'border-gray-100 bg-gray-50 shadow-sm'
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="break-words text-sm font-semibold text-gray-900">{title}</div>
-          <div className="mt-1 break-words text-xs leading-5 text-gray-500">{description}</div>
+          <div className={`break-words text-sm font-semibold ${darkMode ? 'text-slate-100' : 'text-gray-900'}`}>{title}</div>
+          <div className={`mt-1 break-words text-xs leading-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>{description}</div>
         </div>
         <StatusPill tone={proposalKind(proposal)}>
           {proposal.result.side_effect ? 'needs confirmation' : 'read-only'}
         </StatusPill>
       </div>
       {facts.length > 0 && !preview && (
-        <dl className="mt-3 grid gap-2 rounded-md border border-gray-100 bg-white p-3 text-xs sm:grid-cols-2 dark:border-slate-700 dark:bg-slate-900/60">
+        <dl className={`mt-3 grid gap-2 rounded-md border p-3 text-xs sm:grid-cols-2 ${
+          darkMode ? 'border-slate-700 bg-slate-900/60' : 'border-gray-100 bg-white'
+        }`}>
           {facts.map((fact) => (
             <div key={`${proposal.id}-${fact.label}`} className="min-w-0">
-              <dt className="font-semibold uppercase tracking-wide text-gray-500">{fact.label}</dt>
-              <dd className={`mt-1 truncate text-gray-800 dark:text-slate-200 ${fact.mono ? 'font-mono' : ''}`}>{fact.value}</dd>
+              <dt className={`font-semibold uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>{fact.label}</dt>
+              <dd className={`mt-1 truncate ${darkMode ? 'text-slate-200' : 'text-gray-800'} ${fact.mono ? 'font-mono' : ''}`}>{fact.value}</dd>
             </div>
           ))}
         </dl>
@@ -1503,7 +1559,7 @@ function AssistantProposalCard({
             data-testid="proposal-preview"
             onClick={previewProposal}
             disabled={Boolean(cardBusy)}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${secondaryActionClasses}`}
           >
             {cardBusy === 'preview' ? 'Previewing...' : preview ? 'Refresh preview' : isCreateExperiment ? 'Preview draft' : 'Preview'}
           </button>
@@ -1511,7 +1567,7 @@ function AssistantProposalCard({
         {isCreateExperiment && (
           <Link
             to={`/experiments/new${gene ? `?gene=${encodeURIComponent(gene)}` : ''}`}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium ${secondaryActionClasses}`}
           >
             Open Experiment Designer
           </Link>
@@ -1519,15 +1575,17 @@ function AssistantProposalCard({
         {isRunSimulation && experimentId != null && (
           <Link
             to={`/experiments?experiment=${experimentId}`}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium ${secondaryActionClasses}`}
           >
             Review experiment
           </Link>
         )}
       </div>
       {preview && (
-        <div className="mt-3 rounded-md border border-gray-100 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/60">
-          <ToolReviewPanel title="Proposal preview" preview={preview} execution={execution} embedded />
+        <div className={`mt-3 rounded-md border p-3 ${
+          darkMode ? 'border-slate-700 bg-slate-900/60' : 'border-gray-100 bg-white'
+        }`}>
+          <ToolReviewPanel title="Proposal preview" preview={preview} execution={execution} embedded darkMode={darkMode} />
         </div>
       )}
       {isSideEffect && preview && (
@@ -1546,7 +1604,7 @@ function AssistantProposalCard({
             data-testid="proposal-reject"
             onClick={rejectProposal}
             disabled={Boolean(cardBusy) || confirmation?.status === 'rejected' || Boolean(execution?.executed)}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${secondaryActionClasses}`}
           >
             {cardBusy === 'reject' ? 'Rejecting...' : 'Reject'}
           </button>
@@ -1580,17 +1638,26 @@ function AdvancedDisclosure({ title, children }: { title: string; children: Reac
 
 /** Collapsible "thinking" trail — the model's reasoning before each tool call (Claude/ChatGPT style). */
 function ThinkingBlock({ segments, live = false }: { segments: string[]; live?: boolean }) {
+  const { resolvedTheme } = useTheme()
+  const darkMode = resolvedTheme === 'dark'
   if (segments.length === 0) return null
   return (
     <div className="flex justify-start">
-      <details className="max-w-[80%] overflow-hidden rounded-xl border border-gray-200 bg-gray-50/70 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:shadow-none" open={live}>
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[11px] font-medium text-gray-500 dark:bg-slate-800/60 dark:text-slate-300">
+      <details
+        className={`max-w-[80%] overflow-hidden rounded-xl border shadow-sm ${
+          darkMode ? 'border-slate-700 bg-slate-900/70 text-slate-300 shadow-none' : 'border-gray-200 bg-gray-50/70 text-gray-500'
+        }`}
+        open={live}
+      >
+        <summary className={`flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[11px] font-medium ${
+          darkMode ? 'bg-slate-800/60 text-slate-300' : 'text-gray-500'
+        }`}>
           {live && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" />}
           <span>{live ? 'Thinking…' : `Thought process · ${segments.length} step${segments.length === 1 ? '' : 's'}`}</span>
         </summary>
-        <div className="space-y-2 border-t border-gray-200 px-3 py-2 dark:border-slate-700">
+        <div className={`space-y-2 border-t px-3 py-2 ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}>
           {segments.map((seg, i) => (
-            <p key={i} className="whitespace-pre-wrap break-words text-xs italic leading-5 text-gray-500 dark:text-slate-400">{seg}</p>
+            <p key={i} className={`whitespace-pre-wrap break-words text-xs italic leading-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>{seg}</p>
           ))}
         </div>
       </details>
@@ -2000,6 +2067,8 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
     removeConversation, renameConversation, sendMessage, inspectCurrentResult, runReadOnlyProposal,
     handleProposalResolved,
   } = useAssistant()
+  const { resolvedTheme } = useTheme()
+  const darkChat = resolvedTheme === 'dark'
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [showScrollDown, setShowScrollDown] = useState(false)
@@ -2114,8 +2183,12 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
           />
         </aside>
 
-        <div className={`relative flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:bg-surface`}>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-white/80 px-4 py-3 dark:bg-surface/90">
+        <div className={`relative flex ${heightClass} min-h-[560px] flex-col overflow-hidden rounded-xl border shadow-sm ${
+          darkChat ? 'border-slate-700 bg-surface' : 'border-gray-200 bg-white'
+        }`}>
+          <div className={`flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 ${
+            darkChat ? 'border-slate-700 bg-surface/90' : 'border-gray-100 bg-white/80'
+          }`}>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-gray-900">
                 {activeConversation?.title ?? 'New chat'}
@@ -2140,7 +2213,14 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             </div>
           )}
 
-          <div ref={scrollRef} onScroll={onMessagesScroll} className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white px-4 py-5 dark:from-[#0b1019] dark:to-[#111827]">
+          <div
+            ref={scrollRef}
+            onScroll={onMessagesScroll}
+            data-testid="assistant-scroll-region"
+            className={`flex-1 space-y-4 overflow-y-auto px-4 py-5 ${
+              darkChat ? 'bg-gradient-to-b from-[#0b1019] to-[#111827]' : 'bg-gradient-to-b from-gray-50 to-white'
+            }`}
+          >
             {(inspectPreview || inspectExecution) && (
               <ToolReviewPanel
                 title="Read-only result inspection"
@@ -2199,7 +2279,11 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                       className={`overflow-hidden break-words [overflow-wrap:anywhere] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
                         isUser
                           ? 'whitespace-pre-wrap rounded-br-sm bg-brand-600 text-white'
-                          : 'rounded-bl-sm border border-gray-200 bg-white text-gray-800 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                          : `rounded-bl-sm border shadow-sm ${
+                            darkChat
+                              ? 'border-slate-700 bg-slate-800 text-slate-100'
+                              : 'border-gray-200 bg-white text-gray-800'
+                          }`
                       } ${message.status === 'failed' ? 'opacity-60' : ''}`}
                     >
                       {isUser ? (
@@ -2224,12 +2308,23 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             })}
             {/* Proposed actions appear inline at the end of the conversation (Claude-style). */}
             {proposals.length > 0 && (
-              <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3 shadow-sm dark:border-cyan-400/25 dark:bg-[#0d1420] dark:shadow-none dark:ring-1 dark:ring-white/5" data-testid="chat-proposals">
-                <div className="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-cyan-200">
+              <div
+                className={`space-y-3 rounded-xl border p-3 ${
+                  darkChat
+                    ? 'border-cyan-400/25 bg-[#0d1420] shadow-none ring-1 ring-white/5'
+                    : 'border-blue-200 bg-blue-50/50 shadow-sm'
+                }`}
+                data-testid="chat-proposals"
+              >
+                <div className={`flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-wide ${
+                  darkChat ? 'text-cyan-200' : 'text-blue-700'
+                }`}>
                   <span>Actions awaiting your review</span>
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-blue-700 dark:bg-cyan-400/10 dark:text-cyan-200 dark:ring-1 dark:ring-cyan-400/20">{proposals.length}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${
+                    darkChat ? 'bg-cyan-400/10 text-cyan-200 ring-1 ring-cyan-400/20' : 'bg-white text-blue-700'
+                  }`}>{proposals.length}</span>
                 </div>
-                <p className="text-xs leading-5 text-gray-600 dark:text-slate-400">
+                <p className={`text-xs leading-5 ${darkChat ? 'text-slate-400' : 'text-gray-600'}`}>
                   The assistant proposed these. Nothing runs until you preview and confirm.
                 </p>
                 {proposals.slice(0, 5).map((proposal) => (
@@ -2237,14 +2332,17 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                     key={proposal.id}
                     proposal={proposal}
                     context={context}
-                    conversationId={activeConversation?.id ?? null}
-                    busy={inspecting}
-                    onRunReadOnly={runReadOnlyProposal}
-                    onResolved={handleProposalResolved}
-                  />
+            conversationId={activeConversation?.id ?? null}
+            busy={inspecting}
+            darkMode={darkChat}
+            onRunReadOnly={runReadOnlyProposal}
+            onResolved={handleProposalResolved}
+          />
                 ))}
                 {proposals.length > 5 && (
-                  <div className="rounded-md border border-dashed border-blue-200 bg-white/60 px-3 py-2 text-xs text-blue-700 dark:border-cyan-400/20 dark:bg-slate-900/50 dark:text-cyan-200">
+                  <div className={`rounded-md border border-dashed px-3 py-2 text-xs ${
+                    darkChat ? 'border-cyan-400/20 bg-slate-900/50 text-cyan-200' : 'border-blue-200 bg-white/60 text-blue-700'
+                  }`}>
                     +{proposals.length - 5} more proposed action{proposals.length - 5 === 1 ? '' : 's'} — refine your request to narrow these down.
                   </div>
                 )}
@@ -2256,7 +2354,9 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
               <div className="flex justify-start">
                 <div className="max-w-[80%]">
                   <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Assistant</div>
-                  <div className="overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-2.5 text-sm leading-6 text-gray-800 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  <div className={`overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl rounded-bl-sm border px-4 py-2.5 text-sm leading-6 shadow-sm ${
+                    darkChat ? 'border-slate-700 bg-slate-800 text-slate-100' : 'border-gray-200 bg-white text-gray-800'
+                  }`}>
                     {streamingText}
                     <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-brand-400 align-middle" />
                   </div>
@@ -2267,7 +2367,9 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
               <div className="flex justify-start">
                 <div className="max-w-[80%]">
                   <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Assistant</div>
-                  <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <div className={`flex items-center gap-1.5 rounded-2xl rounded-bl-sm border px-4 py-3 shadow-sm ${
+                    darkChat ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'
+                  }`}>
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
@@ -2301,9 +2403,15 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
             </button>
           )}
 
-          <div className="border-t border-gray-100 bg-white p-3 dark:bg-[#0f172a]">
+          <div className={`border-t p-3 ${
+            darkChat ? 'border-slate-700 bg-[#0f172a]' : 'border-gray-100 bg-white'
+          }`}>
             {error && <div className="mb-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</div>}
-            <div className="flex items-end gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 dark:border-slate-700 dark:bg-slate-800 dark:shadow-none dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/30">
+            <div className={`flex items-end gap-2 rounded-xl border p-2 shadow-sm focus-within:ring-1 ${
+              darkChat
+                ? 'border-slate-700 bg-slate-800 shadow-none focus-within:border-blue-400 focus-within:ring-blue-400/30'
+                : 'border-gray-200 bg-white focus-within:border-brand-400 focus-within:ring-brand-200'
+            }`}>
               <label htmlFor="assistant-chat-input" className="sr-only">Assistant message</label>
               <textarea
                 id="assistant-chat-input"
@@ -2318,14 +2426,18 @@ export function TaskCenteredAssistantPanel({ heightClass = 'h-[calc(100vh-180px)
                 }}
                 rows={2}
                 placeholder="Ask what to inspect next…"
-                className="max-h-40 min-h-[44px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-0 dark:bg-transparent dark:text-slate-100 dark:placeholder-slate-500"
+                className={`max-h-40 min-h-[44px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-0 ${
+                  darkChat ? 'text-slate-100 placeholder-slate-500' : 'text-gray-800 placeholder-gray-400'
+                }`}
               />
               {sending ? (
                 <button
                   type="button"
                   data-testid="assistant-stop"
                   onClick={stopStreaming}
-                  className="mb-0.5 flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+                  className={`mb-0.5 flex shrink-0 items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                    darkChat ? 'border-slate-600 bg-slate-900 text-slate-200 hover:bg-slate-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
                 >
                   <span className="h-2.5 w-2.5 rounded-[2px] bg-gray-700" />
                   Stop
