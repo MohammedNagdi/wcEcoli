@@ -158,6 +158,45 @@ off; each scoring is a single independent request — the ideal batch fit). It r
 encrypted provider config; without `--submit` it's a dry run (writes the batch + cost estimate, no
 spend). Output is `judge_scores.jsonl` in the same shape `judge_analyze` consumes.
 
+### Judge-methodology benchmark (three-way)
+
+A single LLM judge's *absolute* 1–5 scores turned out to be unreliable (the Claude pass and a hosted
+pass disagreed at weighted κ ≈ 0.3), so we benchmarked **three judge methodologies** on a fixed
+**48-item anchor** (8 cases spanning all categories × 6 models), measuring **reliability** (do
+independent judges agree?) and **ranking stability**:
+
+| Method | Tooling | Independent-judge agreement | Verdict |
+|---|---|---|---|
+| **A. Multi-judge absolute** (base rubric) | `judge_batch --sync` + `judge_analyze --matrix` | sonnet↔gpt **κ = 0.74**; Claude↔hosted κ ≈ 0.30 | the two hosted judges share a scale; a single judge's absolute scale is idiosyncratic — **average ≥2 hosted judges** |
+| **B. Anchored rubric** (worked examples) | `judge_batch --rubric anchored` | sonnet↔gpt **κ = 0.77**; Claude↔hosted κ ≈ 0.27 | anchoring barely moved κ — the gap is **grader disposition, not rubric ambiguity** |
+| **C. Pairwise / Arena** (both orders) | `judge_pairwise` + `--analyze` | 64% per-pair verdict agreement; **position bias 1–3%** | **most judge-invariant ranking; no absolute scale to calibrate — recommended for the headline ranking** |
+
+**All three methods, and all judges, agree on the ordinal result:** `llama3.1:8b` ranks #1 and
+`llama3.2:latest` last; the top cluster (`llama3.1:8b`, `gpt-4.1-mini`, `qwen3:8b`, `claude-haiku`) and
+bottom (`qwen2.5-coder:14b`, `llama3.2`) are method- and judge-invariant. **The ranking is robust; the
+absolute 1–5 numbers are not.** Notably the 14B ranks near-last on judged *quality* despite a high
+deterministic pass-rate — answer quality and tool-emission are different things.
+
+**Why the Claude anchor (judge 1) grades ~+1.5 points more leniently than the hosted judges** — a
+calibration difference, documented so it isn't mistaken for noise or bias:
+
+- **Ceiling vs central-tendency scale use.** Claude awards a 5 to *any* grounded-correct answer; the
+  hosted judges reserve 5 for excellent answers and compress "correct but unremarkable" toward 3.
+- **Charitable reading of honest-but-incomplete answers.** Claude scored "admits the action card failed"
+  or "gives no number, suggests running a simulation" at 3–4; the hosted judges penalised the
+  incompleteness harder.
+- **Holistic vs strict rubric application.** Claude integrated intent and task difficulty and rewarded
+  good-faith correct attempts; the hosted judges applied the letter of the rubric.
+- **Single-judge scale drift.** With no calibration anchor, one judge's internal scale drifts; two
+  independent hosted models happen to share a stricter calibration.
+- **Not self-preference.** No judged model is Claude, and identities were blinded — the leniency is
+  scale-anchoring, not favouring its own outputs.
+
+**Recommendation:** report the model ranking via **pairwise (Method C)** — judge-invariant,
+position-bias ≈ 2%, no absolute-scale calibration needed; use **multi-judge-averaged absolute scores**
+(Method A over ≥2 hosted judges) only as a secondary, directional readout; treat any *single* judge's
+raw 1–5 as illustrative, and lean on the deterministic axes + flags for per-answer ground truth.
+
 ## Extending
 
 - **Add cases**: copy a starter dataset, add entries (aim for ~100 one-shot across the 6 categories,
