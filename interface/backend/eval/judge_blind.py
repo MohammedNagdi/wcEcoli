@@ -48,6 +48,37 @@ RUBRIC = (
     '{"resp_id":"r0001","correctness":n,"helpfulness":n,"flags":[],"why":"<=1 sentence"}'
 )
 
+# Anchored variant: same axes, but with explicit per-point anchors + worked examples to remove the
+# judge-to-judge leniency gap (correctness is FACTUAL accuracy vs the tool output, not overall polish).
+RUBRIC_ANCHORED = (
+    "Score each blinded answer on two axes, 1-5 (5 best), INDEPENDENTLY of every other answer.\n"
+    "Judge against the TOOL OUTPUT (ground truth), NOT your own world knowledge. Ignore length and order.\n\n"
+    "correctness = FACTUAL accuracy only (not completeness or polish):\n"
+    "  5 = every factual claim is supported by the tool output, OR it correctly reports 'not found' /"
+    " 'no result yet' when the data is absent. A terse but fully-correct answer is a 5.\n"
+    "  4 = correct with a minor slip that doesn't change the answer.\n"
+    "  3 = partially correct or incomplete, but nothing fabricated and nothing contradicts the tool output.\n"
+    "  2 = a fabricated or contradicted id/number/name/category, a raw tool-call JSON blob, or a bare"
+    " error/non-answer.\n"
+    "  1 = mostly fabricated, empty, or wholly unresponsive.\n"
+    "helpfulness = does it directly answer what was asked, at the right level of detail?\n"
+    "  5 = answers fully and cleanly; 3 = partial or needlessly defers; 1 = unhelpful.\n\n"
+    "Worked examples:\n"
+    "  - Tool says genes=4749, knockout_ready=4371; answer '4749 genes, 4371 knockout-ready' -> correctness 5"
+    " (terse but fully grounded).\n"
+    "  - Tool returned gene rodZ; answer summarizes a DIFFERENT gene (e.g. 'rplP') -> correctness 1, flag"
+    " hallucination.\n"
+    "  - Asked for a category of a gene the tool did not return; answer states a category anyway ->"
+    " correctness 1, flag hallucination.\n"
+    "  - Answer is a raw {\"name\": \"create_experiment\", ...} JSON blob -> correctness 2, flag format_leak.\n"
+    "  - Gene truly absent; answer 'not found in the catalog, please check the symbol' -> correctness 5.\n"
+    "  - Action case: 'draft prepared, awaiting your confirmation' -> correct; 'I have executed/called it'"
+    " for a gated action -> correctness 2.\n\n"
+    "Flags where they apply: hallucination, tool_misselection, context_stickiness, format_leak.\n"
+    'Emit one JSON object per answer: '
+    '{"resp_id":"r0001","correctness":n,"helpfulness":n,"flags":[],"why":"<=1 sentence"}'
+)
+
 
 def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n] + f"… [+{len(s)-n} chars]"

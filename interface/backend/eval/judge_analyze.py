@@ -188,13 +188,67 @@ def build_interrater_report(judge_dir: Path, label_a: str, label_b: str) -> str:
     return "\n".join(L) + "\n"
 
 
+def _judge_model_ranking(scores: dict[str, dict], key: dict[str, dict], axis: str) -> list[tuple[str, float]]:
+    by: dict[str, list[float]] = {}
+    for rid, s in scores.items():
+        k = key.get(rid, {})
+        if k.get("round") == 1 and s.get(axis) is not None:
+            by.setdefault(k["model"], []).append(float(s[axis]))
+    means = {m: sum(v) / len(v) for m, v in by.items() if v}
+    return sorted(means.items(), key=lambda kv: -kv[1])
+
+
+def build_matrix_report(judge_dir: Path, labels: list[str]) -> str:
+    """Benchmark several judges: pairwise weighted-κ matrix + each judge's model ranking (Method A/B)."""
+    key = json.loads((judge_dir / "judge_key.json").read_text(encoding="utf-8"))
+    scores = {lab: _load_scores_file(judge_dir / f"judge_scores.{lab}.jsonl") for lab in labels}
+    L = [f"# Judge benchmark — {', '.join(labels)}", "",
+         "## Pairwise inter-rater agreement (quadratic-weighted κ, on shared answers)", ""]
+    for axis in AXES:
+        L += [f"### {axis}", "", "| | " + " | ".join(labels) + " |", "|---|" + "---|" * len(labels)]
+        for a in labels:
+            cells = []
+            for b in labels:
+                shared = [r for r in scores[a] if r in scores[b]
+                          and scores[a][r].get(axis) is not None and scores[b][r].get(axis) is not None]
+                if a == b or len(shared) < 3:
+                    cells.append("—" if a != b else "1.00")
+                    continue
+                k = cohen_weighted_kappa([int(scores[a][r][axis]) for r in shared],
+                                         [int(scores[b][r][axis]) for r in shared])
+                cells.append(f"{k:.2f} (n={len(shared)})")
+            L.append(f"| **{a}** | " + " | ".join(cells) + " |")
+        L.append("")
+    L += ["## Model ranking by each judge (mean correctness, Round 1)", "",
+          "| Rank | " + " | ".join(labels) + " |", "|---|" + "---|" * len(labels)]
+    rankings = {lab: _judge_model_ranking(scores[lab], key, "correctness") for lab in labels}
+    depth = max((len(r) for r in rankings.values()), default=0)
+    for i in range(depth):
+        cells = []
+        for lab in labels:
+            r = rankings[lab]
+            cells.append(f"{r[i][0].split(':', 1)[-1]} ({r[i][1]:.1f})" if i < len(r) else "—")
+        L.append(f"| {i+1} | " + " | ".join(cells) + " |")
+    L += ["", "_κ ≥0.8 near-perfect · 0.6–0.8 substantial · 0.4–0.6 moderate · <0.4 fair/poor. Compare the"
+          " base vs anchored runs to see if anchoring lifts κ; compare rankings for ordinal stability._", ""]
+    return "\n".join(L) + "\n"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--judge", default="eval/results/judge", type=Path)
     ap.add_argument("--out", default=None, type=Path)
     ap.add_argument("--interrater", nargs=2, metavar=("A", "B"),
                     help="compare two judge_scores.<label>.jsonl files for inter-rater κ")
+    ap.add_argument("--matrix", nargs="+", metavar="LABEL",
+                    help="benchmark 2+ judges: pairwise κ matrix + per-judge ranking")
     args = ap.parse_args()
+    if args.matrix:
+        report = build_matrix_report(args.judge, args.matrix)
+        (args.out.write_text(report, encoding="utf-8") if args.out else print(report))
+        if args.out:
+            print(f"Wrote {args.out}")
+        return
     if args.interrater:
         report = build_interrater_report(args.judge, *args.interrater)
         (args.out.write_text(report, encoding="utf-8") if args.out else print(report))

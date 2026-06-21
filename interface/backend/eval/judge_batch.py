@@ -22,16 +22,18 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .judge_blind import RUBRIC
+from .judge_blind import RUBRIC, RUBRIC_ANCHORED
+
+RUBRICS = {"base": RUBRIC, "anchored": RUBRIC_ANCHORED}
 
 _JUDGE_MAX_TOKENS = 400
 _SYSTEM = ("You are a careful, unbiased grader of an AI lab-assistant answer for a whole-cell E. coli "
            "simulation platform. Grade only from the tool output given as ground truth.")
 
 
-def build_prompt(item: dict[str, Any]) -> str:
+def build_prompt(item: dict[str, Any], rubric: str = RUBRIC) -> str:
     """One self-contained judge prompt for a single blinded answer."""
-    parts = [RUBRIC, "", "Grade THIS one answer. Return ONLY the JSON object (no prose).", "",
+    parts = [rubric, "", "Grade THIS one answer. Return ONLY the JSON object (no prose).", "",
              f"QUESTION:\n{item['prompt']}", "",
              f"TOOL OUTPUT (ground truth):\n{json.dumps(item.get('tool_output'), default=str)[:4000]}"]
     if item.get("gold"):
@@ -40,7 +42,7 @@ def build_prompt(item: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def build_requests(items: list[dict[str, Any]], model: str) -> list[dict[str, Any]]:
+def build_requests(items: list[dict[str, Any]], model: str, rubric: str = RUBRIC) -> list[dict[str, Any]]:
     """Anthropic Message-Batch request objects, one per answer (custom_id = resp_id)."""
     return [{
         "custom_id": it["resp_id"],
@@ -48,7 +50,7 @@ def build_requests(items: list[dict[str, Any]], model: str) -> list[dict[str, An
             "model": model,
             "max_tokens": _JUDGE_MAX_TOKENS,
             "system": _SYSTEM,
-            "messages": [{"role": "user", "content": build_prompt(it)}],
+            "messages": [{"role": "user", "content": build_prompt(it, rubric)}],
         },
     } for it in items]
 
@@ -69,14 +71,18 @@ def parse_score(resp_id: str, text: str) -> dict[str, Any] | None:
     return out if ("correctness" in out or "helpfulness" in out) else None
 
 
-def _anthropic_creds(provider_id: str, db_path) -> tuple[str, str, str]:
-    """(api_key, base_url, model) from the platform's encrypted provider config."""
+def _provider_creds(provider_id: str, db_path) -> tuple[str, str, str, str]:
+    """(kind, api_key, base_url, model) from the runtime spec + the encrypted provider config."""
     from sqlmodel import Session, select
 
     from app.db.engine import make_sqlite_engine
     from app.db.models import AssistantProviderConfig
+    from app.services.assistant_runtime import RUNTIME_PROVIDER_SPECS
     from app.services.assistant_secrets import reveal
 
+    spec = RUNTIME_PROVIDER_SPECS.get(provider_id)
+    if not spec:
+        raise SystemExit(f"Unknown provider '{provider_id}'.")
     engine = make_sqlite_engine(db_path)
     with Session(engine) as session:
         cfg = session.exec(select(AssistantProviderConfig)
@@ -86,26 +92,38 @@ def _anthropic_creds(provider_id: str, db_path) -> tuple[str, str, str]:
     key = reveal(cfg.secret_value or "", bool(getattr(cfg, "secret_encrypted", False))).strip()
     if not key:
         raise SystemExit(f"'{provider_id}' provider has no usable API key.")
-    base = (getattr(cfg, "endpoint_url", "") or "https://api.anthropic.com/v1").rstrip("/")
-    return key, base, getattr(cfg, "model", "") or "claude-haiku-4-5"
+    base = (getattr(cfg, "endpoint_url", "") or spec.default_base_url).rstrip("/")
+    return spec.kind, key, base, getattr(cfg, "model", "") or spec.default_model
 
 
-def _run_sync(items: list[dict[str, Any]], key: str, base_url: str, model: str,
-              out_path: Path) -> dict[str, int]:  # pragma: no cover (live API)
-    """One HTTPS call per answer — immediate (no batch latency). Writes scores as they land."""
+def _judge_once(client, kind: str, key: str, base_url: str, model: str, prompt: str) -> str:
+    if kind == "anthropic":
+        r = client.post(f"{base_url}/messages",
+                        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                                 "content-type": "application/json"},
+                        json={"model": model, "max_tokens": _JUDGE_MAX_TOKENS, "system": _SYSTEM,
+                              "messages": [{"role": "user", "content": prompt}]})
+        r.raise_for_status()
+        return "\n".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
+    r = client.post(f"{base_url}/chat/completions",
+                    headers={"authorization": f"Bearer {key}", "content-type": "application/json"},
+                    json={"model": model, "max_tokens": _JUDGE_MAX_TOKENS, "temperature": 0,
+                          "messages": [{"role": "system", "content": _SYSTEM},
+                                       {"role": "user", "content": prompt}]})
+    r.raise_for_status()
+    return (r.json().get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
+
+
+def _run_sync(items: list[dict[str, Any]], kind: str, key: str, base_url: str, model: str,
+              rubric: str, out_path: Path) -> dict[str, int]:  # pragma: no cover (live API)
+    """One HTTPS call per answer — immediate (no batch latency). Anthropic or OpenAI-compatible."""
     import httpx
 
-    headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
     ok = bad = 0
     with httpx.Client(timeout=90) as client, out_path.open("w", encoding="utf-8") as handle:
         for i, item in enumerate(items, 1):
             try:
-                r = client.post(f"{base_url}/messages", headers=headers,
-                                json={"model": model, "max_tokens": _JUDGE_MAX_TOKENS, "system": _SYSTEM,
-                                      "messages": [{"role": "user", "content": build_prompt(item)}]})
-                r.raise_for_status()
-                text = "\n".join(b.get("text", "") for b in r.json().get("content", [])
-                                 if b.get("type") == "text")
+                text = _judge_once(client, kind, key, base_url, model, build_prompt(item, rubric))
                 score = parse_score(item["resp_id"], text)
             except httpx.HTTPError as exc:
                 print(f"  [{i}/{len(items)}] {item['resp_id']} HTTP error: {exc}")
@@ -162,27 +180,34 @@ def main() -> None:
     ap.add_argument("--db", default="/app/data/wcecoli.db")
     ap.add_argument("--label", default="judge2", help="output is judge_scores.<label>.jsonl")
     ap.add_argument("--limit", type=int, default=None, help="judge only the first N items")
+    ap.add_argument("--rubric", choices=list(RUBRICS), default="base", help="scoring rubric variant")
+    ap.add_argument("--items", default=None, help="judge a specific items.jsonl (default: <judge>/judge_items.jsonl)")
     ap.add_argument("--sync", action="store_true", help="one live call per item (immediate; no 50%% batch discount)")
     ap.add_argument("--submit", action="store_true", help="actually submit the batch (costs money)")
     args = ap.parse_args()
 
-    items = [json.loads(l) for l in (args.judge / "judge_items.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    items_path = Path(args.items) if args.items else args.judge / "judge_items.jsonl"
+    items = [json.loads(l) for l in items_path.read_text(encoding="utf-8").splitlines() if l.strip()]
     if args.limit:
         items = items[: args.limit]
+    rubric = RUBRICS[args.rubric]
     model = args.model
+    kind = "anthropic"
     key = base = ""
     if args.submit or args.sync or not args.model:
-        key, base, cfg_model = _anthropic_creds(args.provider, args.db)
+        kind, key, base, cfg_model = _provider_creds(args.provider, args.db)
         model = args.model or cfg_model
 
     if args.sync:
         out = args.judge / f"judge_scores.{args.label}.jsonl"
-        print(f"Judging {len(items)} items live with {args.provider}:{model} (sync) -> {out}")
-        summary = _run_sync(items, key, base, model, out)
+        print(f"Judging {len(items)} items live with {args.provider}:{model} (sync, {args.rubric} rubric) -> {out}")
+        summary = _run_sync(items, kind, key, base, model, rubric, out)
         print(json.dumps({**summary, "out": str(out)}, indent=2))
         return
+    if kind != "anthropic":
+        raise SystemExit("Batch mode is Anthropic-only; use --sync for OpenAI-compatible providers.")
 
-    requests = build_requests(items, model)
+    requests = build_requests(items, model, rubric)
     if not args.submit:
         out = args.judge / "judge_batch_requests.jsonl"
         out.write_text("\n".join(json.dumps(r) for r in requests), encoding="utf-8")
