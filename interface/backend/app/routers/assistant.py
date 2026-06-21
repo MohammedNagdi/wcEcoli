@@ -1,8 +1,9 @@
-"""Assistant harness endpoints.
+"""Assistant endpoints.
 
 These endpoints expose provider status, typed tool metadata, durable context
-storage, confirmations, and provenance. They do not call an LLM or execute
-tools yet.
+storage, confirmations, and provenance, and drive the live tool-using agent
+loop: chat turns call ``generate_assistant_agent_reply`` (SSE streaming, native
+tool calls, confirmation-gated side effects) against the configured provider.
 """
 
 from __future__ import annotations

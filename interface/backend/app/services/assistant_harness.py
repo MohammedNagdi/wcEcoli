@@ -1615,9 +1615,9 @@ def get_assistant_harness_status(session: Session | None = None) -> AssistantHar
         visible_artifacts=VISIBLE_ARTIFACTS,
         tool_registry=get_tool_registry(),
         notes=[
-            "This is the durable harness foundation, not a live LLM runtime.",
+            "The assistant is a live, tool-using LLM runtime: chat streams via SSE and runs the native tool-call loop.",
             "Provider setup can be saved from the Assistant page; stored keys are local to this installation and never returned by API.",
-            "Messages, confirmations, and provenance can be stored before tool execution is enabled.",
+            "Messages, confirmations, and provenance are persisted for every turn.",
             "Registered tools support dry-run validation previews without side effects.",
             "Read-only result inspection can execute immediately.",
             "create_experiment and run_simulation can execute only after approved matching confirmations; other side-effecting tools remain adapter-disabled.",
