@@ -5,6 +5,28 @@ import json
 from eval.judge_analyze import _pearson, build_report
 from eval.judge_batch import build_requests, parse_score
 from eval.judge_blind import build
+from eval.judge_pairwise import _ranking, _resolve
+
+
+def test_pairwise_resolve_and_bias(tmp_path):
+    # 2 models, 1 case. m1 beats m2 consistently (wins regardless of order) -> no position bias.
+    # A second pair where the judge always picks slot A -> a position-biased (-> tie) pair.
+    (tmp_path / "judge_key.json").write_text(json.dumps({
+        "r1": {"model": "p:m1", "round": 1}, "r2": {"model": "p:m2", "round": 1},
+        "r3": {"model": "p:m1", "round": 1}, "r4": {"model": "p:m2", "round": 1},
+    }), encoding="utf-8")
+    (tmp_path / "judge_pairwise.t.jsonl").write_text("\n".join(json.dumps(r) for r in [
+        {"case_id": "c0", "a": "r1", "b": "r2", "winner": "a"},   # m1 wins
+        {"case_id": "c0", "a": "r2", "b": "r1", "winner": "b"},   # m1 wins again (consistent)
+        {"case_id": "c1", "a": "r3", "b": "r4", "winner": "a"},   # picked slot A
+        {"case_id": "c1", "a": "r4", "b": "r3", "winner": "a"},   # picked slot A again -> position bias -> tie
+    ]), encoding="utf-8")
+    winners, wlt, meta = _resolve(tmp_path, "t")
+    assert winners[("r1", "r2")] == "r1"                 # consistent winner resolves
+    assert winners[("r3", "r4")] == "tie"                # order-flipped verdict -> tie
+    assert abs(meta["position_bias_rate"] - 0.5) < 1e-9  # 1 of 2 pairs was position-biased
+    assert wlt["p:m1"][0] == 1 and wlt["p:m2"][1] == 1   # one decisive win for m1
+    assert _ranking(wlt)[0][0] == "p:m1"                 # m1 ranks first by win-rate
 
 
 def _results_dir(tmp_path):
