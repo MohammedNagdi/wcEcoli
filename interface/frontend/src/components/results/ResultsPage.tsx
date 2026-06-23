@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { makeAssistantContextKey } from '../../utils/assistantContext'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -19,6 +20,7 @@ import { HelpTip, HelpNote } from '../common/HelpTip'
 import type { SimulationJob, ResultsResponse, ResultsSummary, TimeseriesData, Experiment, WildtypeDelta } from '../../types'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { statusLabel, variantLabel } from '../../utils/labels'
+import { useTheme } from '../theme/ThemeProvider'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -277,6 +279,22 @@ function TimeseriesChart({
   channel: string
   series: TimeseriesData[]
 }) {
+  const { resolvedTheme } = useTheme()
+  const chartTheme = resolvedTheme === 'dark'
+    ? {
+      text: '#cbd5e1',
+      muted: '#94a3b8',
+      grid: 'rgba(148,163,184,0.18)',
+      tooltipBg: '#0f172a',
+      tooltipBorder: '#334155',
+    }
+    : {
+      text: '#374151',
+      muted: '#6b7280',
+      grid: 'rgba(0,0,0,0.04)',
+      tooltipBg: '#ffffff',
+      tooltipBorder: '#e5e7eb',
+    }
   const config = CHANNEL_CONFIG[channel] ?? { title: channel, color: '#6b7280', fillColor: 'rgba(107,114,128,0.08)', group: 'Other' }
   const multiSeed = series.length > 1
 
@@ -307,8 +325,13 @@ function TimeseriesChart({
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-              legend: { display: multiSeed, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+              legend: { display: multiSeed, position: 'top', labels: { boxWidth: 12, font: { size: 11 }, color: chartTheme.text } },
               tooltip: {
+                backgroundColor: chartTheme.tooltipBg,
+                borderColor: chartTheme.tooltipBorder,
+                borderWidth: 1,
+                titleColor: chartTheme.text,
+                bodyColor: chartTheme.text,
                 callbacks: {
                   title: (items) => 't = ' + (items[0]?.parsed?.x?.toFixed(1) ?? '') + ' min',
                   label: (item) => (item.dataset.label ?? '') + ': ' + (item.parsed.y ?? 0).toPrecision(4) + ' ' + (series[0]?.unit ?? ''),
@@ -318,14 +341,14 @@ function TimeseriesChart({
             scales: {
               x: {
                 type: 'linear',
-                title: { display: true, text: 'Time (min)', font: { size: 11 } },
-                grid: { color: 'rgba(0,0,0,0.04)' },
-                ticks: { font: { size: 10 } },
+                title: { display: true, text: 'Time (min)', font: { size: 11 }, color: chartTheme.muted },
+                grid: { color: chartTheme.grid },
+                ticks: { font: { size: 10 }, color: chartTheme.muted },
               },
               y: {
-                title: { display: true, text: series[0]?.unit ?? '', font: { size: 11 } },
-                grid: { color: 'rgba(0,0,0,0.04)' },
-                ticks: { font: { size: 10 } },
+                title: { display: true, text: series[0]?.unit ?? '', font: { size: 11 }, color: chartTheme.muted },
+                grid: { color: chartTheme.grid },
+                ticks: { font: { size: 10 }, color: chartTheme.muted },
               },
             },
           }}
@@ -353,6 +376,7 @@ export function ResultsPage() {
   const [showChannelGroups, setShowChannelGroups] = useState(false)
   const [showModelDepth, setShowModelDepth] = useState(false)
   const [showRunTable, setShowRunTable] = useState(false)
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
 
   useEffect(() => {
     if (!jobId) return
@@ -431,7 +455,144 @@ export function ResultsPage() {
   }
 
   const focusGeneSymbol = singleGeneSymbol(resolvedGeneSymbol)
+  const channels = useMemo(() => Object.keys(results?.timeseries ?? {}), [results])
+  const grouped = useMemo(() => groupChannels(channels), [channels])
+  const primarySummary = results?.summary[0]
+  const resultTitle = experiment?.name || (resolvedGeneSymbol ? `${resolvedGeneSymbol} knockout` : job ? `Job #${job.id}` : 'Result detail')
+  const strongestWtDelta = useMemo(() => strongestDelta(wtDelta), [wtDelta])
+  const selectedPreset = useMemo(() => CHART_PRESETS.find((preset) => preset.id === chartPreset), [chartPreset])
+  const visibleChannels = useMemo(() => channels.filter((ch) => activeChannels.has(ch)), [activeChannels, channels])
+  const hasWildtype = Boolean(wtDelta?.has_wildtype)
+  const comparisonMetricRows = useMemo(() => comparisonRows(primarySummary, wtDelta), [primarySummary, wtDelta])
+  const comparisonPresets = useMemo(() => suggestedComparisonPresets(wtDelta), [wtDelta])
+  const isMock = job ? (!job.sim_dir || job.status !== 'done') : false
+  const resultPageState = useMemo(() => ({
+    kind: 'result_detail',
+    surface: 'results',
+    summary: job
+      ? `Result detail for job #${job.id}, status ${statusLabel(job.status)}, with ${results?.summary.length ?? 0} summary row${results?.summary.length === 1 ? '' : 's'} and ${channels.length} available time-series channel${channels.length === 1 ? '' : 's'}.`
+      : 'Result detail page loading.',
+    dirty: false,
+    captured_at: assistantCapturedAt,
+    route: `${location.pathname}${location.search}`,
+    loading,
+    error,
+    selected: {
+      job_id: job?.id ?? null,
+      experiment_id: experiment?.id ?? job?.experiment_id ?? null,
+      gene_symbol: focusGeneSymbol ?? null,
+      condition: experiment?.condition ?? job?.condition ?? null,
+      variant_type: experiment?.variant_type ?? job?.variant_type ?? null,
+    },
+    job: job
+      ? {
+        id: job.id,
+        experiment_id: job.experiment_id,
+        status: job.status,
+        status_label: statusLabel(job.status),
+        phase: job.phase,
+        seed: job.seed,
+        generations: job.generations,
+        condition: job.condition,
+        timeline: job.timeline,
+        started_at: job.started_at,
+        finished_at: job.finished_at,
+        data_source: dataSourceLabel(job, isMock),
+        has_sim_dir: Boolean(job.sim_dir),
+      }
+      : null,
+    experiment: experiment
+      ? {
+        id: experiment.id,
+        name: experiment.name,
+        variant_type: experiment.variant_type,
+        variant_label: variantLabel(experiment.variant_type),
+        variant_index: experiment.variant_index,
+        condition: experiment.condition,
+        timeline: experiment.timeline,
+        gene_symbol: experiment.gene_symbol,
+        status: experiment.status,
+        batch_id: experiment.batch_id,
+      }
+      : null,
+    results: {
+      summary_count: results?.summary.length ?? 0,
+      primary_summary: primarySummary
+        ? {
+          job_id: primarySummary.job_id,
+          seed: primarySummary.seed,
+          generation: primarySummary.generation,
+          division_time_min: primarySummary.division_time_sec == null ? null : primarySummary.division_time_sec / 60,
+          final_mass_fg: primarySummary.final_mass_fg,
+          growth_rate_x10_3_per_s: primarySummary.growth_rate == null ? null : primarySummary.growth_rate * 1000,
+          doubling_time_min: primarySummary.doubling_time_min,
+        }
+        : null,
+    },
+    timeseries: {
+      available_channel_count: channels.length,
+      available_channels: channels.slice(0, 50),
+      available_channels_truncated: channels.length > 50,
+      active_channel_count: visibleChannels.length,
+      active_channels: visibleChannels,
+      chart_preset: chartPreset,
+      selected_preset_label: selectedPreset?.label ?? 'Custom',
+      show_channel_groups: showChannelGroups,
+      show_model_depth: showModelDepth,
+      show_run_table: showRunTable,
+    },
+    wt_delta: {
+      has_wildtype: hasWildtype,
+      wt_experiment_id: wtDelta?.wt_experiment_id ?? null,
+      wt_status: wtDelta?.wt_status ?? null,
+      strongest_delta: strongestWtDelta,
+      metrics: {
+        division_time_pct: wtDelta?.division_time_pct ?? null,
+        final_mass_pct: wtDelta?.final_mass_pct ?? null,
+        growth_rate_pct: wtDelta?.growth_rate_pct ?? null,
+        doubling_time_pct: wtDelta?.doubling_time_pct ?? null,
+      },
+    },
+  }), [
+    channels,
+    assistantCapturedAt,
+    chartPreset,
+    error,
+    experiment,
+    focusGeneSymbol,
+    hasWildtype,
+    isMock,
+    job,
+    loading,
+    location.pathname,
+    location.search,
+    primarySummary,
+    results?.summary.length,
+    selectedPreset?.label,
+    showChannelGroups,
+    showModelDepth,
+    showRunTable,
+    strongestWtDelta,
+    visibleChannels,
+    wtDelta,
+  ])
   useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'result_detail',
+      location.pathname,
+      location.search,
+      job?.id,
+      experiment?.id,
+      focusGeneSymbol,
+      selectedPreset?.label,
+      showChannelGroups,
+      showModelDepth,
+      showRunTable,
+      loading,
+      isMock,
+      hasWildtype,
+      results?.summary.length,
+    ]),
     context: {
       assistant_surface: 'results',
       route: `${location.pathname}${location.search}`,
@@ -440,6 +601,7 @@ export function ResultsPage() {
       selected_experiment: experiment?.id ?? null,
       selected_condition: experiment?.condition ?? null,
       selected_variant_type: experiment?.variant_type ?? job?.variant_type ?? null,
+      page_state: resultPageState,
     },
     suggestedPrompt: 'Help me interpret this simulation result. Start with the phenotype summary, WT comparison, and the most useful model outputs to inspect next.',
   })
@@ -464,17 +626,6 @@ export function ResultsPage() {
 
   if (!job || !results) return null
 
-  const channels = Object.keys(results.timeseries)
-  const isMock = !job.sim_dir || job.status !== 'done'
-  const grouped = groupChannels(channels)
-  const primarySummary = results.summary[0]
-  const resultTitle = experiment?.name || (resolvedGeneSymbol ? `${resolvedGeneSymbol} knockout` : `Job #${job.id}`)
-  const strongestWtDelta = strongestDelta(wtDelta)
-  const selectedPreset = CHART_PRESETS.find((preset) => preset.id === chartPreset)
-  const visibleChannels = channels.filter((ch) => activeChannels.has(ch))
-  const hasWildtype = Boolean(wtDelta?.has_wildtype)
-  const comparisonMetricRows = comparisonRows(primarySummary, wtDelta)
-  const comparisonPresets = suggestedComparisonPresets(wtDelta)
   return (
     <div className="h-full overflow-y-auto pr-1">
       <div className="max-w-6xl mx-auto pb-8">

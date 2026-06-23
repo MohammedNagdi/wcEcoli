@@ -249,11 +249,51 @@ def _default_transport(url: str, headers: dict[str, str], payload: dict[str, Any
 
 def _context_summary(context: dict[str, Any]) -> str:
     parts: list[str] = []
-    for key in ("route", "selected_gene", "selected_experiment", "selected_job", "selected_result", "assistant_surface"):
+    for key in (
+        "route",
+        "selected_gene",
+        "selected_experiment",
+        "selected_job",
+        "selected_result",
+        "selected_condition",
+        "selected_variant_type",
+        "selected_builder_section",
+        "assistant_surface",
+    ):
         value = context.get(key)
         if value not in (None, ""):
             parts.append(f"{key}={value}")
     return ", ".join(parts) or "no page context"
+
+
+def _bounded_json(value: Any, *, max_chars: int = 3500) -> str:
+    try:
+        text = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    except (TypeError, ValueError):
+        text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars - 3]}..."
+
+
+def _page_state_summary(context: dict[str, Any]) -> str:
+    page_state = context.get("page_state")
+    if not isinstance(page_state, dict) or not page_state:
+        return ""
+    kind = page_state.get("kind") or "page_state"
+    summary = page_state.get("summary")
+    dirty = page_state.get("dirty")
+    lines = [
+        "Current page state:",
+        "Treat this as unsaved UI state captured when the user sent the message; re-fetch saved platform facts with tools when needed.",
+        f"- kind: {kind}",
+    ]
+    if isinstance(summary, str) and summary.strip():
+        lines.append(f"- summary: {summary.strip()[:700]}")
+    if isinstance(dirty, bool):
+        lines.append(f"- has_unsaved_changes: {dirty}")
+    lines.append(f"- details: {_bounded_json(page_state)}")
+    return "\n".join(lines)
 
 
 def _platform_facts_summary(context: dict[str, Any]) -> str:
@@ -369,9 +409,11 @@ def _system_prompt(context: dict[str, Any]) -> str:
     platform_facts = _platform_facts_summary(context)
     conversation_memory = _conversation_memory_summary(context)
     working_memory = _working_memory_summary(context)
+    page_state = _page_state_summary(context)
     platform_block = f"\n\n{platform_facts}" if platform_facts else ""
     memory_block = f"\n\n{conversation_memory}" if conversation_memory else ""
     working_memory_block = f"\n\n{working_memory}" if working_memory else ""
+    page_state_block = f"\n\n{page_state}" if page_state else ""
     return (
         "You are the wcEcoli platform assistant. Explain model, experiment, and result context clearly. "
         "Do not claim that you executed tools, queued simulations, edited files, or changed data. "
@@ -383,6 +425,7 @@ def _system_prompt(context: dict[str, Any]) -> str:
         "or a small JSON block such as {\"action\":\"create_experiment\",\"proposal_targets\":[\"dnaA\",\"crp\"]}. "
         "The platform validates symbols before showing cards. "
         f"Current page context: {_context_summary(context)}."
+        f"{page_state_block}"
         f"{platform_block}"
         f"{memory_block}"
         f"{working_memory_block}"

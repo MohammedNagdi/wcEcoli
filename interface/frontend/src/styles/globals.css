@@ -2,10 +2,167 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-app: 249 250 251;
+  --color-surface: 255 255 255;
+  --color-elevated: 255 255 255;
+  --color-subtle: 243 244 246;
+  --color-border-subtle: 229 231 235;
+  --color-border-strong: 209 213 219;
+  --color-text-primary: 17 24 39;
+  --color-text-secondary: 75 85 99;
+  --color-text-muted: 107 114 128;
+  --color-focus: 55 138 221;
+}
+
+.dark {
+  --color-app: 12 14 18;
+  --color-surface: 18 22 29;
+  --color-elevated: 28 34 44;
+  --color-subtle: 24 29 38;
+  --color-border-subtle: 48 55 66;
+  --color-border-strong: 68 76 89;
+  --color-text-primary: 241 245 249;
+  --color-text-secondary: 203 213 225;
+  --color-text-muted: 148 163 184;
+  --color-focus: 96 165 250;
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: rgb(var(--color-app));
+  color: rgb(var(--color-text-primary));
 }
 
 code, .font-mono {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+@layer utilities {
+  .dark .bg-white { background-color: rgb(var(--color-surface)); }
+  .dark .bg-white\/60,
+  .dark .bg-white\/70,
+  .dark .bg-white\/80,
+  .dark .bg-white\/90 { background-color: rgb(var(--color-surface) / 0.78); }
+  .dark .bg-gray-50,
+  .dark .bg-slate-50 { background-color: rgb(var(--color-app)); }
+  .dark .bg-gray-100,
+  .dark .bg-slate-100 { background-color: rgb(var(--color-subtle)); }
+  .dark .bg-gray-200,
+  .dark .bg-slate-200 { background-color: rgb(var(--color-border-subtle)); }
+
+  .dark .text-gray-950,
+  .dark .text-gray-900,
+  .dark .text-slate-950,
+  .dark .text-slate-900 { color: rgb(var(--color-text-primary)); }
+  .dark .text-gray-800,
+  .dark .text-gray-700,
+  .dark .text-gray-600,
+  .dark .text-slate-800,
+  .dark .text-slate-700,
+  .dark .text-slate-600 { color: rgb(var(--color-text-secondary)); }
+  .dark .text-gray-500,
+  .dark .text-gray-400,
+  .dark .text-gray-300,
+  .dark .text-slate-500,
+  .dark .text-slate-400,
+  .dark .text-slate-300 { color: rgb(var(--color-text-muted)); }
+
+  .dark .border-gray-100,
+  .dark .border-gray-200,
+  .dark .border-slate-100,
+  .dark .border-slate-200,
+  .dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+  .dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: rgb(var(--color-border-subtle));
+  }
+  .dark .border-gray-300,
+  .dark .border-slate-300 { border-color: rgb(var(--color-border-strong)); }
+
+  .dark .shadow,
+  .dark .shadow-sm,
+  .dark .shadow-md,
+  .dark .shadow-lg,
+  .dark .shadow-xl,
+  .dark .shadow-2xl {
+    --tw-shadow-color: rgb(0 0 0 / 0.45);
+  }
+
+  .dark input,
+  .dark textarea,
+  .dark select {
+    background-color: rgb(var(--color-elevated));
+    color: rgb(var(--color-text-primary));
+    border-color: rgb(var(--color-border-strong));
+  }
+  .dark input::placeholder,
+  .dark textarea::placeholder { color: rgb(var(--color-text-muted)); }
+
+  .dark .hover\:bg-gray-50:hover,
+  .dark .hover\:bg-slate-50:hover,
+  .dark .hover\:bg-gray-100:hover,
+  .dark .hover\:bg-slate-100:hover { background-color: rgb(var(--color-elevated)); }
+  .dark .hover\:text-gray-800:hover,
+  .dark .hover\:text-gray-700:hover,
+  .dark .hover\:text-slate-800:hover,
+  .dark .hover\:text-slate-700:hover { color: rgb(var(--color-text-primary)); }
+
+  .dark .bg-brand-50 { background-color: rgb(12 68 124 / 0.35); }
+  .dark .text-brand-700 { color: rgb(147 197 253); }
+  .dark .border-brand-500 { border-color: rgb(96 165 250); }
+  .dark .ring-brand-500 { --tw-ring-color: rgb(96 165 250); }
+
+  .dark .bg-blue-50,
+  .dark .bg-cyan-50,
+  .dark .bg-sky-50 { background-color: rgb(14 116 144 / 0.18); }
+  .dark .text-blue-700,
+  .dark .text-blue-800,
+  .dark .text-cyan-700,
+  .dark .text-cyan-800,
+  .dark .text-cyan-900,
+  .dark .text-cyan-950 { color: rgb(125 211 252); }
+  .dark .border-blue-200,
+  .dark .border-cyan-100,
+  .dark .border-cyan-200 { border-color: rgb(14 116 144 / 0.55); }
+
+  .dark .bg-emerald-50,
+  .dark .bg-green-50 { background-color: rgb(5 150 105 / 0.18); }
+  .dark .text-emerald-700,
+  .dark .text-emerald-800,
+  .dark .text-green-700,
+  .dark .text-green-800 { color: rgb(110 231 183); }
+  .dark .border-emerald-200,
+  .dark .border-green-200 { border-color: rgb(5 150 105 / 0.55); }
+
+  .dark .bg-amber-50,
+  .dark .bg-yellow-50 { background-color: rgb(180 83 9 / 0.18); }
+  .dark .text-amber-700,
+  .dark .text-amber-800,
+  .dark .text-amber-900,
+  .dark .text-amber-950 { color: rgb(252 211 77); }
+  .dark .border-amber-100,
+  .dark .border-amber-200 { border-color: rgb(180 83 9 / 0.55); }
+
+  .dark .bg-red-50,
+  .dark .bg-rose-50 { background-color: rgb(220 38 38 / 0.18); }
+  .dark .text-red-700,
+  .dark .text-red-800,
+  .dark .text-red-900,
+  .dark .text-rose-700,
+  .dark .text-rose-800 { color: rgb(252 165 165); }
+  .dark .border-red-200,
+  .dark .border-rose-200 { border-color: rgb(220 38 38 / 0.55); }
+
+  .dark .bg-purple-50,
+  .dark .bg-indigo-50,
+  .dark .bg-violet-50 { background-color: rgb(99 102 241 / 0.18); }
+  .dark .text-purple-700,
+  .dark .text-purple-800,
+  .dark .text-indigo-700,
+  .dark .text-indigo-800,
+  .dark .text-violet-700,
+  .dark .text-violet-800 { color: rgb(196 181 253); }
+  .dark .border-purple-200,
+  .dark .border-indigo-200,
+  .dark .border-violet-200 { border-color: rgb(99 102 241 / 0.55); }
 }

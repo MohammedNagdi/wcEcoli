@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import type { EssentialityStats, GeneKOSummary } from '../../types'
 import { categoryLabel } from '../../utils/labels'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
+import { ASSISTANT_GENE_SAMPLE_LIMIT, summarizeKOSummary } from '../../utils/assistantContext'
 
 type Phenotype = GeneKOSummary['phenotype']
 type SortMode = 'total' | 'essential' | 'essential_pct'
@@ -34,6 +35,7 @@ const PHENOTYPE_RANK: Record<Phenotype, number> = {
 interface Props {
   essentiality: EssentialityStats[]
   genes: GeneKOSummary[]
+  onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }
 
 interface HeatmapRow {
@@ -53,7 +55,7 @@ interface TooltipState {
   y: number
 }
 
-export function EssentialityHeatmap({ essentiality, genes }: Props) {
+export function EssentialityHeatmap({ essentiality, genes, onAssistantSnapshot }: Props) {
   const { setWorkspaceUrlState } = useUrlWorkspaceState()
   const containerRef = useRef<HTMLDivElement>(null)
   const [mechanisticOnly, setMechanisticOnly] = useState(false)
@@ -128,6 +130,37 @@ export function EssentialityHeatmap({ essentiality, genes }: Props) {
       return b.total - a.total
     })
   }, [essentiality, filteredGenes, sortMode])
+
+  const assistantSnapshot = useMemo(() => {
+    const categorySample = rows.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map((row) => ({
+      category: row.category,
+      label: categoryLabel(row.category),
+      total: row.total,
+      essential: row.essential,
+      growth_defect: row.growthDefect,
+      neutral: row.neutral,
+      unknown: row.unknown,
+      essential_pct: Number(row.essentialPct.toFixed(2)),
+      gene_sample: row.genes.slice(0, 8).map(summarizeKOSummary),
+      gene_sample_truncated: row.genes.length > 8,
+    }))
+    return {
+      kind: 'essentiality_heatmap',
+      filters: {
+        mechanistic_only: mechanisticOnly,
+        sort_mode: sortMode,
+      },
+      totals,
+      visible_categories: rows.length,
+      category_sample: categorySample,
+      category_sample_truncated: rows.length > categorySample.length,
+      hovered_gene: tooltip ? summarizeKOSummary(tooltip.gene) : null,
+    }
+  }, [mechanisticOnly, rows, sortMode, tooltip, totals])
+
+  useEffect(() => {
+    onAssistantSnapshot?.(assistantSnapshot)
+  }, [assistantSnapshot, onAssistantSnapshot])
 
   function updateTooltip(event: MouseEvent<SVGRectElement>, gene: GeneKOSummary) {
     const rect = containerRef.current?.getBoundingClientRect()

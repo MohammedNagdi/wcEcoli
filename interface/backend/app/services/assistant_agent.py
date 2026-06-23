@@ -45,6 +45,7 @@ from app.services.assistant_runtime import (
 )
 from app.services.assistant_runtime import (
     _context_summary,
+    _page_state_summary,
     _platform_facts_summary,
     _working_memory_summary,
 )
@@ -294,6 +295,9 @@ def _dynamic_context_block(context: dict[str, Any]) -> str:
         f"Current page context (the default subject — the user may redirect to a different/random "
         f"subject, which takes precedence): {_context_summary(context)}."
     ]
+    page_state = _page_state_summary(context)
+    if page_state:
+        parts.append(page_state)
     platform_facts = _platform_facts_summary(context)
     if platform_facts:
         parts.append(platform_facts)

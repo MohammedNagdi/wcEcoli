@@ -8,6 +8,8 @@ import type { TFNetwork } from '../../types'
 import { SearchInput } from '../common/SearchInput'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { type RegulationEffect, regulationEffect } from '../../utils/regulation'
+import { ASSISTANT_EDGE_SAMPLE_LIMIT, makeAssistantContextKey, truncateText } from '../../utils/assistantContext'
+import { useTheme } from '../theme/ThemeProvider'
 
 const FULL_LAYOUT = {
   name: 'cose',
@@ -93,6 +95,19 @@ function formatStd(value: number | null): string {
   return value == null ? 'n/a' : value.toFixed(2)
 }
 
+function summarizeInspectorEdge(edge: InspectorEdge) {
+  return {
+    tf: edge.tf,
+    target: edge.target,
+    partner: edge.partner,
+    effect: edge.effect,
+    log2fc: edge.log2fc,
+    log2fc_std: edge.log2fcStd,
+    raw_type: edge.rawType,
+    is_self_loop: edge.isSelfLoop,
+  }
+}
+
 function selectedGeneZoom(currentZoom: number, maxZoom: number): number {
   const boundedCurrent = Math.min(Math.max(currentZoom, SELECTED_GENE_MIN_ZOOM), SELECTED_GENE_MAX_ZOOM)
   const target = currentZoom < SELECTED_GENE_MIN_ZOOM ? SELECTED_GENE_DEFAULT_ZOOM : boundedCurrent
@@ -114,7 +129,8 @@ function networkModeLabel(mode: NetworkViewMode): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const STYLESHEET: any[] = [
+function networkStylesheet(darkMode: boolean): any[] {
+  return [
   {
     selector: 'node',
     style: {
@@ -132,26 +148,26 @@ const STYLESHEET: any[] = [
   {
     selector: 'node[role="tf"]',
     style: {
-      'background-color': '#534AB7',
-      'border-color': '#3D3690',
+      'background-color': darkMode ? '#7C6FE8' : '#534AB7',
+      'border-color': darkMode ? '#A78BFA' : '#3D3690',
       'font-size': '9px',
     },
   },
   {
     selector: 'node[role="target"]',
     style: {
-      'background-color': '#1D9E75',
+      'background-color': darkMode ? '#10B981' : '#1D9E75',
       'font-size': '7px',
       'border-width': 1,
-      'border-color': '#157A5A',
+      'border-color': darkMode ? '#6EE7B7' : '#157A5A',
     },
   },
   {
     selector: 'node[role="both"]',
     style: {
-      'background-color': '#2563EB',
+      'background-color': darkMode ? '#3B82F6' : '#2563EB',
       'border-width': 3,
-      'border-color': '#16A34A',
+      'border-color': darkMode ? '#86EFAC' : '#16A34A',
       'font-size': '9px',
       'font-weight': 'bold',
     },
@@ -159,12 +175,12 @@ const STYLESHEET: any[] = [
   {
     selector: 'edge[edgeType="activation"]',
     style: {
-      'line-color': '#22C55E',
-      'target-arrow-color': '#22C55E',
+      'line-color': darkMode ? '#4ADE80' : '#22C55E',
+      'target-arrow-color': darkMode ? '#4ADE80' : '#22C55E',
       'target-arrow-shape': 'triangle',
       'curve-style': 'bezier',
       width: 'data(width)',
-      opacity: 0.5,
+      opacity: darkMode ? 0.7 : 0.5,
     },
   },
   {
@@ -178,27 +194,27 @@ const STYLESHEET: any[] = [
   {
     selector: 'edge[edgeType="repression"]',
     style: {
-      'line-color': '#EF4444',
-      'target-arrow-color': '#EF4444',
+      'line-color': darkMode ? '#F87171' : '#EF4444',
+      'target-arrow-color': darkMode ? '#F87171' : '#EF4444',
       'target-arrow-shape': 'tee',
       'curve-style': 'bezier',
       width: 'data(width)',
-      opacity: 0.5,
+      opacity: darkMode ? 0.7 : 0.5,
     },
   },
   {
     selector: 'node:selected',
     style: {
       'border-width': 3,
-      'border-color': '#F59E0B',
+      'border-color': darkMode ? '#FBBF24' : '#F59E0B',
     },
   },
   {
     selector: 'node.highlighted',
     style: {
       'border-width': 3,
-      'border-color': '#F59E0B',
-      'background-color': '#F59E0B',
+      'border-color': darkMode ? '#FBBF24' : '#F59E0B',
+      'background-color': darkMode ? '#FBBF24' : '#F59E0B',
     },
   },
   {
@@ -219,14 +235,17 @@ const STYLESHEET: any[] = [
       display: 'none',
     },
   },
-]
+  ]
+}
 
 interface TFNetworkPageProps {
   embedded?: boolean
+  onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }
 
-export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
+export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetworkPageProps) {
   const { selectedGene, setSelectedGene } = useUrlWorkspaceState()
+  const { resolvedTheme } = useTheme()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const initialMode = networkViewModeFromParam(searchParams.get('mode')) ?? 'full'
@@ -239,9 +258,11 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
   const [networkMode, setNetworkMode] = useState<NetworkViewMode>(initialMode)
   const cyRef = useRef<Core | null>(null)
   const layoutReadyRef = useRef(false)
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const viewportHeightClass = embedded
     ? 'h-[calc(100vh-215px)] min-h-[520px]'
     : 'h-[calc(100vh-65px)]'
+  const cytoscapeStylesheet = useMemo(() => networkStylesheet(resolvedTheme === 'dark'), [resolvedTheme])
 
   useEffect(() => {
     getTFNetwork()
@@ -554,14 +575,117 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
     return { activation, repression, all: activation + repression }
   }, [network, minTargets])
 
+  const assistantPageState = useMemo(() => {
+    const selectedInspectorSummary = selectedInspector
+      ? {
+        symbol: selectedInspector.symbol,
+        role: selectedInspector.role,
+        regulator_count: selectedInspector.regulatorCount,
+        target_count: selectedInspector.targetCount,
+        self_loop_count: selectedInspector.selfLoops.length,
+        incoming_sample: selectedInspector.incoming.slice(0, ASSISTANT_EDGE_SAMPLE_LIMIT).map(summarizeInspectorEdge),
+        incoming_truncated: selectedInspector.incoming.length > ASSISTANT_EDGE_SAMPLE_LIMIT,
+        outgoing_sample: selectedInspector.outgoing.slice(0, ASSISTANT_EDGE_SAMPLE_LIMIT).map(summarizeInspectorEdge),
+        outgoing_truncated: selectedInspector.outgoing.length > ASSISTANT_EDGE_SAMPLE_LIMIT,
+        self_loop_sample: selectedInspector.selfLoops.slice(0, ASSISTANT_EDGE_SAMPLE_LIMIT).map(summarizeInspectorEdge),
+      }
+      : null
+    const normalizedSearch = searchQuery.trim().toLowerCase()
+    const inspectorValues = Array.from(inspectorBySymbol.values())
+    const searchMatches = normalizedSearch
+      ? inspectorValues
+          .filter((inspector) => inspector.symbol.toLowerCase().includes(normalizedSearch))
+          .sort((a, b) => (b.targetCount + b.regulatorCount) - (a.targetCount + a.regulatorCount))
+          .slice(0, ASSISTANT_EDGE_SAMPLE_LIMIT)
+          .map((inspector) => ({
+            symbol: inspector.symbol,
+            role: inspector.role,
+            regulator_count: inspector.regulatorCount,
+            target_count: inspector.targetCount,
+          }))
+      : []
+    return {
+      kind: 'tf_network',
+      surface: 'network',
+      summary: `TF network ${networkMode} view with ${graphStats.totalNodes} visible nodes and ${graphStats.edges} visible edges.`,
+      dirty: false,
+      captured_at: assistantCapturedAt,
+      route: `${location.pathname}${location.search}`,
+      embedded,
+      selected_gene: selectedGene,
+      controls: {
+        network_mode: networkMode,
+        edge_filter: edgeFilter,
+        min_targets: minTargets,
+        search_query: searchQuery,
+      },
+      loading,
+      error: truncateText(error),
+      totals: {
+        tfs: network?.tfs.length ?? 0,
+        total_edges: network?.total_edges ?? 0,
+      },
+      graph_stats: graphStats,
+      edge_counts: edgeCounts,
+      selected_inspector: selectedInspectorSummary,
+      hub_tf_sample: (network?.tfs ?? [])
+        .filter((tf) => tf.target_count >= minTargets)
+        .slice()
+        .sort((a, b) => b.target_count - a.target_count)
+        .slice(0, ASSISTANT_EDGE_SAMPLE_LIMIT)
+        .map((tf) => ({ symbol: tf.symbol, target_count: tf.target_count })),
+      search_match_sample: searchMatches,
+      search_match_sample_truncated: normalizedSearch
+        ? inspectorValues.filter((inspector) => inspector.symbol.toLowerCase().includes(normalizedSearch)).length > searchMatches.length
+        : false,
+    }
+  }, [
+    edgeCounts,
+    assistantCapturedAt,
+    edgeFilter,
+    embedded,
+    error,
+    graphStats,
+    inspectorBySymbol,
+    loading,
+    location.pathname,
+    location.search,
+    minTargets,
+    network,
+    networkMode,
+    searchQuery,
+    selectedGene,
+    selectedInspector,
+  ])
+
   useRegisterAssistantContext({
+    enabled: !embedded,
+    contextKey: makeAssistantContextKey([
+      'tf_network',
+      location.pathname,
+      location.search,
+      selectedGene,
+      networkMode,
+      edgeFilter,
+      minTargets,
+      searchQuery,
+      loading,
+      error,
+      graphStats.totalNodes,
+      graphStats.edges,
+    ]),
     context: {
       assistant_surface: 'network',
       route: `${location.pathname}${location.search}`,
       selected_gene: selectedGene,
+      page_state: assistantPageState,
     },
     suggestedPrompt: `Help me interpret the transcription-factor network. Focus on the ${networkMode} view, ${edgeFilter} regulation edges, hub threshold ${minTargets}, and any selected gene or TF context.`,
   })
+
+  useEffect(() => {
+    onAssistantSnapshot?.(assistantPageState)
+  }, [assistantPageState, onAssistantSnapshot])
 
   useEffect(() => {
     if (!layoutReadyRef.current) return
@@ -766,7 +890,7 @@ export function TFNetworkPage({ embedded = false }: TFNetworkPageProps) {
               key={graphKey}
               elements={graphElements}
               layout={graphLayout as any}
-              stylesheet={STYLESHEET as any}
+              stylesheet={cytoscapeStylesheet as any}
               cy={handleCyInit}
               style={{ width: '100%', height: '100%' }}
               maxZoom={3}

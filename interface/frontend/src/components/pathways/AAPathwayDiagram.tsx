@@ -1,11 +1,19 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import type { AAPathway, GeneKOSummary } from '../../types'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
+import {
+  ASSISTANT_EDGE_SAMPLE_LIMIT,
+  ASSISTANT_PATHWAY_SAMPLE_LIMIT,
+  summarizeAAPathway,
+  summarizeKOSummary,
+} from '../../utils/assistantContext'
+import { useTheme } from '../theme/ThemeProvider'
 
 interface Props {
   pathways: AAPathway[]
   genes: GeneKOSummary[]
+  onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }
 
 interface Edge {
@@ -64,11 +72,15 @@ const AA_CODES: Record<string, string> = {
   valine: 'Val',
 }
 
-export function AAPathwayDiagram({ pathways, genes }: Props) {
+export function AAPathwayDiagram({ pathways, genes, onAssistantSnapshot }: Props) {
   const { setWorkspaceUrlState } = useUrlWorkspaceState()
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const palette = resolvedTheme === 'dark'
+    ? { grid: '#334155', edge: '#64748b', selected: '#e2e8f0' }
+    : { grid: '#d1d5db', edge: '#9ca3af', selected: '#111827' }
 
   const model = useMemo(() => buildDiagram(pathways, genes), [pathways, genes])
 
@@ -83,6 +95,66 @@ export function AAPathwayDiagram({ pathways, genes }: Props) {
     }
     return connected
   }, [model.edges, selectedNode])
+
+  const assistantSnapshot = useMemo(() => {
+    const selected = selectedNode ? model.nodeByKey.get(selectedNode) ?? null : null
+    const geneBySymbol = new Map(genes.map((gene) => [gene.gene_symbol.toLowerCase(), gene]))
+    const connectedEdgeSample = selectedNode
+      ? model.edges
+          .filter((edge) => edge.source === selectedNode || edge.target === selectedNode)
+          .slice(0, ASSISTANT_EDGE_SAMPLE_LIMIT)
+          .map((edge) => ({
+            source: edge.source,
+            target: edge.target,
+            enzymes: edge.enzymes.slice(0, 8),
+            enzymes_truncated: edge.enzymes.length > 8,
+          }))
+      : []
+    return {
+      kind: 'aa_pathway_diagram',
+      totals: {
+        pathways: pathways.length,
+        nodes: model.nodes.length,
+        edges: model.edges.length,
+      },
+      selected_node: selected
+        ? {
+          key: selected.key,
+          name: selected.name,
+          severity: selected.severity,
+          pathway: summarizeAAPathway(selected.pathway),
+          enzymes: selected.enzymes.slice(0, 12),
+          enzymes_truncated: selected.enzymes.length > 12,
+          enzyme_gene_sample: selected.enzymes
+            .flatMap((enzyme) => {
+              const gene = geneBySymbol.get(enzyme.toLowerCase())
+              return gene ? [summarizeKOSummary(gene)] : []
+            })
+            .slice(0, ASSISTANT_PATHWAY_SAMPLE_LIMIT),
+        }
+        : null,
+      connected_node_count: connectedNodes?.size ?? null,
+      connected_edge_sample: connectedEdgeSample,
+      connected_edge_sample_truncated: selectedNode
+        ? model.edges.filter((edge) => edge.source === selectedNode || edge.target === selectedNode).length > connectedEdgeSample.length
+        : false,
+      pathway_sample: pathways.slice(0, ASSISTANT_PATHWAY_SAMPLE_LIMIT).map(summarizeAAPathway),
+      pathway_sample_truncated: pathways.length > ASSISTANT_PATHWAY_SAMPLE_LIMIT,
+      hovered_node: tooltip
+        ? {
+          key: tooltip.node.key,
+          name: tooltip.node.name,
+          severity: tooltip.node.severity,
+          pathway: summarizeAAPathway(tooltip.node.pathway),
+          enzymes: tooltip.node.enzymes.slice(0, 12),
+        }
+        : null,
+    }
+  }, [connectedNodes, genes, model.edges, model.nodeByKey, model.nodes.length, pathways, selectedNode, tooltip])
+
+  useEffect(() => {
+    onAssistantSnapshot?.(assistantSnapshot)
+  }, [assistantSnapshot, onAssistantSnapshot])
 
   function updateTooltip(event: MouseEvent<SVGCircleElement>, node: NodeInfo) {
     const rect = containerRef.current?.getBoundingClientRect()
@@ -107,7 +179,7 @@ export function AAPathwayDiagram({ pathways, genes }: Props) {
       ref={containerRef}
       className="relative overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-4"
       style={{
-        backgroundImage: 'radial-gradient(circle, #d1d5db 1px, transparent 1px)',
+        backgroundImage: `radial-gradient(circle, ${palette.grid} 1px, transparent 1px)`,
         backgroundSize: '18px 18px',
       }}
       onMouseLeave={() => setTooltip(null)}
@@ -123,7 +195,7 @@ export function AAPathwayDiagram({ pathways, genes }: Props) {
             orient="auto"
             markerUnits="strokeWidth"
           >
-            <path d="M 0 0 L 8 4 L 0 8 z" fill="#9ca3af" />
+            <path d="M 0 0 L 8 4 L 0 8 z" fill={palette.edge} />
           </marker>
         </defs>
 
@@ -141,7 +213,7 @@ export function AAPathwayDiagram({ pathways, genes }: Props) {
               <path
                 d={edgePath(source, target)}
                 fill="none"
-                stroke="#9ca3af"
+                stroke={palette.edge}
                 strokeWidth="1.5"
                 markerEnd="url(#aa-pathway-arrow)"
               />
@@ -171,7 +243,7 @@ export function AAPathwayDiagram({ pathways, genes }: Props) {
                 cy={node.y}
                 r={NODE_R}
                 fill={style.fill}
-                stroke={selected ? '#111827' : style.stroke}
+                stroke={selected ? palette.selected : style.stroke}
                 strokeWidth={selected ? 3 : 2}
                 className="cursor-pointer transition-opacity hover:opacity-90"
                 onMouseEnter={(event) => updateTooltip(event, node)}

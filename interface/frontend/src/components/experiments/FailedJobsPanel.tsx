@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getFailedJobs, retryJob, deleteJobPermanent } from '../../api/client'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import type { FailedJobSummary } from '../../types'
@@ -25,7 +25,16 @@ function ErrorPhaseTag({ phase }: { phase: string }) {
   )
 }
 
-export function FailedJobsPanel() {
+function truncate(value: string, max = 500): string {
+  if (value.length <= max) return value
+  return `${value.slice(0, max - 3)}...`
+}
+
+export function FailedJobsPanel({
+  onAssistantSnapshot,
+}: {
+  onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
+}) {
   const [jobs, setJobs] = useState<FailedJobSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [actionInProgress, setActionInProgress] = useState<number | null>(null)
@@ -85,6 +94,43 @@ export function FailedJobsPanel() {
       setActionInProgress(null)
     }
   }
+
+  const assistantSnapshot = useMemo(() => ({
+    kind: 'failed_jobs',
+    failed_job_count: jobs.length,
+    expanded_job_id: expandedId,
+    delete_target: deleteTarget
+      ? {
+        id: deleteTarget.id,
+        experiment_id: deleteTarget.experiment_id,
+        experiment_name: deleteTarget.experiment_name,
+        gene_symbol: deleteTarget.gene_symbol,
+        condition: deleteTarget.condition,
+        phase: deleteTarget.phase,
+      }
+      : null,
+    action_in_progress_job_id: actionInProgress,
+    error,
+    jobs_sample: jobs.slice(0, 25).map((job) => ({
+      id: job.id,
+      experiment_id: job.experiment_id,
+      experiment_name: job.experiment_name,
+      gene_symbol: job.gene_symbol,
+      variant_type: job.variant_type,
+      variant_index: job.variant_index,
+      condition: job.condition,
+      seed: job.seed,
+      phase: job.phase,
+      finished_at: job.finished_at,
+      error_message: truncate(job.error_message || ''),
+      error_truncated: Boolean(job.error_message && job.error_message.length > 500),
+    })),
+    sample_truncated: jobs.length > 25,
+  }), [actionInProgress, deleteTarget, error, expandedId, jobs])
+
+  useEffect(() => {
+    onAssistantSnapshot?.(assistantSnapshot)
+  }, [assistantSnapshot, onAssistantSnapshot])
 
   if (loading) {
     return (

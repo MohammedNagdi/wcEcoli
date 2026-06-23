@@ -1,8 +1,9 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getDesignOverview, getEssentiality } from '../../api/client'
 import type { DesignOverview, GeneKOSummary, EssentialityStats } from '../../types'
+import { ASSISTANT_GENE_SAMPLE_LIMIT, makeAssistantContextKey, summarizeKOSummary, truncateText } from '../../utils/assistantContext'
 
 const PHENOTYPE_COLORS: Record<string, string> = {
   essential: 'bg-red-100 text-red-800',
@@ -23,6 +24,7 @@ type SortDir = 'asc' | 'desc'
 
 export function DesignPage() {
   const location = useLocation()
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const [overview, setOverview] = useState<DesignOverview | null>(null)
   const [essentiality, setEssentiality] = useState<EssentialityStats[]>([])
   const [loading, setLoading] = useState(true)
@@ -99,11 +101,132 @@ export function DesignPage() {
     return sortDir === 'asc' ? '↑' : '↓'
   }
 
+  const exactSelectedGene = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
+    if (!term) return null
+    const match = sortedGenes.find((gene) => gene.gene_symbol.toLowerCase() === term)
+    return match?.gene_symbol ?? null
+  }, [searchTerm, sortedGenes])
+
+  const phenotypeCounts = useMemo(() => {
+    return sortedGenes.reduce(
+      (acc, gene) => {
+        acc[gene.phenotype] += 1
+        return acc
+      },
+      { essential: 0, growth_defect: 0, neutral: 0, unknown: 0 }
+    )
+  }, [sortedGenes])
+
+  const assistantPageState = useMemo(() => {
+    const visibleGeneSample = sortedGenes.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map(summarizeKOSummary)
+    const essentialitySample = essentiality.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map((row) => ({
+      category: row.category,
+      total: row.total,
+      essential: row.essential,
+      growth_defect: row.growth_defect,
+      neutral: row.neutral,
+      unknown: row.unknown,
+      essential_pct: row.essential_pct,
+    }))
+    return {
+      kind: 'genome_design_summary',
+      surface: 'design',
+      summary: `Genome Design ${view} view with ${sortedGenes.length} visible gene${sortedGenes.length === 1 ? '' : 's'} and ${overview?.simulated_genes ?? 0} simulated knockout summaries.`,
+      dirty: false,
+      captured_at: assistantCapturedAt,
+      route: `${location.pathname}${location.search}`,
+      loading,
+      error: truncateText(error),
+      view,
+      overview: overview
+        ? {
+          total_genes: overview.total_genes,
+          simulated_genes: overview.simulated_genes,
+          mechanistic_genes: overview.mechanistic_genes,
+          essential_genes: overview.essential_genes,
+          growth_defect_genes: overview.growth_defect_genes,
+          neutral_genes: overview.neutral_genes,
+          unknown_genes: overview.unknown_genes,
+          simulated_percent: overview.total_genes > 0
+            ? Math.round((overview.simulated_genes / overview.total_genes) * 100)
+            : null,
+        }
+        : null,
+      filters: {
+        search: searchTerm,
+        category: categoryFilter || null,
+        phenotype: phenotypeFilter || null,
+        exact_selected_gene: exactSelectedGene,
+      },
+      sort: {
+        key: sortKey,
+        direction: sortDir,
+      },
+      visible_gene_count: sortedGenes.length,
+      visible_gene_sample: visibleGeneSample,
+      visible_gene_sample_truncated: sortedGenes.length > visibleGeneSample.length,
+      category_options_sample: categories.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT),
+      category_options_truncated: categories.length > ASSISTANT_GENE_SAMPLE_LIMIT,
+      phenotype_counts: phenotypeCounts,
+      table: view === 'table'
+        ? {
+          visible_gene_count: sortedGenes.length,
+          sample: visibleGeneSample,
+          sample_truncated: sortedGenes.length > visibleGeneSample.length,
+        }
+        : null,
+      essentiality_view: view === 'essentiality'
+        ? {
+          category_count: essentiality.length,
+          category_sample: essentialitySample,
+          category_sample_truncated: essentiality.length > essentialitySample.length,
+        }
+        : null,
+    }
+  }, [
+    assistantCapturedAt,
+    categories,
+    categoryFilter,
+    error,
+    essentiality,
+    exactSelectedGene,
+    loading,
+    location.pathname,
+    location.search,
+    overview,
+    phenotypeCounts,
+    phenotypeFilter,
+    searchTerm,
+    sortDir,
+    sortKey,
+    sortedGenes,
+    view,
+  ])
+
   useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'genome_design_summary',
+      location.pathname,
+      location.search,
+      view,
+      searchTerm,
+      categoryFilter,
+      phenotypeFilter,
+      sortKey,
+      sortDir,
+      exactSelectedGene,
+      loading,
+      error,
+      sortedGenes.length,
+      overview?.simulated_genes,
+      overview?.essential_genes,
+    ]),
     context: {
       assistant_surface: 'design',
       route: `${location.pathname}${location.search}`,
-      selected_gene: searchTerm || null,
+      selected_gene: exactSelectedGene,
+      page_state: assistantPageState,
     },
     suggestedPrompt: 'Help me review this Genome Design view. Explain what the current knockout phenotype summaries can and cannot support, which filters matter, and what simulation coverage is still missing before minimal-genome conclusions.',
   })

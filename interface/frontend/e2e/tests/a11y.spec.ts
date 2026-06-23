@@ -6,8 +6,10 @@ test.describe('Assistant accessibility', () => {
   test('docked assistant dialog has no serious axe violations', async ({ page }) => {
     await page.route(/^https?:\/\/[^/]+\/api\//, (r) => r.fulfill({ json: [] }))
     await mockAssistantApi(page, {})
+    await page.addInitScript(() => window.localStorage.setItem('wcecoli.theme', 'dark'))
     await page.goto('/guide')
 
+    await expect(page.locator('html')).toHaveClass(/dark/)
     await page.getByTestId('assistant-dock-toggle').click()
     await expect(page.getByTestId('assistant-input')).toBeVisible()
 

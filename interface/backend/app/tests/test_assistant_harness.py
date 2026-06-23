@@ -95,6 +95,7 @@ def test_assistant_status_exposes_provider_and_tool_contracts_without_execution(
     }
     assert status.db_persistence_enabled is True
     assert "route" in status.context_contract
+    assert "page_state" in status.context_contract
     tool_names = {tool.name for tool in status.tool_registry}
     assert {"create_experiment", "run_simulation", "inspect_result"} <= tool_names
 
@@ -295,6 +296,52 @@ def test_message_output_includes_provider_model_from_provenance():
         engine.dispose()
 
 
+def test_store_message_persists_compact_page_state_only():
+    engine, session = _build_session()
+    try:
+        conversation = AssistantConversation(title="compact context", assistant_surface="experiments")
+        session.add(conversation)
+        session.commit()
+        session.refresh(conversation)
+        context = AssistantContext(
+            route="/experiments/batch",
+            selected_gene="dnaA",
+            assistant_surface="experiments",
+            page_state={
+                "kind": "batch_draft",
+                "surface": "experiments",
+                "summary": "Batch draft with many seeds.",
+                "dirty": True,
+                "captured_at": "2026-06-19T12:00:00Z",
+                "view": "batch",
+                "filters": {"condition": "basal"},
+                "draft": {
+                    "seeds": list(range(200)),
+                    "raw_events": "x" * 5000,
+                },
+                "visible_rows": [{"id": i, "name": f"row-{i}"} for i in range(100)],
+            },
+        )
+        message = store_message(session, conversation, "user", "review this", context)
+
+        stored = json.loads(message.context_json)
+        assert stored["page_state"] == {
+            "kind": "batch_draft",
+            "surface": "experiments",
+            "summary": "Batch draft with many seeds.",
+            "dirty": True,
+            "captured_at": "2026-06-19T12:00:00Z",
+            "view": "batch",
+            "filters": {"condition": "basal"},
+        }
+        assert "draft" not in stored["page_state"]
+        assert "visible_rows" not in stored["page_state"]
+        assert message_to_out(message).context.page_state["summary"] == "Batch draft with many seeds."
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_assistant_message_round_trip_records_blocked_response_and_provenance():
     engine, session = _build_session()
     try:
@@ -305,6 +352,12 @@ def test_assistant_message_round_trip_records_blocked_response_and_provenance():
             selected_job=2,
             selected_result=None,
             assistant_surface="results",
+            page_state={
+                "kind": "experiment_draft",
+                "surface": "experiments",
+                "summary": "Unsaved dnaA knockout under basal.",
+                "dirty": True,
+            },
         )
         conversation = create_conversation(
             session,
@@ -338,6 +391,7 @@ def test_assistant_message_round_trip_records_blocked_response_and_provenance():
         )
 
         assert message_to_out(user_message).role == "user"
+        assert message_to_out(user_message).context.page_state["summary"] == "Unsaved dnaA knockout under basal."
         assert message_to_out(assistant_message).status == "blocked_not_enabled"
         assert provenance.prompt_hash
     finally:

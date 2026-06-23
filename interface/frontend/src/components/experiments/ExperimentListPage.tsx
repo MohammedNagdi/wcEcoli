@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getExperiments, deleteExperiment } from '../../api/client'
@@ -7,7 +7,40 @@ import { ExperimentDetailPanel } from './ExperimentDetailPanel'
 import { BatchDashboard } from './BatchDashboard'
 import { FailedJobsPanel } from './FailedJobsPanel'
 import { ConfirmDialog } from '../common/ConfirmDialog'
+import { makeAssistantContextKey } from '../../utils/assistantContext'
 import type { Experiment } from '../../types'
+
+type AssistantExperimentSummary = {
+  id: number
+  name: string
+  variant_type: string
+  variant_label: string
+  variant_index: number
+  condition: string
+  timeline: string
+  status: string
+  gene_symbol: string
+  batch_id: string
+}
+
+type AssistantSubviewSnapshot = Record<string, unknown> & {
+  selected_experiment?: AssistantExperimentSummary | null
+}
+
+function summarizeExperiment(exp: Experiment): AssistantExperimentSummary {
+  return {
+    id: exp.id,
+    name: exp.name,
+    variant_type: exp.variant_type,
+    variant_label: variantLabel(exp.variant_type),
+    variant_index: exp.variant_index,
+    condition: exp.condition,
+    timeline: exp.timeline,
+    status: exp.status,
+    gene_symbol: exp.gene_symbol,
+    batch_id: exp.batch_id,
+  }
+}
 
 const STATUS_COLORS: Record<string, string> = {
   draft:        'bg-gray-100 text-gray-600',
@@ -22,6 +55,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function ExperimentListPage() {
   const location = useLocation()
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const [searchParams] = useSearchParams()
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [loading, setLoading] = useState(true)
@@ -31,6 +65,9 @@ export function ExperimentListPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [showCreatedMessage, setShowCreatedMessage] = useState(Boolean(searchParams.get('created')))
+  const [batchAssistantSnapshot, setBatchAssistantSnapshot] = useState<AssistantSubviewSnapshot | null>(null)
+  const [failedAssistantSnapshot, setFailedAssistantSnapshot] = useState<AssistantSubviewSnapshot | null>(null)
+  const [detailAssistantSnapshot, setDetailAssistantSnapshot] = useState<AssistantSubviewSnapshot | null>(null)
   const [createdBatchMessage, setCreatedBatchMessage] = useState(() => {
     const batchName = searchParams.get('createdBatchName')
     if (!batchName) return ''
@@ -129,19 +166,139 @@ export function ExperimentListPage() {
   }
 
   // Hide batch-created experiments from the "All experiments" tab
-  const standaloneExperiments = experiments.filter((e) => !e.batch_id)
+  const standaloneExperiments = useMemo(() => experiments.filter((e) => !e.batch_id), [experiments])
+  const batchCreatedExperiments = useMemo(() => experiments.filter((e) => e.batch_id), [experiments])
+  const statusCounts = useMemo(() => experiments.reduce<Record<string, number>>((acc, experiment) => {
+    acc[experiment.status] = (acc[experiment.status] || 0) + 1
+    return acc
+  }, {}), [experiments])
+  const activeExperimentCount = useMemo(() => experiments.filter((experiment) =>
+    ['queued', 'running', 'running_parca', 'running_sim', 'ingesting'].includes(experiment.status)
+  ).length, [experiments])
 
   // Derive selected experiment from list — auto-updates when polling refreshes
   const selectedExperiment = selectedId != null
     ? experiments.find((e) => e.id === selectedId) ?? null
     : null
+  const selectedAssistantExperiment = useMemo(() => (
+    view === 'all'
+      ? (selectedExperiment ? summarizeExperiment(selectedExperiment) : null)
+      : view === 'batches'
+        ? batchAssistantSnapshot?.selected_experiment ?? null
+        : null
+  ), [batchAssistantSnapshot, selectedExperiment, view])
+  const experimentsPageState = useMemo(() => {
+    const standaloneSample = standaloneExperiments.slice(0, 25).map(summarizeExperiment)
+    return {
+      kind: 'experiments_overview',
+      surface: 'experiments',
+      summary: `Experiments ${view} view with ${experiments.length} total experiment${experiments.length === 1 ? '' : 's'}, ${standaloneExperiments.length} standalone, ${batchCreatedExperiments.length} batch-created, and ${activeExperimentCount} active.`,
+      dirty: Boolean(deleteTarget || deletingId || deleteError),
+      captured_at: assistantCapturedAt,
+      view,
+      route: `${location.pathname}${location.search}`,
+      route_params: {
+        created: justCreated || '',
+        created_batch_id: createdBatchId || '',
+        created_batch_name: createdBatchName || '',
+        created_batch_count: createdBatchCount || '',
+      },
+      notices: {
+        show_created_message: showCreatedMessage,
+        created_batch_message: createdBatchMessage,
+        delete_error: deleteError,
+      },
+      totals: {
+        experiments: experiments.length,
+        standalone: standaloneExperiments.length,
+        batch_created: batchCreatedExperiments.length,
+        active: activeExperimentCount,
+        by_status: statusCounts,
+      },
+      selected_experiment: selectedAssistantExperiment,
+      standalone: view === 'all'
+        ? {
+          selected_id: selectedId,
+          sample: standaloneSample,
+          sample_truncated: standaloneExperiments.length > standaloneSample.length,
+          delete_target: deleteTarget ? summarizeExperiment(deleteTarget) : null,
+          deleting_id: deletingId,
+        }
+        : null,
+      batch_dashboard: view === 'batches' ? batchAssistantSnapshot : null,
+      failed_jobs: view === 'failed' ? failedAssistantSnapshot : null,
+      experiment_detail: view === 'all' && selectedExperiment ? detailAssistantSnapshot : null,
+    }
+  }, [
+    activeExperimentCount,
+    assistantCapturedAt,
+    batchAssistantSnapshot,
+    batchCreatedExperiments.length,
+    createdBatchCount,
+    createdBatchId,
+    createdBatchMessage,
+    createdBatchName,
+    deleteError,
+    deleteTarget,
+    deletingId,
+    detailAssistantSnapshot,
+    experiments.length,
+    failedAssistantSnapshot,
+    justCreated,
+    location.pathname,
+    location.search,
+    selectedAssistantExperiment,
+    selectedExperiment,
+    selectedId,
+    showCreatedMessage,
+    standaloneExperiments,
+    statusCounts,
+    view,
+  ])
+  const batchSnapshotForKey = batchAssistantSnapshot as {
+    total_batches?: number
+    visible_batches?: number
+    expanded_batch_id?: string | null
+    expanded_batch?: { expanded_experiment_count?: number } | null
+  } | null
+  const failedSnapshotForKey = failedAssistantSnapshot as {
+    failed_job_count?: number
+    expanded_job_id?: number | null
+  } | null
   useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'experiments_overview',
+      view,
+      location.pathname,
+      location.search,
+      selectedAssistantExperiment?.id,
+      selectedAssistantExperiment?.condition,
+      selectedAssistantExperiment?.variant_type,
+      experiments.length,
+      activeExperimentCount,
+      deleteTarget?.id,
+      deletingId,
+      Boolean(deleteError),
+      detailAssistantSnapshot?.kind as string | undefined,
+      batchAssistantSnapshot?.kind as string | undefined,
+      failedAssistantSnapshot?.kind as string | undefined,
+      batchSnapshotForKey?.total_batches,
+      batchSnapshotForKey?.visible_batches,
+      batchSnapshotForKey?.expanded_batch_id,
+      batchSnapshotForKey?.expanded_batch?.expanded_experiment_count,
+      failedSnapshotForKey?.failed_job_count,
+      failedSnapshotForKey?.expanded_job_id,
+      batchAssistantSnapshot?.selected_experiment && typeof batchAssistantSnapshot.selected_experiment === 'object'
+        ? (batchAssistantSnapshot.selected_experiment as { id?: number }).id
+        : null,
+    ]),
     context: {
       assistant_surface: 'experiments',
       route: `${location.pathname}${location.search}`,
-      selected_experiment: selectedExperiment?.id ?? null,
-      selected_condition: selectedExperiment?.condition ?? null,
-      selected_variant_type: selectedExperiment?.variant_type ?? null,
+      selected_experiment: selectedAssistantExperiment?.id ?? null,
+      selected_condition: selectedAssistantExperiment?.condition || null,
+      selected_variant_type: selectedAssistantExperiment?.variant_type || null,
+      page_state: experimentsPageState,
     },
     suggestedPrompt: `Help me review the Experiments page. Explain the ${view} view, selected experiment or batch context, queue state, redundant controls, and the next safe action.`,
   })
@@ -235,9 +392,12 @@ export function ExperimentListPage() {
       </div>
 
       {view === 'failed' ? (
-        <FailedJobsPanel />
+        <FailedJobsPanel onAssistantSnapshot={setFailedAssistantSnapshot} />
       ) : view === 'batches' ? (
-        <BatchDashboard initialExpandedId={createdBatchId || undefined} />
+        <BatchDashboard
+          initialExpandedId={createdBatchId || undefined}
+          onAssistantSnapshot={setBatchAssistantSnapshot}
+        />
       ) : loading ? (
         <div className="text-center py-12 text-gray-400">
           <div className="inline-block w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mr-2" />
@@ -332,6 +492,7 @@ export function ExperimentListPage() {
         experiment={selectedExperiment}
         onClose={() => setSelectedId(null)}
         onUpdated={handleUpdated}
+        onAssistantSnapshot={setDetailAssistantSnapshot}
       />
     )}
     <ConfirmDialog

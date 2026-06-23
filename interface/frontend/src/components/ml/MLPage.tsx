@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getDataSummary, getFeatures, getFeaturesCSVUrl, trainModel } from '../../api/client'
 import { HelpTip } from '../common/HelpTip'
+import { makeAssistantContextKey, truncateText } from '../../utils/assistantContext'
 import type {
   DataSummary, FeatureExtractionResponse, FeatureRow,
   TrainRequest, TrainResponse,
@@ -19,6 +20,58 @@ const TARGETS = [
   { value: 'growth_rate', label: 'Growth rate', type: 'regression', desc: 'Predict instantaneous growth rate (1/s)' },
   { value: 'doubling_time_min', label: 'Doubling time', type: 'regression', desc: 'Predict doubling time in minutes' },
 ]
+
+const FEATURE_SAMPLE_LIMIT = 20
+const HISTORY_SAMPLE_LIMIT = 10
+const IMPORTANCE_SAMPLE_LIMIT = 20
+const RANDOM_STATE = 42
+
+function summarizeFeatureRow(row: FeatureRow) {
+  return {
+    experiment_id: row.experiment_id,
+    experiment_name: row.experiment_name,
+    job_id: row.job_id,
+    gene_symbol: row.gene_symbol,
+    ko_index: row.ko_index,
+    category: row.category,
+    is_mechanistic: row.is_mechanistic,
+    variant_type: row.variant_type,
+    variant_index: row.variant_index,
+    condition: row.condition,
+    seed: row.seed,
+    divided: row.divided,
+    division_time_sec: row.division_time_sec,
+    final_mass_fg: row.final_mass_fg,
+    growth_rate: row.growth_rate,
+    doubling_time_min: row.doubling_time_min,
+  }
+}
+
+function summarizeTrainResult(result: TrainResponse | null) {
+  if (!result) return null
+  const importances = result.feature_importances.slice(0, IMPORTANCE_SAMPLE_LIMIT)
+  return {
+    model_id: result.model_id,
+    algorithm: result.algorithm,
+    target: result.target,
+    task_type: result.task_type,
+    n_samples: result.n_samples,
+    n_train: result.n_train,
+    n_test: result.n_test,
+    n_features: result.n_features,
+    training_time_sec: result.training_time_sec,
+    classification: result.classification,
+    regression: result.regression,
+    cross_validation: {
+      scores: result.cross_val_scores.slice(0, 10),
+      scores_truncated: result.cross_val_scores.length > 10,
+      mean: result.cross_val_mean,
+      std: result.cross_val_std,
+    },
+    feature_importances: importances,
+    feature_importances_truncated: result.feature_importances.length > importances.length,
+  }
+}
 
 function Pct({ value, decimals = 1 }: { value: number; decimals?: number }) {
   return <span className="font-mono">{(value * 100).toFixed(decimals)}%</span>
@@ -91,6 +144,7 @@ function FeatureImportanceBar({ features }: { features: { feature: string; impor
 
 export function MLPage() {
   const location = useLocation()
+  const assistantCapturedAt = useRef(new Date().toISOString()).current
   const [summary, setSummary] = useState<DataSummary | null>(null)
   const [features, setFeatures] = useState<FeatureExtractionResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -151,7 +205,7 @@ export function MLPage() {
         test_fraction: testFraction,
         n_estimators: nEstimators,
         max_depth: maxDepth,
-        random_state: 42,
+        random_state: RANDOM_STATE,
       })
       setResult(res)
       setHistory(prev => [res, ...prev])
@@ -169,12 +223,128 @@ export function MLPage() {
   })
 
   const targetInfo = TARGETS.find(t => t.value === target)
+  const trainBlockingReason = !features
+    ? 'feature matrix has not loaded'
+    : features.total_rows < 10
+      ? `need at least 10 samples; currently ${features.total_rows}`
+      : ''
+  const canTrain = Boolean(features && features.total_rows >= 10 && !training)
+  const trainUnavailable = !features || features.total_rows < 10
+  const assistantPageState = useMemo(() => ({
+    kind: 'ml_modeling_workspace',
+    surface: 'ml',
+    summary: `ML workspace configured for ${targetInfo?.label ?? target} with ${features?.total_rows ?? 0} feature row${features?.total_rows === 1 ? '' : 's'} under current filters.`,
+    dirty: Boolean(training || trainError || result || history.length > 0),
+    captured_at: assistantCapturedAt,
+    route: `${location.pathname}${location.search}`,
+    loading,
+    features_loading: featuresLoading,
+    selected_condition: filterCondition || null,
+    selected_variant_type: filterVariant || null,
+    data_summary: summary
+      ? {
+        total_experiments: summary.total_experiments,
+        total_completed_jobs: summary.total_completed_jobs,
+        total_genes: summary.total_genes,
+        mechanistic_genes: summary.mechanistic_genes,
+        divided_count: summary.divided_count,
+        not_divided_count: summary.not_divided_count,
+        conditions: summary.conditions.slice(0, 25),
+        conditions_truncated: summary.conditions.length > 25,
+        variant_types: summary.variant_types.slice(0, 25),
+        variant_types_truncated: summary.variant_types.length > 25,
+      }
+      : null,
+    filters: {
+      condition: filterCondition || null,
+      variant_type: filterVariant || null,
+      mechanistic_only: mechanisticOnly,
+    },
+    model_config: {
+      algorithm,
+      algorithm_label: ALGORITHMS.find((item) => item.value === algorithm)?.label ?? algorithm,
+      target,
+      target_label: targetInfo?.label ?? target,
+      target_task_type: targetInfo?.type ?? null,
+      test_fraction: testFraction,
+      n_estimators: nEstimators,
+      max_depth: maxDepth,
+      random_state: RANDOM_STATE,
+    },
+    feature_matrix: features
+      ? {
+        total_rows: features.total_rows,
+        total_experiments: features.total_experiments,
+        total_genes: features.total_genes,
+        columns_sample: features.columns.slice(0, 25),
+        columns_truncated: features.columns.length > 25,
+        visible_row_sample: features.rows.slice(0, FEATURE_SAMPLE_LIMIT).map(summarizeFeatureRow),
+        visible_row_sample_truncated: features.rows.length > FEATURE_SAMPLE_LIMIT || features.total_rows > FEATURE_SAMPLE_LIMIT,
+      }
+      : null,
+    train_readiness: {
+      can_train: canTrain,
+      blocking_reason: trainBlockingReason || null,
+      disabled_by_training: training,
+    },
+    training_state: {
+      training,
+      train_error: truncateText(trainError),
+      train_error_truncated: trainError.length > 500,
+      latest_result: summarizeTrainResult(result),
+      history_sample: history.slice(0, HISTORY_SAMPLE_LIMIT).map(summarizeTrainResult),
+      history_truncated: history.length > HISTORY_SAMPLE_LIMIT,
+    },
+  }), [
+    algorithm,
+    assistantCapturedAt,
+    canTrain,
+    features,
+    featuresLoading,
+    filterCondition,
+    filterVariant,
+    history,
+    loading,
+    location.pathname,
+    location.search,
+    maxDepth,
+    mechanisticOnly,
+    nEstimators,
+    result,
+    summary,
+    target,
+    targetInfo,
+    testFraction,
+    trainBlockingReason,
+    trainError,
+    training,
+  ])
+
   useRegisterAssistantContext({
+    contextKey: makeAssistantContextKey([
+      'ml_modeling_workspace',
+      location.pathname,
+      location.search,
+      filterCondition,
+      filterVariant,
+      mechanisticOnly,
+      algorithm,
+      target,
+      testFraction,
+      nEstimators,
+      maxDepth,
+      training,
+      Boolean(trainError),
+      result?.model_id,
+      history.length,
+      features?.rows.length,
+    ]),
     context: {
       assistant_surface: 'ml',
       route: `${location.pathname}${location.search}`,
       selected_condition: filterCondition || null,
       selected_variant_type: filterVariant || null,
+      page_state: assistantPageState,
     },
     suggestedPrompt: 'Help me assess this ML setup. Explain whether the available simulation data are sufficient, how the current filters and target affect interpretation, and what result batches would improve model reliability.',
   })
@@ -361,9 +531,14 @@ export function MLPage() {
           {/* Actions */}
           <div className="flex gap-2">
             <button
+              data-testid="ml-train-button"
               onClick={handleTrain}
-              disabled={training || !features || features.total_rows < 10}
-              className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 disabled:bg-gray-300 rounded-lg transition-colors flex items-center justify-center gap-2"
+              disabled={training || trainUnavailable}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                trainUnavailable
+                  ? 'cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-subtle dark:text-slate-500'
+                  : 'bg-brand-600 text-white hover:bg-brand-700 disabled:cursor-wait disabled:opacity-75'
+              }`}
             >
               {training ? (
                 <>
@@ -377,7 +552,7 @@ export function MLPage() {
             <a
               href={csvUrl}
               download
-              className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
+              className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               CSV
             </a>
