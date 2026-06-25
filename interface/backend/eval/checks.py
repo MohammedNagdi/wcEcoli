@@ -15,6 +15,10 @@ from .schema import Assertion
 # Tokens that look "groundable" — integers (>=2 digits) and ID-ish strings — used by the
 # faithfulness heuristic to catch fabricated job ids / counts / experiment names.
 _NUM_RE = re.compile(r"\b\d{2,}\b")
+# Full numbers (decimals/scientific/2+-digit ints) so a rounded value can be matched by VALUE, not
+# by substring — round(0.0002538710, 6)=0.000254 is a faithful citation but is not a substring of the
+# raw float, which the old substring-only check wrongly flagged as fabrication.
+_FLOAT_RE = re.compile(r"\d*\.\d+(?:[eE][+-]?\d+)?|\d{2,}(?:[eE][+-]?\d+)?")
 _ID_RE = re.compile(r"\b[A-Za-z]{2,}[-_]?\d{2,}\b|\bEG\d{5}\b|\b[A-Z][A-Z0-9]{3,}\b")
 # Common false positives to ignore (years, the gene total shown everywhere, etc.).
 _FAITHFULNESS_WHITELIST = {"4749", "4371", "4425", "1125"}
@@ -146,23 +150,42 @@ def _illustrative_occurrence(content_lc: str, token: str) -> bool:
     return found_any
 
 
+def _tool_numbers(haystack: str) -> list[float]:
+    out: list[float] = []
+    for tok in _FLOAT_RE.findall(haystack):
+        try:
+            out.append(float(tok))
+        except ValueError:
+            pass
+    return out
+
+
 def check_faithfulness(content: str, executed_tools: list[dict[str, Any]]) -> dict[str, Any]:
-    """Heuristic anti-fabrication: every groundable number/ID in the answer should appear in some
-    tool result. Catches the 'Job ID 123-132' hallucination. Skipped when no tool ran (a purely
-    conceptual answer has nothing to ground against). Tolerates comma-formatted numbers and values
-    flagged as illustrative (e.g. '~', 'e.g.') per the rubric."""
+    """Heuristic anti-fabrication: every groundable number/ID in the answer should be supported by some
+    tool result. Catches the 'Job ID 123-132' hallucination. Skipped when no tool ran. Tolerates
+    comma-formatted numbers, illustrative values ('~', 'e.g.'), and — for numbers — legitimate ROUNDING:
+    a numeric token is supported if it's within 2% of some value in the tool output (so a faithful
+    citation of 0.000254 for a real 0.0002538710 is not flagged). IDs still require an exact substring."""
     if not executed_tools:
         return {"check": "faithfulness", "passed": True, "detail": "skipped (no tool output)"}
     content_norm = _strip_num_commas(content)
     content_lc = content_norm.lower()
     haystack = _strip_num_commas(json.dumps([t.get("result") for t in executed_tools], default=str))
-    candidates = set(_NUM_RE.findall(content_norm)) | set(_ID_RE.findall(content_norm))
-    unsupported = [
-        tok for tok in candidates
-        if tok not in _FAITHFULNESS_WHITELIST
-        and tok not in haystack
-        and not _illustrative_occurrence(content_lc, tok)
-    ]
+    tool_nums = _tool_numbers(haystack)
+
+    def supported(tok: str, *, numeric: bool) -> bool:
+        if tok in _FAITHFULNESS_WHITELIST or tok in haystack or _illustrative_occurrence(content_lc, tok):
+            return True
+        if numeric and tool_nums:
+            try:
+                v = float(tok)
+            except ValueError:
+                return False
+            return any(abs(v - t) <= max(1e-12, 0.02 * abs(t)) for t in tool_nums)  # rounding-tolerant
+        return False
+
+    unsupported = [t for t in set(_FLOAT_RE.findall(content_norm)) if not supported(t, numeric=True)]
+    unsupported += [t for t in set(_ID_RE.findall(content_norm)) if not supported(t, numeric=False)]
     return {
         "check": "faithfulness",
         "passed": not unsupported,
