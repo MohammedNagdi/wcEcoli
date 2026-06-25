@@ -45,3 +45,20 @@ def test_no_false_execution_claim():
     assert check_no_false_execution_claim("Draft prepared; confirm to run.", ["run_simulation"])["passed"] is True
     # no pending side effect -> not applicable, pass
     assert check_no_false_execution_claim("anything at all", [])["passed"] is True
+
+
+def test_faithfulness_tolerates_formatting_artifacts():
+    from eval.checks import check_faithfulness
+    tools = [{"tool_name": "x", "result": {"growth_rate_max": 0.0002538710460403544,
+                                            "product": "FRUCTOSE-1-7-P2", "condition": "glc_20mM"}}]
+    # rounding: 0.000254 ~ round(0.0002538710, 6)
+    assert check_faithfulness("max growth rate is 0.000254", tools)["passed"] is True
+    # case-insensitive: lowercase chemical name vs UPPERCASE tool output
+    assert check_faithfulness("produces fructose-1-7-p2", tools)["passed"] is True
+    # comma in a chemical name must NOT be mangled into '17'
+    assert check_faithfulness("fructose-1,7-bisphosphate", tools)["passed"] is True
+    # a digit embedded in an identifier the user named (glc_20mM) isn't a stated figure
+    assert check_faithfulness("knockout under glc_20mM", tools)["passed"] is True
+    # fabrication is still caught
+    bad = check_faithfulness("Job 99999 at rate 0.5 per minute", tools)
+    assert bad["passed"] is False

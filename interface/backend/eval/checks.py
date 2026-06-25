@@ -29,8 +29,22 @@ def _norm(text: str) -> str:
 
 
 def _strip_num_commas(text: str) -> str:
-    """Drop thousands separators inside numbers so '4,749' matches '4749'."""
-    return re.sub(r"(?<=\d),(?=\d)", "", text or "")
+    """Drop thousands separators so '4,749' matches '4749' — but only a comma followed by exactly three
+    digits, so chemical names like 'fructose-1,7-bisphosphate' aren't mangled into '...-17-...'."""
+    return re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", text or "")
+
+
+def _free_numbers(text: str) -> set[str]:
+    """Numeric tokens that stand alone — NOT digits embedded in an identifier (glc_20mM, EG10164,
+    gen0). A digit run with a letter/underscore immediately before it is part of a name the user or a
+    tool id supplied, not a stated figure, so it shouldn't be faithfulness-checked as a number."""
+    out: set[str] = set()
+    for m in _FLOAT_RE.finditer(text):
+        before = text[m.start() - 1] if m.start() > 0 else ""
+        if before.isalpha() or before == "_":
+            continue
+        out.add(m.group())
+    return out
 
 
 # Markers that signal an illustrative value the rubric explicitly allows (not a grounded claim).
@@ -171,10 +185,11 @@ def check_faithfulness(content: str, executed_tools: list[dict[str, Any]]) -> di
     content_norm = _strip_num_commas(content)
     content_lc = content_norm.lower()
     haystack = _strip_num_commas(json.dumps([t.get("result") for t in executed_tools], default=str))
+    haystack_lc = haystack.lower()  # case-insensitive: model writes 'fructose-16', tool has 'FRUCTOSE-16'
     tool_nums = _tool_numbers(haystack)
 
     def supported(tok: str, *, numeric: bool) -> bool:
-        if tok in _FAITHFULNESS_WHITELIST or tok in haystack or _illustrative_occurrence(content_lc, tok):
+        if tok in _FAITHFULNESS_WHITELIST or tok.lower() in haystack_lc or _illustrative_occurrence(content_lc, tok):
             return True
         if numeric and tool_nums:
             try:
@@ -184,7 +199,7 @@ def check_faithfulness(content: str, executed_tools: list[dict[str, Any]]) -> di
             return any(abs(v - t) <= max(1e-12, 0.02 * abs(t)) for t in tool_nums)  # rounding-tolerant
         return False
 
-    unsupported = [t for t in set(_FLOAT_RE.findall(content_norm)) if not supported(t, numeric=True)]
+    unsupported = [t for t in _free_numbers(content_norm) if not supported(t, numeric=True)]
     unsupported += [t for t in set(_ID_RE.findall(content_norm)) if not supported(t, numeric=False)]
     return {
         "check": "faithfulness",
