@@ -68,7 +68,9 @@ AgentStatus = Literal[
     "completed",
 ]
 
-DEFAULT_MAX_TOKENS = 1500
+# Applied to EVERY provider (was Anthropic-only at 1500, which truncated verbose hosted answers and
+# under-scored them while OpenAI/Ollama ran uncapped). 4096 is generous for a chat turn yet bounded.
+DEFAULT_MAX_TOKENS = 4096
 
 _JSON_TYPE_MAP = {
     "string": "string",
@@ -312,19 +314,36 @@ def _dynamic_context_block(context: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
-def _agent_system_prompt(context: dict[str, Any]) -> str:
+# The base prompt's heavy ALWAYS/NEVER style is needed to push weak local models into calling tools and
+# not fabricating. Instruction-following frontier models follow it too literally — they over-call tools
+# and behave rigidly. This calibration note softens the framing for hosted models (and nudges them off
+# their habit of adding accurate-but-ungrounded elaboration, which our grounding criterion penalises).
+_FRONTIER_CALIBRATION = (
+    "\n\nCalibration (capable models): you select tools and follow instructions reliably, so treat the "
+    "rules above as defaults to apply with judgement, not rigid mandates. Don't over-call tools when the "
+    "answer is already in context, don't pad responses, and keep every claim grounded in the tool output "
+    "— do not add unverified detail from general knowledge. Prefer the single most relevant tool."
+)
+
+
+def _stable_system(frontier: bool) -> str:
+    return _STABLE_SYSTEM_PROMPT + (_FRONTIER_CALIBRATION if frontier else "")
+
+
+def _agent_system_prompt(context: dict[str, Any], frontier: bool = False) -> str:
     """Single-string system prompt (OpenAI/Ollama). Stable prefix first so prefix caching applies."""
-    return f"{_STABLE_SYSTEM_PROMPT}\n\n{_dynamic_context_block(context)}"
+    return f"{_stable_system(frontier)}\n\n{_dynamic_context_block(context)}"
 
 
-def build_system(kind: str, context: dict[str, Any]):
-    """Provider-shaped system. Anthropic gets a cached stable block + a fresh dynamic block."""
+def build_system(kind: str, context: dict[str, Any], frontier: bool = False):
+    """Provider-shaped system. Anthropic gets a cached stable block + a fresh dynamic block. ``frontier``
+    selects the softened prompt tier for hosted/instruction-following models (vs local 8Bs)."""
     if kind == "anthropic":
         return [
-            {"type": "text", "text": _STABLE_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": _stable_system(frontier), "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": _dynamic_context_block(context)},
         ]
-    return _agent_system_prompt(context)
+    return _agent_system_prompt(context, frontier)
 
 
 # --------------------------------------------------------------------------- #
@@ -409,7 +428,8 @@ def _call_provider(
             "keep_alive": settings.assistant_ollama_keep_alive or "30m",
             # Bound the context window so the KV cache footprint is small + predictable (avoids
             # runaway memory on big local models). Large enough for prompt + tool results.
-            "options": {"num_ctx": int(settings.assistant_ollama_num_ctx or 8192)},
+            "options": {"num_ctx": int(settings.assistant_ollama_num_ctx or 8192),
+                        "num_predict": DEFAULT_MAX_TOKENS},
         }
         if provider_tools:
             payload["tools"] = _openai_tools(provider_tools)
@@ -429,7 +449,8 @@ def _call_provider(
     url = f"{base_url}/chat/completions"
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    payload = {"model": model, "messages": messages, "temperature": 0.2}
+    payload = {"model": model, "messages": messages, "temperature": 0.2,
+               "max_tokens": DEFAULT_MAX_TOKENS}
     if provider_tools:
         payload["tools"] = _openai_tools(provider_tools)
         payload["tool_choice"] = "auto"
@@ -974,7 +995,7 @@ def generate_assistant_agent_reply(
     max_turns = max(1, int(settings.assistant_max_agent_turns or 6))
     active_transport = transport or _default_transport
 
-    system = build_system(kind, context)
+    system = build_system(kind, context, frontier=not is_local)
     native_messages = _base_messages(history, user_content)
     tools = enrich_tools_for_session(session, build_agent_tools())
     typed_context = AssistantContext.model_validate(
