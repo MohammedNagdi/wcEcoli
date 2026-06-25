@@ -144,16 +144,30 @@ def main() -> None:
                 with Session(engine) as session:
                     for sample in range(args.repeats):
                         for case in dataset.oneshot:
-                            r = run_oneshot(session, case, target)
+                            # Isolate per case: one bad case (e.g. an invalid context) records an error
+                            # row instead of aborting the whole multi-model run.
+                            try:
+                                r = run_oneshot(session, case, target)
+                            except Exception as exc:  # noqa: BLE001
+                                r = {"id": case.id, "kind": "oneshot", "category": case.category,
+                                     "model": target.label, "status": "harness_error", "passed": False,
+                                     "error": f"{type(exc).__name__}: {exc}", "checks": [], "content": "",
+                                     "tool_names": [], "tool_output": [], "latency_ms": 0}
                             r["sample"] = sample  # lets the analysis aggregate per-item across repeats
                             checkpoint(r, handle)
                             tag = f" s{sample}" if args.repeats > 1 else ""
-                            print(f"  [oneshot{tag}] {case.id:<26} {'PASS' if r['passed'] else 'FAIL'}  {r['latency_ms']}ms")
+                            mark = "ERR " if r["status"] == "harness_error" else ("PASS" if r["passed"] else "FAIL")
+                            print(f"  [oneshot{tag}] {case.id:<26} {mark}  {r.get('latency_ms', 0)}ms")
                         for scenario in dataset.multiturn:
-                            r = run_multiturn(session, scenario, target)
+                            try:
+                                r = run_multiturn(session, scenario, target)
+                            except Exception as exc:  # noqa: BLE001
+                                r = {"id": scenario.id, "kind": "multiturn", "category": scenario.category,
+                                     "model": target.label, "status": "harness_error", "passed": False,
+                                     "error": f"{type(exc).__name__}: {exc}", "turns": [], "avg_latency_ms": 0}
                             r["sample"] = sample
                             checkpoint(r, handle)
-                            print(f"  [multi ] {scenario.id:<28} {'PASS' if r['passed'] else 'FAIL'}  ~{r['avg_latency_ms']}ms/turn")
+                            print(f"  [multi ] {scenario.id:<28} {'ERR' if r['status']=='harness_error' else ('PASS' if r['passed'] else 'FAIL')}  ~{r.get('avg_latency_ms', 0)}ms/turn")
                 _unload_ollama(target)  # free RAM before the next model loads
     finally:
         # Always emit the human-readable artifacts from whatever completed (full run OR partial crash).
