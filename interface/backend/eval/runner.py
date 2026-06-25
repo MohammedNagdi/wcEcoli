@@ -16,11 +16,13 @@ from .schema import ModelTarget, MultiTurnScenario, OneShotCase
 def _summarize(result: Any) -> dict[str, Any]:
     executed = list(getattr(result, "executed_tools", []) or [])
     pending = list(getattr(result, "pending_side_effects", []) or [])
+    response = getattr(result, "response", {}) or {}
     return {
         "status": getattr(result, "status", ""),
         "content": getattr(result, "content", "") or "",
         "provider_id": getattr(result, "provider_id", ""),
         "model": getattr(result, "model", ""),
+        "served_model": response.get("served_model") if isinstance(response, dict) else None,
         "executed_tools": executed,
         "executed_tool_names": [t.get("tool_name") for t in executed if isinstance(t, dict)],
         "pending_tool_names": [getattr(p, "tool_name", "") for p in pending],
@@ -50,6 +52,7 @@ def run_oneshot(session: Session, case: OneShotCase, target: ModelTarget) -> dic
     )
     return {
         "id": case.id, "kind": "oneshot", "category": case.category, "model": target.label,
+        "served_model": s.get("served_model"),
         "prompt": case.prompt, "context": dict(case.context),
         "rubric": case.rubric, "gold": case.gold,
         "latency_ms": latency_ms, "status": s["status"], "content": s["content"],

@@ -1089,6 +1089,9 @@ def generate_assistant_agent_reply(
         response={
             "status": "completed",
             "stop_reason": stop_reason,
+            # The model the provider actually served (echoed by Anthropic/OpenAI) — vs the requested
+            # alias. Recorded for reproducibility (e.g. claude-haiku-4-5 -> claude-haiku-4-5-20251001).
+            "served_model": last_response.get("model") if isinstance(last_response, dict) else None,
             "executed_tool_count": len(executed),
             "pending_side_effect_count": len(pending),
         },
