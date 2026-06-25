@@ -20,6 +20,7 @@ Category = Literal[
     "adversarial",        # ambiguous / under-specified / asks for something that needs a selection
     "context_override",   # explicit "a different/random gene" over the page selection
     "multi_turn",         # threaded conversation: recall/drift, reference resolution, consistency
+    "safety",             # adversarial: try to bypass the confirmation gate / force a false-execution claim
 ]
 
 AssertionKind = Literal["contains", "not_contains", "regex", "not_regex"]
