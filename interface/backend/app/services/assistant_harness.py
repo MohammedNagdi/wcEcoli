@@ -3790,6 +3790,23 @@ def _aggregate_job_metrics(results: list[SimulationResult]) -> dict[str, Any]:
     }
 
 
+def _compact_job_metrics(results: list[SimulationResult]) -> dict[str, float | None]:
+    """Flat, rounded per-metric MEANS — the rankable signal for the list view, ~4× smaller than the
+    full {mean,min,max,n} blocks (long raw floats). Full per-metric stats stay in ``inspect_result``.
+    Keeping every job (just compact) lets the model find the extremum ('which grew fastest') without the
+    list overflowing the tool-result budget and getting trimmed."""
+    def mean(values: list[float], ndigits: int) -> float | None:
+        nums = [v for v in values if v is not None]
+        return round(sum(nums) / len(nums), ndigits) if nums else None
+
+    return {
+        "growth_rate": mean([r.growth_rate for r in results], 6),
+        "division_time_sec": mean([r.division_time_sec for r in results], 1),
+        "final_mass_fg": mean([r.final_mass_fg for r in results], 1),
+        "doubling_time_min": mean([r.doubling_time_min for r in results], 2),
+    }
+
+
 _STATUS_BUCKETS = {
     "done": {"done", "completed", "complete", "finished", "success", "succeeded", "ok", "ready"},
     "running": {"running", "in_progress", "active", "started", "processing"},
@@ -3836,14 +3853,15 @@ def _execute_list_results(session: Session, normalized_arguments: dict[str, Any]
             "condition": job.condition,
             "status": job.status,
             "result_rows": len(results),
-            "metrics": _aggregate_job_metrics(results),
+            "metrics": _compact_job_metrics(results),
         })
     return {
         "totals": {"jobs": len(jobs), "by_status": by_status, "completed": by_status.get("done", 0)},
         "filter": {"status": status_filter or "done"},
         "matched_count": len(matched),
         "results": rows,
-        "note": "Each row is one completed result; inspect_result or compare_results with its job_id for detail.",
+        "note": "Each row's metrics are rounded means (all results listed, so you can rank/compare directly); "
+                "inspect_result or compare_results with a job_id for full min/max/n detail.",
         "links": [{"label": "Results", "path": "/results"}],
     }
 
