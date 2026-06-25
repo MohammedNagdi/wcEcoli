@@ -22,6 +22,7 @@ Design rules:
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import urllib.error
@@ -757,12 +758,49 @@ def _run_tool_call(
     )
 
 
+def _iter_lists(obj: Any):
+    """Yield (container_dict, key, list) for every list value reachable through dicts/lists."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, list):
+                yield obj, key, value
+            else:
+                yield from _iter_lists(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from _iter_lists(value)
+
+
+def _compact_payload(payload: Any, budget: int) -> Any:
+    """Shrink an oversized tool result to ~``budget`` chars by trimming the HEAD of its largest lists
+    (keeping valid JSON + an explicit 'showing N of M' note) rather than slicing the JSON string
+    mid-structure — a blind char-cut hands the model malformed JSON, which is worse than fewer rows.
+    """
+    if budget <= 0 or len(json.dumps(payload, default=str)) <= budget:
+        return payload
+    shaped = copy.deepcopy(payload)
+    original_len: dict[tuple[int, str], int] = {}
+    for _ in range(40):
+        if len(json.dumps(shaped, default=str)) <= budget:
+            break
+        candidates = [c for c in _iter_lists(shaped) if len(c[2]) > 1]
+        if not candidates:
+            break  # nothing left to trim by list -> caller applies a hard char fallback
+        container, key, lst = max(candidates, key=lambda c: len(json.dumps(c[2], default=str)))
+        total = original_len.setdefault((id(container), key), len(lst))  # remember the ORIGINAL count
+        keep = max(1, len(lst) // 2)
+        container[key] = lst[:keep]
+        container[f"{key}__truncated"] = f"showing {keep} of {total}; narrow the query to see the rest"
+    return shaped
+
+
 def _tool_result(call: NormalizedToolCall, payload: dict[str, Any], *, is_error: bool = False) -> dict[str, Any]:
-    content = json.dumps(payload, default=str)
+    # Compact what re-enters the model's context each round (the grounded card the user sees is full).
     cap = int(settings.assistant_max_tool_result_chars or 0)
+    shaped = _compact_payload(payload, cap) if cap else payload
+    content = json.dumps(shaped, default=str)
     if cap and len(content) > cap:
-        # Trim what re-enters the model's context each round (the grounded card the user sees is full).
-        content = content[:cap] + f'… [truncated {len(content) - cap} chars; full data shown in the card]"'
+        content = content[:cap] + "… [truncated; full data shown in the card]"  # rare hard fallback
     return {
         "id": call.id,
         "name": call.name,
