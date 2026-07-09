@@ -22,6 +22,8 @@ class RunResponse(BaseModel):
 class RunJobRequest(BaseModel):
     condition: str = ""
     seeds: Optional[int | list[int]] = None
+    seed_count: Optional[int] = None
+    seed_values: Optional[list[int]] = None
     generations: Optional[int] = None
 
 
@@ -43,11 +45,16 @@ def create_simulation_jobs_for_experiment(
     except json.JSONDecodeError:
         params = {}
 
-    seed_spec = body.seeds if body.seeds is not None else params.get("seeds", 1)
-    if isinstance(seed_spec, list):
-        seed_values = [int(seed) for seed in seed_spec]
+    if body.seed_values is not None:
+        seed_values = [int(seed) for seed in body.seed_values]
     else:
-        seed_values = list(range(int(seed_spec)))
+        seed_spec = body.seed_count if body.seed_count is not None else body.seeds
+        if seed_spec is None:
+            seed_spec = params.get("seed_values", params.get("seeds", 1))
+        if isinstance(seed_spec, list):
+            seed_values = [int(seed) for seed in seed_spec]
+        else:
+            seed_values = list(range(int(seed_spec)))
     generations = body.generations if body.generations is not None else params.get("generations", 1)
     timeline = resolve_timeline_definition(session, experiment.timeline) if experiment.timeline else ""
     condition = body.condition or experiment.condition or "basal"

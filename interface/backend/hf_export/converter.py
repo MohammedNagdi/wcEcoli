@@ -9,8 +9,9 @@ are exported too when ``--full-tensors`` is set (see ``MATRIX_CHANNELS`` / ``wri
 their column-id maps are stored once under ``/reference``.
 
 HDF5 layout (one group per cell trajectory):
-    /cond=<c>/geno=<g>/seed=<s>/gen=<n>
-        attrs: variant_type, ko_gene, condition, seed, generation, job_id, divided, summary metrics…
+    /variant=<type>/idx=<i>/exp=<experiment_id>/job=<job_id>/seed=<s>/gen=<n>
+        attrs: variant_type, variant_index, experiment_id, job_id, condition, genotype, seed, generation,
+        ko_gene, divided, summary metrics…
         <channel>/value  [T] float32
         <channel>/time   [T] float32   (attrs: unit)
 
@@ -21,6 +22,10 @@ with a synthetic channel dict — no real simOut needed.
 from __future__ import annotations
 
 from typing import Any
+
+import hashlib
+import json
+import re
 
 import numpy as np
 
@@ -44,8 +49,43 @@ MATRIX_CHANNELS = {
 }
 
 
-def group_path(condition: str, genotype: str, seed: int, generation: int) -> str:
-    return f"cond={condition}/geno={genotype}/seed={seed}/gen={generation}"
+def safe_path_segment(value: Any) -> str:
+    """Return a compact HDF5-safe path segment."""
+    text = str(value if value not in (None, "") else "unknown")
+    text = re.sub(r"[^A-Za-z0-9_.+=-]+", "_", text)
+    return text.strip("_") or "unknown"
+
+
+def sim_params_hash(raw_sim_params: str | None) -> str:
+    """Stable short hash for simulation parameters stored in provenance."""
+    try:
+        parsed = json.loads(raw_sim_params or "{}")
+    except json.JSONDecodeError:
+        parsed = raw_sim_params or ""
+    canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
+def group_path(
+    condition: str,
+    genotype: str,
+    seed: int,
+    generation: int,
+    *,
+    variant_type: str = "",
+    variant_index: int = 0,
+    experiment_id: int | None = None,
+    job_id: int | None = None,
+) -> str:
+    if experiment_id is None or job_id is None:
+        return (
+            f"cond={safe_path_segment(condition)}/geno={safe_path_segment(genotype)}"
+            f"/seed={seed}/gen={generation}"
+        )
+    return (
+        f"variant={safe_path_segment(variant_type)}/idx={variant_index}"
+        f"/exp={experiment_id}/job={job_id}/seed={seed}/gen={generation}"
+    )
 
 
 def write_matrix_channels(h5file: Any, path: str, matrices: dict[str, dict[str, Any]]) -> dict[str, list[str]]:

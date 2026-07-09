@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from collections import Counter
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -20,7 +21,7 @@ from app.config import settings
 from app.db.engine import make_sqlite_engine
 from app.db.models import Experiment, SimulationJob
 
-from .converter import MATRIX_CHANNELS, build_record, group_path, write_matrix_channels, write_sim
+from .converter import MATRIX_CHANNELS, build_record, group_path, sim_params_hash, write_matrix_channels, write_sim
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("hf_export")
@@ -34,6 +35,16 @@ def _genotype(exp: Experiment | None) -> tuple[str, str]:
     return (f"{gene}_KO" if gene else (exp.variant_type or "variant")), gene
 
 
+def _campaign_tier(exp: Experiment | None) -> str:
+    """Extract a tier label from campaign experiment names like '[T3] ...'."""
+    if not exp or not exp.name.startswith("["):
+        return ""
+    closing = exp.name.find("]")
+    if closing <= 1:
+        return ""
+    return exp.name[1:closing]
+
+
 def export(out_dir: Path, limit: int | None, full_tensors: bool = False) -> dict:
     import h5py
     import numpy as np
@@ -42,6 +53,7 @@ def export(out_dir: Path, limit: int | None, full_tensors: bool = False) -> dict
     out_dir.mkdir(parents=True, exist_ok=True)
     engine = make_sqlite_engine(settings.database_path)
     records: list[dict] = []
+    qc_records: list[dict] = []
     n_jobs = n_traj = 0
     reference_ids: dict[str, list[str]] = {}  # written once under /reference
     matrix_cols: dict[str, int] = {}
@@ -55,15 +67,32 @@ def export(out_dir: Path, limit: int | None, full_tensors: bool = False) -> dict
         for job in jobs:
             exp = session.get(Experiment, job.experiment_id)
             genotype, ko_gene = _genotype(exp)
+            variant_type = exp.variant_type if exp else job.variant_type
+            variant_index = exp.variant_index if exp else job.variant_index
+            experiment_id = int(job.experiment_id or 0)
+            sim_hash = sim_params_hash(exp.sim_params if exp else "{}")
+            tier = _campaign_tier(exp)
             if not job.sim_dir:
+                qc_records.append({
+                    "experiment_id": experiment_id, "job_id": int(job.id), "status": "no_sim_out",
+                    "reason": "job has no sim_dir", "sim_dir": "", "export_path": "",
+                })
                 continue
             base = settings.sim_output_dir / job.sim_dir
             try:
                 sim_outs = find_sim_outs(base)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("job %s: cannot locate sim_outs: %s", job.id, exc)
+                qc_records.append({
+                    "experiment_id": experiment_id, "job_id": int(job.id), "status": "no_sim_out",
+                    "reason": str(exc), "sim_dir": job.sim_dir, "export_path": "",
+                })
                 continue
             if not sim_outs:
+                qc_records.append({
+                    "experiment_id": experiment_id, "job_id": int(job.id), "status": "no_sim_out",
+                    "reason": "no simOut directories found", "sim_dir": job.sim_dir, "export_path": "",
+                })
                 continue
             n_jobs += 1
             for generation, sim_out_path in enumerate(sim_outs):
@@ -73,18 +102,44 @@ def export(out_dir: Path, limit: int | None, full_tensors: bool = False) -> dict
                     summary = reader.extract_summary()
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("job %s gen %s: read failed: %s", job.id, generation, exc)
+                    qc_records.append({
+                        "experiment_id": experiment_id, "job_id": int(job.id), "status": "malformed",
+                        "reason": str(exc), "sim_dir": job.sim_dir, "export_path": "",
+                    })
                     continue
                 if not channels:
+                    qc_records.append({
+                        "experiment_id": experiment_id, "job_id": int(job.id), "status": "malformed",
+                        "reason": "no exportable channels", "sim_dir": job.sim_dir, "export_path": "",
+                    })
                     continue
-                path = group_path(job.condition or "unknown", genotype, job.seed, generation)
+                path = group_path(
+                    job.condition or "unknown",
+                    genotype,
+                    job.seed,
+                    generation,
+                    variant_type=variant_type,
+                    variant_index=variant_index,
+                    experiment_id=experiment_id,
+                    job_id=int(job.id),
+                )
                 attrs = {
-                    "variant_type": exp.variant_type if exp else job.variant_type,
+                    "variant_type": variant_type,
+                    "variant_index": int(variant_index),
+                    "campaign_tier": tier,
+                    "experiment_id": experiment_id,
+                    "sim_params_hash": sim_hash,
                     "ko_gene": ko_gene, "condition": job.condition or "",
+                    "genotype": genotype,
                     "seed": int(job.seed), "generation": generation, "job_id": int(job.id),
                     **{k: ("" if v is None else v) for k, v in summary.items()},
                 }
                 written = write_sim(h5, path, channels, attrs)
                 if not written:
+                    qc_records.append({
+                        "experiment_id": experiment_id, "job_id": int(job.id), "status": "malformed",
+                        "reason": "no channels written", "sim_dir": job.sim_dir, "export_path": path,
+                    })
                     continue
 
                 # High-dimensional per-gene/per-reaction matrices (opt-in; the dataset's real value).
@@ -105,12 +160,19 @@ def export(out_dir: Path, limit: int | None, full_tensors: bool = False) -> dict
                     written = written + list(matrices.keys())
 
                 n_traj += 1
+                qc_status = "exported" if summary.get("divided") is not False else "no_division"
+                qc_records.append({
+                    "experiment_id": experiment_id, "job_id": int(job.id), "status": qc_status,
+                    "reason": "", "sim_dir": job.sim_dir, "export_path": path,
+                })
                 records.append(build_record(
                     path=path, variant_type=attrs["variant_type"], condition=job.condition or "",
                     genotype=genotype, ko_gene=ko_gene, seed=int(job.seed), generation=generation,
                     job_id=int(job.id), channels_written=written, summary=summary,
                     provenance={"experiment_id": job.experiment_id,
-                                "variant_index": getattr(job, "variant_index", None)},
+                                "campaign_tier": tier,
+                                "variant_index": getattr(job, "variant_index", None),
+                                "sim_params_hash": sim_hash},
                 ))
 
         # Column-id maps for the high-dim matrices, stored ONCE (model-wide, not per cell).
@@ -122,12 +184,19 @@ def export(out_dir: Path, limit: int | None, full_tensors: bool = False) -> dict
 
     (out_dir / "metadata.jsonl").write_text(
         "".join(json.dumps(r, default=str) + "\n" for r in records), encoding="utf-8")
+    (out_dir / "export_qc.jsonl").write_text(
+        "".join(json.dumps(r, default=str) + "\n" for r in qc_records), encoding="utf-8")
+    )
     manifest = {
         "version": "v0", "n_jobs": n_jobs, "n_cell_trajectories": n_traj,
         "channels": sorted({c for r in records for c in r["channels"]}),
         "matrix_channels": matrix_cols,
         "conditions": sorted({r["condition"] for r in records}),
         "genotypes": sorted({r["genotype"] for r in records}),
+        "variant_types": sorted({r["variant_type"] for r in records}),
+        "campaign_tiers": sorted({r.get("prov_campaign_tier") for r in records if r.get("prov_campaign_tier")}),
+        "variant_indices": sorted({r.get("prov_variant_index") for r in records if r.get("prov_variant_index") is not None}),
+        "qc_counts": dict(Counter(r["status"] for r in qc_records)),
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     logger.info("Exported %s jobs / %s trajectories -> %s", n_jobs, n_traj, out_dir)

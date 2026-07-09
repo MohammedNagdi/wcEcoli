@@ -40,6 +40,21 @@ def test_write_sim_and_record(tmp_path):
     assert rec["channels"] == written
 
 
+def test_group_path_is_collision_safe_for_variant_exports():
+    first = group_path(
+        "basal", "WT", 0, 0,
+        variant_type="ppgpp_conc", variant_index=1, experiment_id=10, job_id=100,
+    )
+    second = group_path(
+        "basal", "WT", 0, 0,
+        variant_type="ppgpp_conc", variant_index=2, experiment_id=11, job_id=101,
+    )
+
+    assert first != second
+    assert first == "variant=ppgpp_conc/idx=1/exp=10/job=100/seed=0/gen=0"
+    assert second == "variant=ppgpp_conc/idx=2/exp=11/job=101/seed=0/gen=0"
+
+
 def test_write_matrix_channels(tmp_path):
     import h5py
 

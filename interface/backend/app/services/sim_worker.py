@@ -24,6 +24,7 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import update
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, col, select
 
@@ -136,6 +137,7 @@ def _run_docker(
     sim_dir: str,
     log_buffer: deque,
     phase_label: str,
+    env_vars: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a command inside the wcEcoli Docker container."""
     output_volume = os.environ.get("SIM_OUTPUT_VOLUME", "interface_sim-output")
@@ -159,6 +161,7 @@ def _run_docker(
             "-v", host_models_path + ":/wcEcoli/models:ro",
         ])
 
+    docker_cmd.extend(_docker_env_args(env_vars or {}))
     docker_cmd.extend([settings.docker_image] + args)
 
     logger.info("[%s] %s", phase_label, " ".join(docker_cmd))
@@ -181,6 +184,35 @@ def _run_docker(
     proc.wait()
     log_buffer.append("--- " + phase_label + " exited with code " + str(proc.returncode) + " ---")
     return subprocess.CompletedProcess(docker_cmd, proc.returncode)
+
+
+def _docker_env_args(env_vars: dict[str, str]) -> list[str]:
+    args: list[str] = []
+    for key, value in sorted(env_vars.items()):
+        args.extend(["-e", key + "=" + value])
+    return args
+
+
+SINUSOIDAL_ENV_KEYS = {"SINE_MEDIA_A", "SINE_MEDIA_B"}
+
+
+def _sinusoidal_env_from_sim_params(raw_sim_params: str) -> dict[str, str]:
+    try:
+        params = json.loads(raw_sim_params or "{}")
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(params, dict):
+        return {}
+
+    sinusoidal = params.get("sinusoidal_media", {})
+    if not isinstance(sinusoidal, dict):
+        return {}
+
+    return {
+        key: str(value)
+        for key, value in sinusoidal.items()
+        if key in SINUSOIDAL_ENV_KEYS and value not in ("", None)
+    }
 
 
 def _parca_cached(sim_dir: str) -> bool:
@@ -345,8 +377,11 @@ def execute_job(engine, job_id: int):
 
     with Session(engine) as session:
         job = session.get(SimulationJob, job_id)
+        if not job:
+            logger.error("Job %d not found", job_id)
+            return
         experiment = session.get(Experiment, job.experiment_id)
-        if not job or not experiment:
+        if not experiment:
             logger.error("Job %d or its experiment not found", job_id)
             return
 
@@ -482,7 +517,16 @@ def execute_job(engine, job_id: int):
             sim_args.extend(["--timeline", condition_timeline])
             log_buffer.append("Condition '" + job.condition + "' → timeline: " + condition_timeline)
 
-        result = _run_docker(sim_args, run_id, log_buffer, "sim")
+        sim_env_vars: dict[str, str] = {}
+        if job.variant_type == "sinusoidal_media":
+            sim_env_vars = _sinusoidal_env_from_sim_params(experiment.sim_params)
+            if sim_env_vars:
+                log_buffer.append(
+                    "Sinusoidal media env: "
+                    + ", ".join(key + "=" + value for key, value in sorted(sim_env_vars.items()))
+                )
+
+        result = _run_docker(sim_args, run_id, log_buffer, "sim", env_vars=sim_env_vars)
         if result.returncode != 0:
             _fail_job(session, job, log_buffer, "Simulation failed")
             return
@@ -620,7 +664,7 @@ def _repair_stale_statuses(engine):
     states from a prior crash or unclean shutdown."""
     with Session(engine) as session:
         # 1. Reset orphaned jobs (stuck in active state) back to pending
-        active_statuses = ["running_parca", "running_sim", "ingesting"]
+        active_statuses = ["claimed", "running_parca", "running_sim", "ingesting"]
         stuck_jobs = session.exec(
             select(SimulationJob).where(
                 col(SimulationJob.status).in_(active_statuses)
@@ -668,6 +712,29 @@ def _repair_stale_statuses(engine):
             logger.info("Repaired %d stale experiment(s)", fixed)
 
 
+def claim_next_pending_job(engine) -> int | None:
+    """Atomically claim the oldest pending job for this worker."""
+    with Session(engine) as session:
+        pending = session.exec(
+            select(SimulationJob.id)
+            .where(SimulationJob.status == "pending")
+            .order_by(col(SimulationJob.id).asc())
+            .limit(1)
+        ).first()
+        if pending is None:
+            return None
+        job_id = int(pending[0] if isinstance(pending, tuple) else pending)
+        result = session.exec(
+            update(SimulationJob)
+            .where(SimulationJob.id == job_id, SimulationJob.status == "pending")
+            .values(status="claimed", phase="Claimed by worker", started_at=_now())
+        )
+        session.commit()
+        if getattr(result, "rowcount", 0) != 1:
+            return None
+        return job_id
+
+
 def poll_loop():
     """Main worker loop — poll for pending jobs and execute them."""
     engine = make_sqlite_engine(settings.database_path)
@@ -682,17 +749,11 @@ def poll_loop():
             # finished creating the SQLite schema on first boot.
             _repair_stale_statuses(engine)
 
-            with Session(engine) as session:
-                job = session.exec(
-                    select(SimulationJob)
-                    .where(SimulationJob.status == "pending")
-                    .order_by(col(SimulationJob.id).asc())
-                    .limit(1)
-                ).first()
+            job_id = claim_next_pending_job(engine)
 
-            if job:
-                logger.info("Picked up job %d (experiment %d)", job.id, job.experiment_id)
-                execute_job(engine, job.id)
+            if job_id:
+                logger.info("Claimed job %d", job_id)
+                execute_job(engine, job_id)
             else:
                 time.sleep(settings.worker_poll_interval)
 

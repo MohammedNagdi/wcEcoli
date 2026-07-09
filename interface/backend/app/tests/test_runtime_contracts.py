@@ -7,8 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import app.main  # noqa: F401 - load routers through the normal app entrypoint
-from app.db.models import Condition, SimulationJob
+from sqlmodel import SQLModel, Session, create_engine, select
+
+from app.db.models import Condition, Experiment, SimulationJob
 from app.routers import experiments
+from app.services.job_queue import RunJobRequest, create_simulation_jobs_for_experiment
 from app.services import sim_worker
 
 
@@ -54,6 +57,14 @@ class FakeSession:
 
 
 class RuntimeContractsTest(unittest.TestCase):
+	def _runtime_test_engine(self, tmpdir):
+		engine = create_engine(
+			"sqlite:///" + str(Path(tmpdir) / "runtime-test.db"),
+			connect_args={"check_same_thread": False},
+		)
+		SQLModel.metadata.create_all(engine)
+		return engine
+
 	def test_tf_activity_uses_current_timeline_id(self):
 		sim_data = SimpleNamespace(
 			tf_to_active_inactive_conditions={
@@ -201,6 +212,26 @@ class RuntimeContractsTest(unittest.TestCase):
 			SimulationJob(variant_type='multi_gene_knockout', variant_index=0)
 		))
 
+	def test_sinusoidal_env_from_sim_params_is_whitelisted(self):
+		env = sim_worker._sinusoidal_env_from_sim_params(
+			'{"sinusoidal_media":{"SINE_MEDIA_A":"minimal","SINE_MEDIA_B":"minimal_acetate","BAD":"x"}}'
+		)
+
+		self.assertEqual({
+			'SINE_MEDIA_A': 'minimal',
+			'SINE_MEDIA_B': 'minimal_acetate',
+		}, env)
+		self.assertEqual({}, sim_worker._sinusoidal_env_from_sim_params('not json'))
+
+	def test_docker_env_args_are_sorted_key_value_pairs(self):
+		self.assertEqual(
+			['-e', 'SINE_MEDIA_A=minimal', '-e', 'SINE_MEDIA_B=minimal_acetate'],
+			sim_worker._docker_env_args({
+				'SINE_MEDIA_B': 'minimal_acetate',
+				'SINE_MEDIA_A': 'minimal',
+			}),
+		)
+
 	def test_all_jobs_share_content_addressed_parca_directory(self):
 		with patch.object(sim_worker, '_parca_cache_key', return_value='a' * 64):
 			self.assertEqual(
@@ -287,6 +318,119 @@ class RuntimeContractsTest(unittest.TestCase):
 				self.assertFalse(sim_worker._parca_cached('parca_cache_test'))
 			finally:
 				sim_worker.settings.sim_output_dir = original_sim_output_dir
+
+	def test_job_queue_accepts_explicit_seed_values(self):
+		with TemporaryDirectory() as tmpdir:
+			engine = self._runtime_test_engine(tmpdir)
+			with Session(engine) as session:
+				experiment = Experiment(
+					name='seed-values',
+					variant_type='wildtype',
+					variant_index=0,
+					condition='basal',
+					sim_params='{}',
+					status='draft',
+				)
+				session.add(experiment)
+				session.flush()
+
+				response = create_simulation_jobs_for_experiment(
+					experiment,
+					RunJobRequest(seed_values=[3, 5], generations=2),
+					session,
+				)
+				jobs = session.exec(
+					select(SimulationJob).where(SimulationJob.experiment_id == experiment.id)
+				).all()
+
+			self.assertEqual(2, len(response.job_ids))
+			self.assertEqual([3, 5], [job.seed for job in jobs])
+			self.assertEqual([2, 2], [job.generations for job in jobs])
+
+	def test_job_queue_seed_count_is_count_not_literal_seed(self):
+		with TemporaryDirectory() as tmpdir:
+			engine = self._runtime_test_engine(tmpdir)
+			with Session(engine) as session:
+				experiment = Experiment(
+					name='seed-count',
+					variant_type='wildtype',
+					variant_index=0,
+					condition='basal',
+					sim_params='{}',
+					status='draft',
+				)
+				session.add(experiment)
+				session.flush()
+
+				create_simulation_jobs_for_experiment(
+					experiment,
+					RunJobRequest(seed_count=3, generations=1),
+					session,
+				)
+				jobs = session.exec(
+					select(SimulationJob).where(SimulationJob.experiment_id == experiment.id)
+				).all()
+
+			self.assertEqual([0, 1, 2], [job.seed for job in jobs])
+
+	def test_job_queue_keeps_legacy_seeds_list_behavior(self):
+		with TemporaryDirectory() as tmpdir:
+			engine = self._runtime_test_engine(tmpdir)
+			with Session(engine) as session:
+				experiment = Experiment(
+					name='legacy-seeds',
+					variant_type='wildtype',
+					variant_index=0,
+					condition='basal',
+					sim_params='{}',
+					status='draft',
+				)
+				session.add(experiment)
+				session.flush()
+
+				create_simulation_jobs_for_experiment(
+					experiment,
+					RunJobRequest(seeds=[7, 11], generations=1),
+					session,
+				)
+				jobs = session.exec(
+					select(SimulationJob).where(SimulationJob.experiment_id == experiment.id)
+				).all()
+
+			self.assertEqual([7, 11], [job.seed for job in jobs])
+
+	def test_worker_atomically_claims_one_pending_job(self):
+		with TemporaryDirectory() as tmpdir:
+			engine = self._runtime_test_engine(tmpdir)
+			with Session(engine) as session:
+				experiment = Experiment(
+					name='claim-test',
+					variant_type='wildtype',
+					variant_index=0,
+					condition='basal',
+					status='queued',
+				)
+				session.add(experiment)
+				session.flush()
+				job = SimulationJob(
+					experiment_id=experiment.id,
+					status='pending',
+					phase='Queued',
+					variant_type='wildtype',
+					variant_index=0,
+					condition='basal',
+				)
+				session.add(job)
+				session.commit()
+				job_id = job.id
+
+			self.assertEqual(job_id, sim_worker.claim_next_pending_job(engine))
+			self.assertIsNone(sim_worker.claim_next_pending_job(engine))
+
+			with Session(engine) as session:
+				claimed_job = session.get(SimulationJob, job_id)
+				self.assertEqual('claimed', claimed_job.status)
+				self.assertEqual('Claimed by worker', claimed_job.phase)
 
 
 if __name__ == '__main__':
