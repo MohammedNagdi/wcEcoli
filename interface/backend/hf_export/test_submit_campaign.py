@@ -12,6 +12,7 @@ from hf_export.matrix import (
     T2_EXTENDED_CONDITIONS,
     TIER_T2_CORE,
     TIER_T2_EXTENDED,
+    TIER_T1,
     TIER_T3,
     TIER_T4,
     TIER_T5,
@@ -129,10 +130,17 @@ def test_plan_cell_rejects_missing_variant_row():
 
 
 def test_stratified_sample_spans_families():
-    cells = v0_campaign(ko_genes=["dnaA", "crp", "manY"])
-    picked = stratified_sample(cells, 8)
+    cells = [
+        CampaignCell("wildtype", "WT/basal"),
+        CampaignCell("wildtype", "WT/acetate"),
+        CampaignCell("gene_knockout", "dnaA_KO/basal", params={"gene": "dnaA"}),
+        CampaignCell("gene_knockout", "argG_KO/basal", params={"gene": "argG"}),
+        CampaignCell("timelines", "WT/rich_to_minimal", params={"events": "0 minimal, 1200 minimal_acetate"}),
+        CampaignCell("timelines", "WT/glucose_starvation", params={"events": "0 minimal, 1200 minimal_no_glucose"}),
+    ]
+    picked = stratified_sample(cells, 5)
     families = {c.variant_type for c in picked}
-    assert len(picked) == 8
+    assert len(picked) == 5
     # A first-N slice would be all wildtype; the stratified sample must span multiple families.
     assert len(families) >= 3 and "gene_knockout" in families and "wildtype" in families
 
@@ -168,9 +176,9 @@ def test_t2_campaigns_emit_gene_knockouts_over_expected_conditions():
 
 
 def test_parse_tiers_defaults_and_deduplicates():
-    assert parse_tiers("") == ["v0"]
-    assert parse_tiers("v0,T2_CORE,t2_core,T2_EXTENDED,T3,T4,t4,T5,t5") == [
-        "v0",
+    assert parse_tiers("") == [TIER_T1]
+    assert parse_tiers("T1,v0,T2_CORE,t2_core,T2_EXTENDED,T3,T4,t4,T5,t5") == [
+        TIER_T1,
         TIER_T2_CORE,
         TIER_T2_EXTENDED,
         TIER_T3,

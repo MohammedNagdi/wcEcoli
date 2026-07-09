@@ -8,7 +8,7 @@ exporter on the completed jobs.
     docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --limit 8
     docker exec interface-api-1 python -m hf_export.submit_campaign --limit 8      # real submit
 
-Implemented campaign tiers cover the legacy `v0` pilot plus T2-T5. T3 direct dynamics, T4
+Implemented campaign tiers cover T1-T5. T3 direct dynamics, T4
 regulatory variants, and T5 multi-gene knockouts are submitted through the same experiment-creation
 contract used by the app. T6 genome-design variants remain a documented follow-up.
 """
@@ -58,7 +58,7 @@ from .matrix import (
     TIER_T3,
     TIER_T4,
     TIER_T5,
-    TIER_V0,
+    TIER_T1,
     CampaignCell,
     t3_campaign,
     t4_campaign,
@@ -362,9 +362,9 @@ def resolve_t5_pair_set(session: Session) -> dict[str, Any]:
 
 def parse_tiers(raw: str) -> list[str]:
     tiers = [_strip_quotes(tier).upper() for tier in raw.split(",") if tier.strip()]
-    tiers = [TIER_V0 if tier == TIER_V0.upper() else tier for tier in tiers]
+    tiers = [TIER_T1 if tier in {TIER_T1, "V0"} else tier for tier in tiers]
     if not tiers:
-        return [TIER_V0]
+        return [TIER_T1]
 
     unsupported = [tier for tier in tiers if tier not in SUPPORTED_TIERS]
     if unsupported:
@@ -406,10 +406,13 @@ def build_campaign_cells(
     cells: list[CampaignCell] = []
     metadata: dict[str, Any] = {}
 
-    if TIER_V0 in tiers:
-        ko_genes = resolve_ko_genes(session, genes)
-        cells.extend(v0_campaign(ko_genes))
-        metadata["v0_ko_genes_resolved"] = len(ko_genes)
+    if TIER_T1 in tiers:
+        t1_cells = v0_campaign([])
+        cells.extend(t1_cells)
+        metadata["t1"] = {
+            "wt_conditions": len(t1_cells),
+            "cells": len(t1_cells),
+        }
 
     t2_gene_sets: dict[str, Any] | None = None
     if TIER_T2_CORE in tiers or TIER_T2_EXTENDED in tiers:
@@ -641,7 +644,7 @@ def stratified_sample(cells: list[CampaignCell], n: int) -> list[CampaignCell]:
 def run(*, limit: int | None, dry_run: bool, seeds: int, generations: int,
         genes: list[str] | None, sample: int | None = None, tiers: list[str] | None = None,
         campaign_id: str | None = None) -> dict[str, Any]:
-    tiers = tiers or [TIER_V0]
+    tiers = tiers or [TIER_T1]
     campaign_id = campaign_id or default_campaign_id(tiers, seeds, generations)
     engine = make_sqlite_engine(settings.database_path)
     with Session(engine) as session:
@@ -764,8 +767,8 @@ def main() -> None:
     ap.add_argument("--generations", type=int, default=GENERATIONS)
     ap.add_argument("--genes", type=str, default="", help="comma-separated KO gene list (else auto)")
     ap.add_argument("--campaign-id", type=str, default="", help="stable id for idempotent campaign submission")
-    ap.add_argument("--tiers", type=str, default=TIER_V0,
-                    help="comma-separated campaign tiers: v0, T2_CORE, T2_EXTENDED, T3, T4, T5")
+    ap.add_argument("--tiers", type=str, default=TIER_T1,
+                    help="comma-separated campaign tiers: T1, T2_CORE, T2_EXTENDED, T3, T4, T5")
     args = ap.parse_args()
     genes = [g.strip() for g in args.genes.split(",") if g.strip()] or None
     tiers = parse_tiers(args.tiers)

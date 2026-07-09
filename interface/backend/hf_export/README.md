@@ -4,9 +4,10 @@ Packages completed whole-cell simulations into the HF dataset layout ("The Well,
 `HF_DATASET_DESIGN.md` (repo root) for the full design, benchmark tasks, and tiered roadmap.
 
 ## Pieces
-- `matrix.py` — the **locked v0 campaign** (what to simulate): knockouts + static conditions +
-  **dynamic media (timelines / sinusoidal) from day one** so the T3 forecasting benchmark exists in
-  v0. `SEEDS`, `GENERATIONS`, condition sets, `KO_TARGET` are tunable to your compute budget.
+- `matrix.py` — the fixed tiered campaign plan: T1 covers WT static references, T2 covers
+  single-gene KOs, T3 covers dynamic media, T4 covers regulatory variants, and T5 covers curated
+  multi-gene KOs. `SEEDS`, `GENERATIONS`, condition sets, and target counts are tunable to your
+  compute budget.
 - `submit_campaign.py` — turns the matrix into experiments + queued jobs (the **generation** side). It
   only *enqueues*; the platform worker runs the sims.
 - `converter.py` + `run_export.py` — `simOut → HDF5 + metadata.jsonl + manifest.json` (the **export**
@@ -21,15 +22,15 @@ once so `eval/` and `hf_export/` are live:
 docker compose up -d api          # applies the ./backend/{eval,hf_export} bind mounts
 ```
 
-**1 — Submit the v0 campaign (generation).** Validate first with `--dry-run` (creates nothing):
+**1 — Submit a campaign tier (generation).** Validate first with `--dry-run` (creates nothing):
 ```
-docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --limit 8 --seeds 2 --generations 2
-docker exec interface-api-1 python -m hf_export.submit_campaign           --limit 8 --seeds 2 --generations 2
+docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --tiers T1 --limit 8 --seeds 2 --generations 2
+docker exec interface-api-1 python -m hf_export.submit_campaign           --tiers T1 --limit 8 --seeds 2 --generations 2
 ```
 The real run creates experiments + queues jobs; **the worker then runs them** (watch the Experiments
 page until `done`). Submittable now: `wildtype`, `gene_knockout`, timeline-based dynamics, T3
 sinusoidal/amino-acid shifts, T4 regulatory variants, and T5 curated multi-gene KOs. `--limit N`
-caps cells (the matrix orders all WT conditions first, then KOs, then dynamics). `--sample` picks a
+caps cells within the selected tiers. `--sample` picks a
 stratified mix instead of the first-N — use it for a representative mini-pilot. Real submissions write
 a `campaign_ledger.jsonl` next to the app DB; pass `--campaign-id <stable-id>` when resuming a known
 campaign so already-created cells are reused instead of duplicated.

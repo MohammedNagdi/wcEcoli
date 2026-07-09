@@ -7,7 +7,7 @@ This tracker describes the campaign that is currently implemented in `hf_export`
 Dry-run first. A dry-run validates real submission prerequisites without creating experiments or jobs.
 
 ```bash
-docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --tiers v0 --seeds 1 --generations 1
+docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --tiers T1 --seeds 1 --generations 1
 docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --tiers T2_CORE,T2_EXTENDED --seeds 1 --generations 1
 docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --tiers T3 --seeds 1 --generations 1
 docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --tiers T4 --seeds 1 --generations 1
@@ -31,7 +31,7 @@ docker exec interface-api-1 python -m hf_export.run_export --out /app/eval/hf_ca
 
 | Tier | CLI value | What it runs | Current status |
 |---|---|---|---|
-| T1 reference | `v0` WT cells | WT across all 21 static conditions. | Implemented as the WT portion of `v0`. |
+| T1 reference | `T1` | WT across all 21 static conditions. | Implemented. |
 | T2 core KO | `T2_CORE` | Single-gene KOs across 5 core static conditions. | Implemented. |
 | T2 extended KO | `T2_EXTENDED` | Bounded single-gene KO set across all 21 static conditions. | Implemented. |
 | T3 dynamic media | `T3` | Timeline protocols, sinusoidal media, and amino-acid shifts. | Implemented. |
@@ -48,7 +48,6 @@ Campaign cell counts are counted before seed and generation multipliers. Expecte
 | Tier | Cell calculation | Expected cells | Default jobs | Default trajectories |
 |---|---:|---:|---:|---:|
 | T1 reference | `21 WT static conditions` | `21` | `168` | `672` |
-| Legacy `v0` full pilot | `21 WT + 50 KOs x 5 conditions + 4 dynamic pilot cells` | `275` | `2200` | `8800` |
 | T2 Core | `573 live DB genes x 5 core conditions` | `2865` | `22920` | `91680` |
 | T2 Extended standalone | `188 live DB genes x 21 static conditions` | `3948` | `31584` | `126336` |
 | T2 Core + Extended combined | `2865 core + 3008 non-overlapping extended cells` | `5873` | `46984` | `187936` |
@@ -59,7 +58,7 @@ Campaign cell counts are counted before seed and generation multipliers. Expecte
 
 ## T1 Reference
 
-T1 is the WT static-condition reference manifold. It is implemented through the WT cells emitted by `v0`.
+T1 is the WT static-condition reference manifold.
 
 What it runs:
 
@@ -72,7 +71,6 @@ Expected cell calculation:
 - T1 reference cells: `21 WT conditions = 21 cells`
 - Default jobs: `21 cells x 8 seeds = 168 jobs`
 - Default trajectories: `168 jobs x 4 generations = 672 trajectories`
-- Full legacy `v0` CLI cells: `21 WT + 50 KOs x 5 core conditions + 4 dynamic pilot cells = 275 cells`
 
 What it has:
 

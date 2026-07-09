@@ -75,13 +75,14 @@ def test_write_matrix_channels(tmp_path):
         assert ids["mrna_counts_matrix"] == [f"RNA{i}" for i in range(8)]   # ids returned for /reference
 
 
-def test_v0_matrix_includes_dynamics():
+def test_t1_matrix_is_wildtype_static_only():
     cells = v0_campaign(ko_genes=["dnaA", "crp", "manY"])
     variant_types = {c.variant_type for c in cells}
-    # Dynamics families present from day one.
-    assert "timelines" in variant_types
-    assert "sinusoidal_media" in variant_types
-    assert "wildtype" in variant_types and "gene_knockout" in variant_types
+    assert variant_types == {"wildtype"}
+    assert "sinusoidal_media" not in variant_types
+    assert len(cells) == 21
     counts = estimate_counts(ko_genes_n=50)
     assert counts["cell_trajectories"] == counts["jobs"] * 4  # GENERATIONS
-    assert counts["dynamic_jobs"] > 0
+    assert counts["wt_jobs"] == counts["jobs"]
+    assert counts["ko_jobs"] == 0
+    assert counts["dynamic_jobs"] == 0

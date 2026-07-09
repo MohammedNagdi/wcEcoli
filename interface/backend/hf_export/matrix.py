@@ -1,8 +1,7 @@
-"""Locked v0 perturbation matrix for the wcEcoli HF dataset.
+"""Tiered perturbation matrix for the wcEcoli HF dataset.
 
-This is the *campaign plan* — what to simulate for the v0 pilot release. The dynamics families are
-included from day one so the time-series forecasting benchmark (T3) exists immediately. Counts are
-tunable constants so you can dial v0 to your compute budget; the converter packages whatever
+This is the *campaign plan* — what to simulate for each fixed campaign tier. Counts are
+tunable constants so you can dial pilot runs to your compute budget; the converter packages whatever
 completed jobs exist regardless of these numbers.
 """
 
@@ -14,13 +13,13 @@ from dataclasses import dataclass, field
 SEEDS = 8           # stochastic replicates per (genotype, condition)
 GENERATIONS = 4     # generations per seed lineage (each yields one cell trajectory)
 
-TIER_V0 = "v0"
+TIER_T1 = "T1"
 TIER_T2_CORE = "T2_CORE"
 TIER_T2_EXTENDED = "T2_EXTENDED"
 TIER_T3 = "T3"
 TIER_T4 = "T4"
 TIER_T5 = "T5"
-SUPPORTED_TIERS = {TIER_V0, TIER_T2_CORE, TIER_T2_EXTENDED, TIER_T3, TIER_T4, TIER_T5}
+SUPPORTED_TIERS = {TIER_T1, TIER_T2_CORE, TIER_T2_EXTENDED, TIER_T3, TIER_T4, TIER_T5}
 
 # WT is cheap, so sweep all conditions; KOs are sampled over a core condition set.
 WT_CONDITIONS = [
@@ -42,19 +41,6 @@ T2_EXTENDED_ESSENTIAL_TARGET = 100
 T2_EXTENDED_NONESSENTIAL_PER_CATEGORY = 5
 T3_ESSENTIAL_TARGET = 50
 T3_NONESSENTIAL_TARGET = 50
-
-# Dynamics from day one — time-varying media (the T3 forecasting axis).
-DYNAMIC_RUNS = [
-    {"variant_type": "timelines", "label": "rich_to_minimal",
-     "params": {"events": "0 minimal_plus_amino_acids, 1200 minimal"}},
-    {"variant_type": "timelines", "label": "minimal_to_acetate",
-     "params": {"events": "0 minimal, 1200 minimal_acetate"}},
-    {"variant_type": "timelines", "label": "glucose_starvation",
-     "params": {"events": "0 minimal, 1200 minimal_no_glucose"}},
-    {"variant_type": "sinusoidal_media", "label": "sinusoidal_glc_acetate",
-     "params": {"media_a": "minimal_glucose", "media_b": "minimal_acetate", "period_min": 30}},
-]
-DYNAMIC_GENOTYPES = ["WT"]  # + a few KOs in v1
 
 T3_TIMELINE_PROTOCOLS = [
     {"label": "rich_to_minimal", "events": "0 minimal_plus_amino_acids, 1200 minimal"},
@@ -162,26 +148,18 @@ class CampaignCell:
     params: dict = field(default_factory=dict)
     seeds: int = SEEDS
     generations: int = GENERATIONS
-    tier: str = TIER_V0
+    tier: str = TIER_T1
 
 
 def v0_campaign(ko_genes: list[str]) -> list[CampaignCell]:
-    """Expand the locked v0 matrix into experiment descriptors. ``ko_genes`` is the resolved
-    curated knockout list (see selection criterion above)."""
+    """Expand T1 into WT static-condition experiment descriptors.
+
+    ``ko_genes`` is accepted for backward compatibility with the old v0 helper signature, but T1 is
+    intentionally WT-only. T2 owns single-KO cells and T3 owns dynamic-media cells.
+    """
     cells: list[CampaignCell] = []
-    # 1. Wildtype baseline across all conditions (static).
     for cond in WT_CONDITIONS:
-        cells.append(CampaignCell("wildtype", f"WT/{cond}", condition=cond, tier=TIER_V0))
-    # 2. Curated single knockouts across core conditions.
-    for gene in ko_genes[:KO_TARGET]:
-        for cond in KO_CORE_CONDITIONS:
-            cells.append(CampaignCell("gene_knockout", f"{gene}_KO/{cond}", condition=cond,
-                                      params={"gene": gene}, tier=TIER_V0))
-    # 3. Dynamic-media runs (day-one dynamics benchmark).
-    for run in DYNAMIC_RUNS:
-        for geno in DYNAMIC_GENOTYPES:
-            cells.append(CampaignCell(run["variant_type"], f"{geno}/{run['label']}",
-                                      params=run["params"], tier=TIER_V0))
+        cells.append(CampaignCell("wildtype", f"WT/{cond}", condition=cond, tier=TIER_T1))
     return cells
 
 
@@ -305,9 +283,9 @@ def t5_campaign(pair_definitions: list[dict]) -> list[CampaignCell]:
 def estimate_counts(ko_genes_n: int) -> dict[str, int]:
     """Rough job/trajectory counts for budgeting."""
     wt_jobs = len(WT_CONDITIONS) * SEEDS
-    ko_jobs = min(ko_genes_n, KO_TARGET) * len(KO_CORE_CONDITIONS) * SEEDS
-    dyn_jobs = len(DYNAMIC_RUNS) * len(DYNAMIC_GENOTYPES) * SEEDS
-    jobs = wt_jobs + ko_jobs + dyn_jobs
+    ko_jobs = 0
+    dyn_jobs = 0
+    jobs = wt_jobs
     return {
         "jobs": jobs,
         "cell_trajectories": jobs * GENERATIONS,
