@@ -22,8 +22,10 @@ from app.services.timelines import infer_condition_from_timeline, resolve_timeli
 MAX_BATCH_RECORDS = 5000
 DEFAULT_LENGTH_SEC = 10800
 
-ACTIVE_EXPERIMENT_STATUSES = {"queued", "running", "running_parca", "running_sim", "ingesting"}
-ACTIVE_JOB_STATUSES = {"pending", "running_parca", "running_sim", "ingesting"}
+ACTIVE_EXPERIMENT_STATUSES = {"queued", "running", "running_parca", "running_sim", "ingesting", "cancelling"}
+ACTIVE_JOB_STATUSES = {
+    "pending", "claimed", "waiting_parca", "running_parca", "running_sim", "ingesting", "cancelling", "recovering"
+}
 
 
 class BatchRecord(BaseModel):

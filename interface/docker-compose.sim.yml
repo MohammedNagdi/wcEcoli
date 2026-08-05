@@ -1,24 +1,15 @@
 # Docker Compose for building the wcEcoli simulation image.
 #
-# The simulation WORKER runs natively on the host (not in a container)
-# because it needs Docker socket access to launch simulation containers.
-# This file is only used to build the simulation Docker image.
+# This file only builds the simulation image. The persistent runner and worker
+# are started by interface/docker-compose.yml.
 #
 # Usage:
 #   # Build the simulation image:
 #   cd <repo-root>
 #   docker compose -f interface/docker-compose.sim.yml build
-#
-#   # Then start the worker natively:
-#   cd interface/backend
-#   python -m app.services.sim_worker
-#
-#   # Or use the convenience script:
-#   ./interface/start-worker.sh
 
 services:
-  # This service definition is for IMAGE BUILDING only.
-  # The actual simulation runs are launched by the worker via `docker run`.
+  # Image-building only. Runtime uses the sim-runner service in docker-compose.yml.
   wcecoli-sim:
     build:
       context: ../

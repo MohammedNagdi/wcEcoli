@@ -16,7 +16,15 @@ class Settings(BaseSettings):
     worker_poll_interval: int = 5                # seconds between job polls
     log_tail_lines: int = 200                    # lines of log to keep in DB
     parca_cpus: int = 8                          # processes used by parallel Parca stages
-    parca_lock_timeout: int = 3600                # seconds to wait for another Parca worker
+    parca_max_concurrency: int = 1                # simultaneous Parca processes in the runner
+    sim_runner_socket: Path = Path("/data/out/.runner/control.sock")
+    sim_runner_concurrency: int = 1               # independent runSim subprocesses
+    sim_runner_cpu_budget: int = 8                # shared CPU tokens for Parca + simulations
+    sim_cpus_per_job: int = 1                     # CPU tokens consumed by one runSim process
+    sim_runner_memory_limit: str = ""             # optional container-wide Docker limit
+    runner_poll_interval: float = 1.0              # runner task status polling interval
+    worker_lease_timeout: int = 300                # seconds before an unrenewed claim is stale
+    worker_shutdown_grace_sec: int = 1800          # seconds to drain running tasks on shutdown
 
     # Local-first distribution and optional artifact bootstrap
     artifact_bootstrap_source: str = ""          # optional source label, e.g. "huggingface"

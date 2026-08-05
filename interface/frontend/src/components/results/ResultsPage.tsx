@@ -266,7 +266,7 @@ function suggestedComparisonPresets(wtDelta: WildtypeDelta | null): Array<{ pres
 function statusTone(status: string): string {
   if (status === 'done') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
   if (status === 'failed') return 'border-red-200 bg-red-50 text-red-800'
-  if (['pending', 'running_parca', 'running_sim', 'ingesting'].includes(status)) return 'border-blue-200 bg-blue-50 text-blue-800'
+  if (['pending', 'claimed', 'waiting_parca', 'running_parca', 'running_sim', 'ingesting', 'cancelling', 'recovering'].includes(status)) return 'border-blue-200 bg-blue-50 text-blue-800'
   return 'border-gray-200 bg-gray-50 text-gray-700'
 }
 

@@ -229,6 +229,7 @@ class RunSimulation(scriptBase.ScriptBase):
 			for idx, name in failed_variants:
 				print("  Variant {}: {}".format(idx, name), file=sys.stderr)
 			print("=" * 60, file=sys.stderr)
+			raise SystemExit(1)
 
 
 if __name__ == '__main__':

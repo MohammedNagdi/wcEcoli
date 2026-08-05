@@ -14,9 +14,14 @@ const STATUS_COLORS: Record<string, string> = {
 
 const JOB_STATUS_COLORS: Record<string, string> = {
   pending:       'bg-yellow-50 text-yellow-700',
+  claimed:       'bg-blue-50 text-blue-700',
+  waiting_parca: 'bg-blue-50 text-blue-700',
   running_parca: 'bg-blue-50 text-blue-700',
   running_sim:   'bg-blue-50 text-blue-700',
   ingesting:     'bg-purple-50 text-purple-700',
+  cancelling:    'bg-amber-50 text-amber-700',
+  recovering:    'bg-amber-50 text-amber-700',
+  cancelled:     'bg-gray-100 text-gray-600',
   done:          'bg-green-50 text-green-700',
   failed:        'bg-red-50 text-red-700',
 }
@@ -122,7 +127,7 @@ export function ExperimentDetailPanel({ experiment, onClose, onUpdated, onAssist
   }
 
   const isActive = (s: string) =>
-    ['pending', 'running_parca', 'running_sim', 'ingesting'].includes(s)
+    ['pending', 'claimed', 'waiting_parca', 'running_parca', 'running_sim', 'ingesting', 'cancelling', 'recovering'].includes(s)
 
   const canRun = experiment.status === 'draft' || experiment.status === 'failed' || experiment.status === 'done'
   const assistantSnapshot = useMemo(() => {

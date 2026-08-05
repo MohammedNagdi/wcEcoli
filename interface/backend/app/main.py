@@ -39,6 +39,11 @@ async def lifespan(app: FastAPI):
     # Lightweight schema migrations for columns added after initial release
     _run_migrations(_engine)
 
+    # Restore historical job links if an earlier schema rebuild preserved
+    # experiments/results but silently dropped their simulation_jobs rows.
+    from app.services.job_recovery import recover_orphaned_simulation_jobs
+    recover_orphaned_simulation_jobs(_engine, settings.sim_output_dir)
+
     # Auto-reingest any completed jobs with null summary stats
     # (caused by earlier broken TableReader import)
     _auto_reingest_stale_results(_engine)
@@ -126,7 +131,25 @@ def _run_migrations(engine):
             cur.execute("ALTER TABLE simulation_jobs ADD COLUMN docker_container_id TEXT NOT NULL DEFAULT ''")
             conn.commit()
 
-        # Migration 6: Upsert newly added variant files into existing live DBs.
+        # Migration 6: Persistent runner task ownership and lease fields.
+        cur.execute("PRAGMA table_info(simulation_jobs)")
+        job_cols = {row[1] for row in cur.fetchall()}
+        runner_columns = {
+            "runner_task_id": "TEXT NOT NULL DEFAULT ''",
+            "worker_id": "TEXT NOT NULL DEFAULT ''",
+            "heartbeat_at": "TEXT NOT NULL DEFAULT ''",
+            "lease_expires_at": "TEXT NOT NULL DEFAULT ''",
+            "attempt": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, declaration in runner_columns.items():
+            if column not in job_cols:
+                logger.info("Migration: adding '%s' column to simulation_jobs", column)
+                cur.execute(
+                    "ALTER TABLE simulation_jobs ADD COLUMN {} {}".format(column, declaration)
+                )
+                conn.commit()
+
+        # Migration 7: Upsert newly added variant files into existing live DBs.
         variant_path = settings.variants_dir / "multi_gene_knockout.py"
         if variant_path.exists():
             import re
@@ -177,7 +200,8 @@ def _run_migrations(engine):
                 conn.commit()
 
     except Exception as exc:
-        logger.warning("Migration check failed: %s", exc)
+        logger.exception("Database migration failed")
+        raise RuntimeError("Database migration failed") from exc
     finally:
         conn.close()
 
@@ -189,9 +213,10 @@ def _auto_reingest_stale_results(engine):
     (e.g., before the standalone iff_reader replaced wholecell.io.tablereader).
     Runs once at API startup - only touches jobs marked 'done' with a sim_dir.
     """
+    from collections import deque
     from sqlmodel import Session as Sess, select
-    from app.db.models import SimulationJob, SimulationResult
-    from datetime import datetime, timezone
+    from app.db.models import Experiment, SimulationJob, SimulationResult
+    from app.services.sim_worker import _collect_results
 
     try:
         with Sess(engine) as session:
@@ -224,46 +249,17 @@ def _auto_reingest_stale_results(engine):
                 # Re-ingest
                 logger.info("Auto-reingesting job %d (stale null results)", job.id)
                 try:
-                    from app.services.table_reader_bridge import (
-                        SimOutReader, find_sim_outs, parse_sim_out_path,
-                    )
-                    sim_out_base = settings.sim_output_dir / job.sim_dir
-                    sim_outs = find_sim_outs(sim_out_base)
-                    if not sim_outs:
+                    experiment = session.get(Experiment, job.experiment_id)
+                    if not experiment:
                         continue
-
-                    # Delete old results
+                    new_results = _collect_results(
+                        job, experiment, deque(maxlen=settings.log_tail_lines)
+                    )
+                    # Preserve historical rows unless every replacement was
+                    # validated and parsed successfully.
                     for r in results:
                         session.delete(r)
-                    session.flush()
-
-                    now = datetime.now(timezone.utc).isoformat()
-                    for sim_out_path in sim_outs:
-                        path_info = parse_sim_out_path(sim_out_path)
-                        try:
-                            reader = SimOutReader(sim_out_path)
-                            summary = reader.extract_summary()
-                        except Exception:
-                            summary = {
-                                "division_time_sec": None,
-                                "final_mass_fg": None,
-                                "growth_rate": None,
-                                "doubling_time_min": None,
-                                "divided": False,
-                            }
-
-                        new_result = SimulationResult(
-                            job_id=job.id,
-                            experiment_id=job.experiment_id,
-                            seed=path_info.get("seed", job.seed),
-                            generation=path_info.get("generation", 0),
-                            division_time_sec=summary["division_time_sec"],
-                            final_mass_fg=summary["final_mass_fg"],
-                            growth_rate=summary["growth_rate"],
-                            doubling_time_min=summary["doubling_time_min"],
-                            divided=summary.get("divided", False),
-                            created_at=now,
-                        )
+                    for new_result in new_results:
                         session.add(new_result)
 
                     session.commit()
@@ -296,11 +292,18 @@ app.add_middleware(
 @app.get("/api/health")
 def health_check():
     """Health check endpoint."""
+    from app.services.sim_runner_client import RunnerClient, RunnerError
+
+    try:
+        runner = RunnerClient(settings.sim_runner_socket, timeout=1).health()
+    except RunnerError as exc:
+        runner = {"status": "unavailable", "error": str(exc)}
     return {
         "status": "ok",
         "version": "0.1.0",
         "database": str(settings.database_path),
         "reconstruction": str(settings.reconstruction_path),
+        "simulation_runner": runner,
     }
 
 

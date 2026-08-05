@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from app.config import settings
-from app.db.models import Condition, Experiment, Gene, SimulationJob, SimulationResult, TFEdge, Variant
+from app.db.models import Condition, Experiment, SimulationJob, SimulationResult, TFEdge, Variant
 from app.main import get_session
 from app.services.job_queue import (
     RunJobRequest,
@@ -23,11 +23,6 @@ from app.services.job_queue import (
 from app.services.experiment_creation import ExperimentCreateData, create_experiment_record
 from app.services.experiment_identity import experiment_environment_key
 from app.services.timelines import infer_condition_from_timeline, resolve_timeline_definition
-from app.services.multi_gene_knockout import (
-    MULTI_GENE_KNOCKOUT_TYPE,
-    strip_multi_gene_targets,
-    with_multi_gene_targets,
-)
 from app.services.batches import (
     BatchRequest,
     BatchResponse,
@@ -933,7 +928,7 @@ def run_batch(batch_id: str, session: Session = Depends(get_session)):
 
 @router.post("/batches/{batch_id}/cancel", response_model=BatchControlResponse)
 def cancel_batch_run(batch_id: str, session: Session = Depends(get_session)):
-    """Stop queued batch work while allowing the currently running job to finish."""
+    """Stop queued batch work while allowing active jobs to finish."""
     experiments = _get_batch_experiments(batch_id, session)
     experiment_ids = [exp.id for exp in experiments if exp.id is not None]
     if not experiment_ids:
@@ -962,7 +957,9 @@ def cancel_batch_run(batch_id: str, session: Session = Depends(get_session)):
         if exp.id not in cancelled_by_experiment:
             continue
         jobs = session.exec(select(SimulationJob).where(SimulationJob.experiment_id == exp.id)).all()
-        if not any(job.status in ("pending", "running_parca", "running_sim", "ingesting") for job in jobs):
+        if not any(job.status in (
+            "pending", "claimed", "waiting_parca", "running_parca", "running_sim", "ingesting", "cancelling", "recovering"
+        ) for job in jobs):
             exp.status = "cancelled"
             exp.updated_at = now
             session.add(exp)
@@ -973,7 +970,7 @@ def cancel_batch_run(batch_id: str, session: Session = Depends(get_session)):
         cancelled=len(pending_jobs),
         message=(
             f"Stopped {len(pending_jobs)} queued job{'' if len(pending_jobs) == 1 else 's'}. "
-            "The current running job will finish."
+            "Active jobs will finish."
         ),
     )
 

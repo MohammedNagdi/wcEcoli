@@ -296,6 +296,14 @@ What needs to be decided before implementation:
 - Dry-run validation checks variants, conditions, direct variant indices, timeline events, and JSON-serializable `sim_params`.
 - Real submission writes a JSONL campaign ledger keyed by campaign id, cell payload, seed values, and generations.
 - Worker job claiming uses an atomic pending-to-claimed update before execution.
+- One persistent simulation container runs a configurable number of isolated `runSim.py` subprocesses.
+- Worker claims carry ownership, heartbeat, lease expiry, and attempt metadata; recovery only requeues expired work.
+- Every lifecycle write is fenced by worker id, attempt, and expected status; stale attempts cannot ingest or finalize.
+- Runner CPU admission accounts for simulations and shared Parca execution, and cancellation remains durable until termination is confirmed.
+- Failed or incomplete shared Parca tasks are retried at most twice and publish manifests atomically only after every expected KB file exists.
+- Result ingestion validates the exact seed and generation set, parses outside the write transaction, and atomically replaces rows once.
+- `runSim.py` returns failure when any requested variant or generation fails; partial lineages cannot be marked complete.
+- API startup is health-gated on database initialization and migrations; the worker also waits for a healthy runner scheduler.
 - Seeds are submitted as explicit `seed_values`.
 - Export paths include variant type, variant index, experiment id, job id, seed, and generation to avoid HDF5 path collisions.
 - Export writes `export_qc.jsonl` and QC counts in `manifest.json`.
@@ -309,4 +317,5 @@ What needs to be decided before implementation:
 - T5 is not crossed with T3 dynamic media, T4 regulatory variants, or all 21 static conditions.
 - T6 is not implemented.
 - Future campaign editions could add KO x regulatory, KO x dynamic media, multi-KO x stress media, regulatory x dynamic media, and genome-design x media screens.
-- Local SQLite plus polling workers remain suitable for moderate local runs; corpus-scale execution still needs a stronger queue/database/object-store layer.
+- Local SQLite with bounded runner scheduling remains suitable for moderate runs; corpus-scale execution still requires database and storage benchmarking.
+- The persistent runner has only been smoke-tested up to eight concurrent subprocesses in development; production concurrency must be selected from CPU, RAM, and disk benchmarks.

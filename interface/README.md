@@ -8,32 +8,33 @@ The platform provides a browser-based interface for designing gene knockout expe
 
 ## Architecture
 
-The platform has three runtime components plus a simulation Docker image:
+The platform has four runtime components:
 
 | Component | Technology | Port | Runs in Docker? |
 |-----------|-----------|------|-----------------|
 | **Backend API** | FastAPI + SQLite | 8000 | Optional |
 | **Frontend** | Vite + React + Tailwind | 5173 | Optional |
-| **Simulation Worker** | Python process | — | No (launches Docker containers) |
-| **Simulation Image** | `wcecoli-sim:latest` | — | Yes (contains all model dependencies) |
+| **Simulation Worker** | Python scheduler | — | Yes |
+| **Simulation Runner** | `wcecoli-sim:latest` | — | Yes (runs parallel subprocesses) |
 
-The backend and frontend can run either natively or inside Docker (via `docker compose`). The simulation worker always runs natively because it needs Docker socket access to launch simulation containers. The actual simulations run inside `wcecoli-sim:latest` containers that have all wcEcoli dependencies (Cython, NumPy, SciPy, gfortran, etc.).
+The backend and frontend can run natively or through Docker Compose. Simulation execution uses one persistent `wcecoli-sim:latest` container containing the compiled model dependencies. The worker schedules database jobs into isolated subprocesses inside that runner.
 
 ### How Docker is used
 
-Docker serves a single purpose in this setup: **isolating the heavy simulation environment**. The wcEcoli model requires a specific set of compiled C/Fortran extensions, Cython modules, and large numerical libraries. Rather than requiring every developer to build these locally, we package them into a Docker image.
+Docker isolates the heavy simulation environment. The wcEcoli model requires compiled C/Fortran extensions, Cython modules, and numerical libraries, which are packaged in the persistent runner image.
 
 The flow is:
 
 1. The **worker** polls the SQLite database for pending simulation jobs.
-2. When it finds one, it calls `docker run wcecoli-sim:latest` with the appropriate arguments, mounting the repo's `reconstruction/` and `models/` directories into the container.
-3. Inside the container, two stages run sequentially:
+2. The worker submits the job over a Unix socket to the persistent runner.
+3. The runner executes two stages:
    - **Parca** (parameter calculator) — generates `simData.cPickle` (~500 MB). This is cached and reused across runs with the same parameters.
    - **Simulation** — the actual whole-cell simulation (~30 min per generation on a modern CPU).
-4. Output files land in `out/<run_id>/` on the host filesystem.
-5. The worker ingests the results back into SQLite and updates the job status.
+4. Independent jobs run concurrently as subprocesses; generations in one lineage remain sequential.
+5. Output files land in `out/<run_id>/` on the shared volume.
+6. The worker ingests the results back into SQLite and updates the job status.
 
-The backend API and frontend do **not** need Docker — they're lightweight Python/Node processes. `docker compose` is provided as a convenience for running all three together, but native execution is simpler for development.
+The backend API and frontend do not require Docker for browsing or experiment design. Simulation execution uses Docker Compose so the worker and runner share the database and output volumes.
 
 ---
 
@@ -113,46 +114,25 @@ docker build -t wcecoli-sim:latest -f docker/local/Dockerfile .
 
 This takes 10–20 minutes the first time (compiling Cython extensions). Subsequent builds use Docker layer cache.
 
-### 4. Start the Simulation Worker
+### 4. Start Simulation Execution
 
-In a third terminal (after the backend is running and the Docker image is built):
-
-```bash
-# From the repo root:
-./interface/start-worker.sh
-```
-
-Or manually:
+The persistent runner and worker are designed to run through Docker Compose:
 
 ```bash
-cd interface/backend
-
-export RECONSTRUCTION_PATH="$(cd ../.. && pwd)/reconstruction"
-export MODELS_PATH="$(cd ../.. && pwd)/models"
-export DATABASE_PATH="$(pwd)/data/wcecoli.db"
-export WCECOLI_ROOT="$(cd ../.. && pwd)"
-export SIM_OUTPUT_DIR="$(cd ../.. && pwd)/out"
-export DOCKER_IMAGE="wcecoli-sim:latest"
-export PYTHONPATH="$(cd ../.. && pwd)"
-
-python -m app.services.sim_worker
+cd interface
+SIM_RUNNER_CONCURRENCY=4 SIM_RUNNER_CPU_BUDGET=8 docker compose up -d sim-runner worker
 ```
 
-**Windows (PowerShell):**
+Concurrency defaults to `1`. Increase it only after measuring peak memory per simulation. The Compose API, worker, and runner must use the same SQLite and output volumes.
 
-```powershell
-cd interface\backend
+From the repository root, the launcher accepts concurrency and an optional CPU budget:
 
-$env:RECONSTRUCTION_PATH = (Resolve-Path "..\..\reconstruction")
-$env:MODELS_PATH = (Resolve-Path "..\..\models")
-$env:DATABASE_PATH = "$(Get-Location)\data\wcecoli.db"
-$env:WCECOLI_ROOT = (Resolve-Path "..\..").Path
-$env:SIM_OUTPUT_DIR = (Resolve-Path "..\..\out").Path
-$env:DOCKER_IMAGE = "wcecoli-sim:latest"
-$env:PYTHONPATH = (Resolve-Path "..\..").Path
-
-python -m app.services.sim_worker
+```bash
+./interface/start-worker.sh 4 8
 ```
+
+Without the second argument, the budget is `max(concurrency * SIM_CPUS_PER_JOB, PARCA_CPUS)`.
+The launcher prints the requested and effective simulation capacity before starting Compose.
 
 ---
 
@@ -165,7 +145,7 @@ cd interface
 docker compose up --build
 ```
 
-This starts three containers (API on 8000, worker, frontend on 5173). The worker container mounts the Docker socket to launch simulation containers. You still need to build `wcecoli-sim:latest` separately (step 3 above).
+This starts four containers: API, frontend, worker, and one persistent simulation runner. `docker compose up --build` builds the runner image when needed.
 
 Source code is bind-mounted into the containers (`./backend/app:/app/app` and `./frontend/src:/app/src`), so most changes are picked up automatically: the backend uses `uvicorn --reload` and the frontend uses Vite HMR. If hot reload doesn't pick up changes (new files, config changes, dependency updates), restart the relevant service:
 
@@ -194,18 +174,43 @@ After restarting the frontend, do a hard refresh in the browser (`Ctrl+Shift+R`)
 6. Watch the job status update in real time: Parca → Simulation → Ingesting → Done
 7. View results on the **Results** tab — time-series charts, summary cards, molecule explorer
 
-Each job runs two Docker stages:
+Each job runs two subprocess stages inside the persistent runner container:
 - **Parca**: `python runscripts/manual/runParca.py -c $PARCA_CPUS <parca_cache_id>` — content-addressed and shared across jobs with identical reconstruction/model inputs
 - **Simulation**: `python runscripts/manual/runSim.py out/<run_id> --variant <type> <idx> <idx> --seed <s> --generations <g>`
 
 Output goes to `out/<run_id>/<variant_dir>/<seed>/generation_000000/000000/simOut/`.
 
-The worker defaults to `PARCA_CPUS=8` and waits up to
-`PARCA_LOCK_TIMEOUT=3600` seconds when another worker is building the same
-Parca cache entry. A cache entry is reused only after all expected KB files and
+The runner defaults to `PARCA_CPUS=8` and permits one Parca process at a time.
+Duplicate requests for the same cache key attach to the same runner task. A cache entry is reused only after all expected KB files and
 its completion manifest exist. Changes under `reconstruction/ecoli`,
 `models/ecoli`, the configured Docker image, or Parca defaults create a new
 cache key and rerun Parca.
+
+Set `SIM_RUNNER_CONCURRENCY=N` to run up to `N` independent simulations. The
+shared `SIM_RUNNER_CPU_BUDGET` covers simulations and Parca. With the default
+budget of eight, an 8-CPU Parca temporarily uses the entire budget. Simulation
+subprocesses set BLAS, OpenMP, and MKL thread counts to one.
+`runSim.py` remains single-core for each job; speedup comes from running independent jobs concurrently.
+Generations in one lineage remain sequential because each daughter depends on the prior generation.
+
+Job claims use `(worker_id, attempt)` as a fencing token and renew a lease throughout Parca,
+simulation, parsing, export, and database ingestion. Cancellation is durable: an active job remains
+`cancelling` until its runner subprocess has stopped. A partial lineage or unreadable `simOut` fails
+the job and cannot replace previously ingested summaries.
+
+Check runner capacity and activity through the API health endpoint:
+
+```bash
+curl -s http://localhost:8000/api/health
+docker compose logs -f sim-runner worker
+```
+
+For a development smoke check without submitting campaign jobs:
+
+```bash
+cd ..
+PYTHONPATH='.:interface/backend' python -m unittest runscripts.manual.test_simRunner -v
+```
 
 ---
 
@@ -318,11 +323,14 @@ The backend exposes 47 routes across 8 routers:
 | `MODELS_PATH` | Backend | Path to `models/` directory |
 | `DATABASE_PATH` | Backend, Worker | Path to SQLite database file |
 | `WCECOLI_ROOT` | Backend, Worker | Repo root (for resolving relative paths) |
-| `SIM_OUTPUT_DIR` | Worker | Where simulation output is written |
-| `DOCKER_IMAGE` | Worker | Simulation Docker image name (default: `wcecoli-sim:latest`) |
-| `PYTHONPATH` | Worker | Must include repo root for wcEcoli imports |
-
-The `interface/.env` file contains `WCECOLI_HOST_PATH` — the absolute host path passed to `docker run -v` for volume mounts. This file is machine-specific and excluded from version control.
+| `SIM_OUTPUT_DIR` | Worker | Shared output and runner control directory |
+| `SIM_RUNNER_CONCURRENCY` | Worker, Runner | Maximum concurrent simulation subprocesses; default `1` |
+| `SIM_RUNNER_CPU_BUDGET` | Worker, Runner | CPU tokens and runner-container CPU limit; default `8` |
+| `SIM_CPUS_PER_JOB` | Worker | CPU tokens allocated to each simulation; default `1` |
+| `SIM_RUNNER_MEMORY_LIMIT` | Runner | Optional container-wide Docker memory limit |
+| `SIM_RUNNER_SOCKET` | API, Worker, Runner | Shared Unix control socket |
+| `PARCA_CPUS` | Worker | CPU tokens allocated to Parca; default `8` |
+| `WORKER_LEASE_TIMEOUT` | Worker | Seconds before an unrenewed job is recoverable |
 
 ---
 
@@ -333,9 +341,9 @@ interface/
 ├── README.md                          # ← this file
 ├── .env                               # Host-specific settings (git-ignored)
 ├── .gitignore
-├── docker-compose.yml                 # Backend + Worker + Frontend (all-in-one)
+├── docker-compose.yml                 # API + Worker + Persistent Runner + Frontend
 ├── docker-compose.sim.yml             # Simulation image build only
-├── start-worker.sh                    # Convenience script for native worker
+├── start-worker.sh                    # Compose runner launcher: concurrency + optional CPU budget
 ├── tests/
 │   └── smoke_test_fresh_clone.py      # Fresh-clone validation (schema, data, API)
 │
@@ -367,7 +375,8 @@ interface/
 │       │   └── extract_ko_map.py      # Extract ko_index mapping from simData.cPickle
 │       └── services/
 │           ├── __init__.py
-│           ├── sim_worker.py          # Job executor — polls DB, runs Docker containers
+│           ├── sim_worker.py          # Fenced job executor and persistent-runner client
+│           ├── sim_runner_client.py   # Unix-socket protocol client
 │           ├── table_reader_bridge.py # Standalone wcEcoli binary format (.npy-like) reader
 │           └── iff_reader.py          # IFF (internal file format) reader utility
 │
@@ -444,12 +453,10 @@ interface/
 - OneDrive sync can corrupt files and cause git lock conflicts. Consider excluding the repo folder from sync (see Troubleshooting below).
 
 **macOS:**
-- Docker socket path (`/var/run/docker.sock`) works out of the box.
 - Apple Silicon (M1/M2/M3): the sim image builds natively — no Rosetta needed.
 
 **Linux:**
-- Ensure your user is in the `docker` group (`sudo usermod -aG docker $USER`), or the worker won't launch containers.
-- Docker Engine works directly — no Docker Desktop needed.
+- Docker Engine works directly; the worker does not require the Docker socket.
 
 ---
 
@@ -458,8 +465,9 @@ interface/
 | Component | How to stop |
 |-----------|-------------|
 | Backend / Frontend | `Ctrl+C` in their terminals |
-| Worker | `Ctrl+C` (graceful — finishes current job phase) |
-| Running simulation | Click "Cancel" in the UI, or `docker stop <container_id>` |
+| Worker | `docker compose stop worker` (stops claiming and drains active jobs) |
+| Running simulation | Click "Cancel" in the UI; the job remains `cancelling` until subprocess termination is confirmed |
+| Simulation runner | `docker compose stop -t 1800 sim-runner` |
 | Docker Compose | `Ctrl+C` or `docker compose down` |
 
 ---

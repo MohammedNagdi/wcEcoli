@@ -12,7 +12,7 @@ services:
       - ../reconstruction:/data/reconstruction:rw
       - ../models:/data/models:ro
       - api-db:/app/data
-      - sim-output:/data/out:ro
+      - sim-output:/data/out
     environment:
       - RECONSTRUCTION_PATH=/data/reconstruction
       - MODELS_PATH=/data/models
@@ -27,6 +27,17 @@ services:
       - VLLM_BASE_URL=${VLLM_BASE_URL:-}
       - ASSISTANT_PROVIDER=${ASSISTANT_PROVIDER:-}
       - ASSISTANT_MODEL=${ASSISTANT_MODEL:-}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)); assert data['status'] == 'ok' and data['database']
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
     restart: unless-stopped
 
   worker:
@@ -40,7 +51,6 @@ services:
       - ../models:/data/models:ro
       - api-db:/app/data
       - sim-output:/data/out
-      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - RECONSTRUCTION_PATH=/data/reconstruction
       - MODELS_PATH=/data/models
@@ -49,12 +59,55 @@ services:
       - SIM_OUTPUT_DIR=/data/out
       - DOCKER_IMAGE=wcecoli-sim:latest
       - PARCA_CPUS=${PARCA_CPUS:-8}
-      - PARCA_LOCK_TIMEOUT=${PARCA_LOCK_TIMEOUT:-3600}
-      - SIM_OUTPUT_VOLUME=interface_sim-output
-      - WCECOLI_HOST_RECONSTRUCTION=${PWD}/../reconstruction
-      - WCECOLI_HOST_MODELS=${PWD}/../models
+      - PARCA_MAX_CONCURRENCY=${PARCA_MAX_CONCURRENCY:-1}
+      - SIM_RUNNER_SOCKET=/data/out/.runner/control.sock
+      - SIM_RUNNER_CONCURRENCY=${SIM_RUNNER_CONCURRENCY:-1}
+      - SIM_RUNNER_CPU_BUDGET=${SIM_RUNNER_CPU_BUDGET:-8}
+      - SIM_CPUS_PER_JOB=${SIM_CPUS_PER_JOB:-1}
+      - RUNNER_POLL_INTERVAL=${RUNNER_POLL_INTERVAL:-1}
+      - WORKER_LEASE_TIMEOUT=${WORKER_LEASE_TIMEOUT:-300}
+      - WORKER_SHUTDOWN_GRACE_SEC=${WORKER_SHUTDOWN_GRACE_SEC:-1800}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+      sim-runner:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sim-runner:
+    build:
+      context: ../
+      dockerfile: docker/local/Dockerfile
+    image: wcecoli-sim:latest
+    command: ["python", "runscripts/manual/simRunner.py"]
+    init: true
+    volumes:
+      - ../reconstruction:/wcEcoli/reconstruction:ro
+      - ../models:/wcEcoli/models:ro
+      - sim-output:/wcEcoli/out
+    environment:
+      - SIM_RUNNER_SOCKET=/wcEcoli/out/.runner/control.sock
+      - SIM_RUNNER_CONCURRENCY=${SIM_RUNNER_CONCURRENCY:-1}
+      - SIM_RUNNER_CPU_BUDGET=${SIM_RUNNER_CPU_BUDGET:-8}
+      - SIM_CPUS_PER_JOB=${SIM_CPUS_PER_JOB:-1}
+      - PARCA_MAX_CONCURRENCY=${PARCA_MAX_CONCURRENCY:-1}
+      - WORKER_SHUTDOWN_GRACE_SEC=${WORKER_SHUTDOWN_GRACE_SEC:-1800}
+      - OPENBLAS_NUM_THREADS=1
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+    cpus: ${SIM_RUNNER_CPU_BUDGET:-8}
+    mem_limit: ${SIM_RUNNER_MEMORY_LIMIT:-0}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, socket; s=socket.socket(socket.AF_UNIX); s.connect('/wcEcoli/out/.runner/control.sock');
+          s.sendall(b'{"command":"health"}\n'); data=json.loads(s.recv(4096)); assert data['ok'] and data['result']['status'] == 'ok'
+      interval: 5s
+      timeout: 2s
+      retries: 12
     restart: unless-stopped
 
   web:

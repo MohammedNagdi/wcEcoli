@@ -1,7 +1,7 @@
 """SQLModel ORM models for wcEcoli reconstruction data."""
 
 from typing import Optional
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -260,10 +260,30 @@ class SimulationJob(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     experiment_id: int = Field(index=True)       # FK to experiments.id
-    status: str = "pending"                      # pending | running_parca | running_sim | ingesting | done | failed
+    status: str = "pending"                      # pending | claimed | waiting_parca | running_parca | running_sim | ingesting | cancelling | recovering | done | failed | cancelled
     phase: str = ""                              # current phase description for UI
     sim_dir: str = ""                            # e.g. "out/20260510_120000_rpoB_KO"
-    docker_container_id: str = ""                # for cancellation
+    docker_container_id: str = ""                # deprecated compatibility field
+    runner_task_id: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=""),
+    )                                             # subprocess identity in the persistent runner
+    worker_id: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=""),
+    )                                             # worker process holding the job lease
+    heartbeat_at: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=""),
+    )                                             # latest lease renewal
+    lease_expires_at: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=""),
+    )                                             # active claim expiry
+    attempt: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )                                             # incremented for every claimed execution
     log_tail: str = ""                           # last N lines of stdout/stderr
     started_at: str = ""                         # ISO timestamp
     finished_at: str = ""                        # ISO timestamp

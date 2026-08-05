@@ -35,6 +35,12 @@ stratified mix instead of the first-N — use it for a representative mini-pilot
 a `campaign_ledger.jsonl` next to the app DB; pass `--campaign-id <stable-id>` when resuming a known
 campaign so already-created cells are reused instead of duplicated.
 
+Jobs execute as isolated subprocesses in one persistent `wcecoli-sim` container. Set
+`SIM_RUNNER_CONCURRENCY` and `SIM_RUNNER_CPU_BUDGET` before starting Compose; both the worker and
+runner default to one simultaneous simulation. Generations within one lineage remain sequential.
+Use `./interface/start-worker.sh <concurrency> [cpu-budget]` from the repository root; each
+`runSim.py` job is single-core and throughput increases by scheduling independent jobs in parallel.
+
 Fixed T2 knockout tiers can be inspected or submitted with `--tiers`:
 ```
 docker exec interface-api-1 python -m hf_export.submit_campaign --dry-run --tiers T2_CORE

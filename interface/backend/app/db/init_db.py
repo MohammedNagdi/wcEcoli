@@ -5,7 +5,6 @@ Runs once when the database doesn't exist or when source files are newer.
 
 import ast
 import csv
-import hashlib
 import json
 import logging
 import re
@@ -833,7 +832,7 @@ def _ingest_complexes(session: Session) -> int:
 #   v4: added divided (simulation_results), docker_container_id (simulation_jobs),
 #       imported all models so create_all() creates complete schema
 #   v5: added media_recipes table (ingested from media_recipes.tsv)
-_SCHEMA_VERSION = 8  # v8: use authoritative ko_index from simData.cPickle extraction
+_SCHEMA_VERSION = 8  # runtime-only job columns are migrated in place by app.main
 
 
 def needs_rebuild() -> bool:
@@ -852,13 +851,6 @@ def needs_rebuild() -> bool:
             logger.info("Schema version %d < %d — forcing rebuild", stored_version, _SCHEMA_VERSION)
             return True
     except (ValueError, OSError):
-        return True
-
-    # Check if init_db.py itself changed (catches bind-mount edits without version bump)
-    code_hash_path = db_path.parent / ".init_db_hash"
-    current_hash = hashlib.md5(Path(__file__).read_bytes()).hexdigest()
-    if code_hash_path.exists() and code_hash_path.read_text().strip() != current_hash:
-        logger.info("init_db.py source changed — forcing rebuild")
         return True
 
     db_mtime = db_path.stat().st_mtime
@@ -928,7 +920,7 @@ def _backup_user_tables(db_path: Path) -> dict[str, list[tuple]]:
     return backup
 
 
-def _restore_user_tables(engine, backup: dict[str, list[tuple]]) -> None:
+def _restore_user_tables(engine, backup: dict[str, list[tuple]]) -> dict[str, int]:
     """Restore user-data rows after a schema rebuild.
 
     Handles column mismatches gracefully: if the new schema added or
@@ -938,12 +930,13 @@ def _restore_user_tables(engine, backup: dict[str, list[tuple]]) -> None:
     import sqlite3
 
     if not backup:
-        return
+        return {}
 
     db_url = str(engine.url).replace("sqlite:///", "")
     conn = sqlite3.connect(db_url)
     cur = conn.cursor()
 
+    restored_counts: dict[str, int] = {}
     try:
         for table, data in backup.items():
             if len(data) < 2:          # header-only, no rows
@@ -967,7 +960,7 @@ def _restore_user_tables(engine, backup: dict[str, list[tuple]]) -> None:
             placeholders = ", ".join("?" for _ in shared_cols)
             col_list = ", ".join(shared_cols)
 
-            insert_sql = f"INSERT OR IGNORE INTO {table} ({col_list}) VALUES ({placeholders})"
+            insert_sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})"
 
             restored = 0
             for row in rows:
@@ -978,13 +971,29 @@ def _restore_user_tables(engine, backup: dict[str, list[tuple]]) -> None:
                 except Exception as exc:
                     logger.warning("Failed to restore row in '%s': %s", table, exc)
 
+            restored_counts[table] = restored
             logger.info("Restored %d/%d rows to '%s'", restored, len(rows), table)
 
         conn.commit()
     except Exception as exc:
-        logger.warning("User-table restore failed: %s", exc)
+        conn.rollback()
+        raise RuntimeError(f"User-table restore failed: {exc}") from exc
     finally:
         conn.close()
+
+    incomplete = {
+        table: (restored_counts.get(table, 0), len(data) - 1)
+        for table, data in backup.items()
+        if restored_counts.get(table, 0) != len(data) - 1
+    }
+    if incomplete:
+        details = ", ".join(
+            f"{table} {restored}/{expected}"
+            for table, (restored, expected) in incomplete.items()
+        )
+        raise RuntimeError(f"User-table restore incomplete: {details}")
+
+    return restored_counts
 
 
 def init_database() -> None:
@@ -1034,11 +1043,9 @@ def init_database() -> None:
     # ── Restore user data that was backed up before rebuild ──
     _restore_user_tables(engine, user_backup)
 
-    # Write schema version and code hash markers
+    # Write the schema marker only after ingestion and user-data restoration.
     version_path = db_path.parent / ".schema_version"
     version_path.write_text(str(_SCHEMA_VERSION))
-    code_hash_path = db_path.parent / ".init_db_hash"
-    code_hash_path.write_text(hashlib.md5(Path(__file__).read_bytes()).hexdigest())
 
     logger.info(
         "Database built: %d genes, %d TF edges, %d AA pathways, "
