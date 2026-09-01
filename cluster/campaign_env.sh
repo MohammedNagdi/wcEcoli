@@ -44,13 +44,13 @@ export WCECOLI_MAX_IN_FLIGHT="${WCECOLI_MAX_IN_FLIGHT:-800}"
 export PYTHONPATH="${WCECOLI_REPO_ROOT}/interface/backend"
 
 # ── Layout ───────────────────────────────────────────────────────────────────
-# Guarded so that hundreds of concurrent array tasks sourcing this file do not all churn
-# the same paths on GPFS.
-if [[ ! -d "${WCECOLI_CAMPAIGN_ROOT}/logs" ]]; then
-    mkdir -p "${WCECOLI_CAMPAIGN_ROOT}/out" \
-             "${WCECOLI_CAMPAIGN_ROOT}/state/manifests" \
-             "${WCECOLI_CAMPAIGN_ROOT}/logs"
-fi
+# Checked individually rather than behind one guard: keying the whole block on a single
+# directory silently skips the others when that one already exists. Three stats is cheap
+# enough for hundreds of array tasks sourcing this file.
+for _wce_dir in out state/manifests logs; do
+    [[ -d "${WCECOLI_CAMPAIGN_ROOT}/${_wce_dir}" ]] || mkdir -p "${WCECOLI_CAMPAIGN_ROOT}/${_wce_dir}"
+done
+unset _wce_dir
 
 # wholecell/utils/filepath.py hardcodes OUT_DIR = <repo>/out with no environment override,
 # so <repo>/out must BE the campaign output root. This symlink is the SLURM equivalent of
