@@ -324,19 +324,26 @@ def _release_job(engine, job_id: int):
 
 # ── Reconcile ────────────────────────────────────────────────────────────────
 
-def _manifest_for_array(array_job_id: str) -> Path | None:
+def _manifest_index() -> dict[str, Path]:
+    """Map array job id -> manifest path, read once per reconcile.
+
+    Looking this up per row would re-read the whole dispatch log for every in-flight job.
+    """
+    index: dict[str, Path] = {}
     if not dispatch_log().exists():
-        return None
-    for line in reversed(dispatch_log().read_text().splitlines()):
+        return index
+    for line in dispatch_log().read_text().splitlines():
         if not line.strip():
             continue
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if record.get("array_job_id") == array_job_id:
-            return Path(record["manifest"])
-    return None
+        array_job_id = record.get("array_job_id")
+        if array_job_id:
+            # Later dispatches win, so a reused id resolves to its most recent manifest.
+            index[str(array_job_id)] = Path(record["manifest"])
+    return index
 
 
 def _purge_run_dir(sim_dir: str):
@@ -377,11 +384,15 @@ def reconcile() -> dict:
             logger.info("Nothing in flight")
             return counts
 
+        manifests = _manifest_index()
         without_sentinel: list[dict] = []
         for row in rows:
             array_job_id, _, index = row["task"].partition("_")
-            manifest = _manifest_for_array(array_job_id)
+            manifest = manifests.get(array_job_id)
             if manifest is None:
+                logger.warning(
+                    "No manifest recorded for array %s (job %d)", array_job_id, row["id"]
+                )
                 counts["unknown"] += 1
                 continue
             sentinel = sentinel_path(manifest, int(index))
