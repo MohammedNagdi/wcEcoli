@@ -541,6 +541,21 @@ def _parse_iso(value: str):
 
 # ── Status ───────────────────────────────────────────────────────────────────
 
+def init_db():
+    """Create and seed the campaign database.
+
+    On the Docker path this happens in the FastAPI startup hook (app/main.py). Nothing
+    runs that hook on a cluster, so the schema and its reference data -- genes, conditions,
+    timelines, variants, which submit_campaign resolves against -- have to be built here.
+    """
+    from app.db.init_db import init_database
+
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    with db_lock():
+        init_database()
+    logger.info("Database ready at %s", settings.database_path)
+
+
 def status() -> dict:
     engine = _engine()
     with Session(engine) as session:
@@ -566,6 +581,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("reconcile", help="ingest sentinels and reconcile against the scheduler")
     sub.add_parser("status", help="show job status counts")
+    sub.add_parser("init-db", help="create and seed the campaign database")
     sub.add_parser("verify-parca", help="check that the frozen Parca cache is complete")
     sub.add_parser("parca-id", help="print the content-addressed Parca cache directory name")
 
@@ -577,7 +593,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     resources = SlurmResources.from_env()
 
-    if args.command == "parca-id":
+    if args.command == "init-db":
+        init_db()
+    elif args.command == "parca-id":
         print(resolve_parca_run_id())
     elif args.command == "status":
         print(json.dumps(status(), indent=2, sort_keys=True))
