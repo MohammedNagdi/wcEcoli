@@ -10,6 +10,15 @@
 # They cannot be merged: interface/backend/pyproject.toml pins numpy==2.4.6 and
 # requires-python>=3.11, while requirements.txt pins numpy==1.26.3.
 #
+# Building a scientific Python environment onto GPFS is I/O-bound and painfully slow on a
+# busy login node -- measured at 44s of CPU across 29 minutes of wall time, entirely blocked
+# on I/O. Run it on a compute node instead:
+#
+#     sbatch --account=<acct> --partition=<part> cluster/setup_env.sbatch
+#
+# The script is resumable: re-running installs into an existing environment rather than
+# failing, so an interrupted build can simply be repeated.
+#
 # Usage:  cluster/setup_env.sh [--sim-only|--api-only]
 
 set -euo pipefail
@@ -37,11 +46,17 @@ fi
 
 mm() { "${MAMBA_BIN}" "$@"; }
 
+env_exists() { [[ -d "${MAMBA_ROOT_PREFIX}/envs/$1" ]]; }
+
 # ---------------------------------------------------------------- simulation env
 if [[ "${DO_SIM}" -eq 1 ]]; then
-  echo "=== Creating ${SIM_ENV} (Python 3.10) ==="
-  mm create -y -n "${SIM_ENV}" -c conda-forge \
-      python=3.10 pip gcc_linux-64 gxx_linux-64 gfortran_linux-64 swig cmake make
+  if env_exists "${SIM_ENV}"; then
+    echo "=== ${SIM_ENV} already exists; resuming into it ==="
+  else
+    echo "=== Creating ${SIM_ENV} (Python 3.10) ==="
+    mm create -y -n "${SIM_ENV}" -c conda-forge \
+        python=3.10 pip gcc_linux-64 gxx_linux-64 gfortran_linux-64 swig cmake make
+  fi
 
   # Mirror docker/local/Dockerfile: install the conflict-prone packages first, in order,
   # then the remainder of requirements.txt with those entries filtered out.
@@ -72,8 +87,12 @@ fi
 
 # ------------------------------------------------------------------ control env
 if [[ "${DO_API}" -eq 1 ]]; then
-  echo "=== Creating ${API_ENV} (Python 3.11) ==="
-  mm create -y -n "${API_ENV}" -c conda-forge python=3.11 pip
+  if env_exists "${API_ENV}"; then
+    echo "=== ${API_ENV} already exists; resuming into it ==="
+  else
+    echo "=== Creating ${API_ENV} (Python 3.11) ==="
+    mm create -y -n "${API_ENV}" -c conda-forge python=3.11 pip
+  fi
 
   # Direct dependencies from interface/backend/pyproject.toml, plus pyarrow.
   #
