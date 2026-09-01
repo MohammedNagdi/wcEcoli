@@ -13,10 +13,18 @@ consistently.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from sqlalchemy import event
 from sqlmodel import create_engine
+
+# WAL is the right default on a local filesystem (a Docker volume). It is NOT safe on the
+# GPFS-backed shared filesystems used by SLURM clusters, where WAL's shared-memory index
+# (-shm) relies on mmap semantics the network filesystem does not provide. Set
+# SQLITE_JOURNAL_MODE=TRUNCATE there. See cluster/RUN_SLURM.md.
+DEFAULT_JOURNAL_MODE = "WAL"
+DEFAULT_BUSY_TIMEOUT_MS = 5000
 
 
 def make_sqlite_engine(database_path: Any, *, echo: bool = False):
@@ -29,10 +37,12 @@ def make_sqlite_engine(database_path: Any, *, echo: bool = False):
 
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragmas(dbapi_connection, _connection_record):  # noqa: ANN001
+        journal_mode = os.environ.get("SQLITE_JOURNAL_MODE", DEFAULT_JOURNAL_MODE)
+        busy_timeout = os.environ.get("SQLITE_BUSY_TIMEOUT_MS", str(DEFAULT_BUSY_TIMEOUT_MS))
         cursor = dbapi_connection.cursor()
         try:
-            cursor.execute("PRAGMA journal_mode=WAL")     # readers don't block the writer
-            cursor.execute("PRAGMA busy_timeout=5000")    # wait up to 5s instead of erroring
+            cursor.execute(f"PRAGMA journal_mode={journal_mode}")  # readers don't block the writer
+            cursor.execute(f"PRAGMA busy_timeout={busy_timeout}")  # wait instead of erroring
             cursor.execute("PRAGMA foreign_keys=ON")      # enforce referential integrity
             cursor.execute("PRAGMA synchronous=NORMAL")   # safe + fast under WAL
         finally:
