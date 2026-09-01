@@ -221,6 +221,7 @@ def dispatch(limit: int, resources: SlurmResources, *, max_in_flight: int) -> di
             array_job_id = slurm_backend.submit_array(
                 TASK_SCRIPT, manifest, len(claimed), resources,
                 log_dir=log_dir(), job_name="wce-" + dispatch_id[-6:],
+                script_args=[str(REPO_ROOT)],
             )
         except Exception as exc:
             logger.error("sbatch failed (%s); returning %d job(s) to the queue", exc, len(claimed))

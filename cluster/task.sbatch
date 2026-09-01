@@ -1,7 +1,7 @@
 #!/bin/bash
 # One wcEcoli simulation job, run as one SLURM array task.
 #
-#   sbatch --array=0-<n>%<throttle> cluster/task.sbatch <manifest.jsonl>
+#   sbatch --array=0-<n>%<throttle> cluster/task.sbatch <manifest.jsonl> <repo-root>
 #
 # Submitted by app.services.slurm_campaign.dispatch; resources (--account, --partition,
 # --mem, --time, --cpus-per-task) are set there, not here, so one script serves every tier.
@@ -18,10 +18,16 @@
 
 set -uo pipefail
 
-MANIFEST="${1:?usage: task.sbatch <manifest.jsonl>}"
+MANIFEST="${1:?usage: task.sbatch <manifest.jsonl> <repo-root>}"
 INDEX="${SLURM_ARRAY_TASK_ID:?must run as a job array}"
 
-REPO_ROOT="${WCECOLI_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# Passed explicitly by the dispatcher. It cannot be derived from BASH_SOURCE, because sbatch
+# runs a *copy* of this script from its spool directory, not the file in the repo.
+REPO_ROOT="${2:-${WCECOLI_REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}}"
+if [[ ! -d "${REPO_ROOT}/runscripts" ]]; then
+    echo "FATAL: ${REPO_ROOT} is not the wcEcoli repo root" >&2
+    exit 1
+fi
 BACKEND_ROOT="${REPO_ROOT}/interface/backend"
 
 # Pick up campaign paths and SLURM defaults. sbatch exports the submitting environment by

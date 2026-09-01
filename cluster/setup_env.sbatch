@@ -15,7 +15,13 @@
 
 set -euo pipefail
 
-REPO_ROOT="${WCECOLI_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# NOT from BASH_SOURCE: sbatch runs a *copy* of this script from its spool directory.
+REPO_ROOT="${WCECOLI_REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
+if [[ ! -x "${REPO_ROOT}/cluster/setup_env.sh" ]]; then
+    echo "FATAL: ${REPO_ROOT} is not the wcEcoli repo root." >&2
+    echo "       Submit from the repo root, or set WCECOLI_REPO_ROOT." >&2
+    exit 1
+fi
 cd "${REPO_ROOT}"
 echo "Building environments on $(hostname) at $(date -Is)"
 exec cluster/setup_env.sh "$@"

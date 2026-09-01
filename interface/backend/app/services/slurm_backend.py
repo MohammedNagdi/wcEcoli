@@ -98,6 +98,7 @@ def submit_array(
     log_dir: Path,
     job_name: str = "wcecoli",
     dependency: str = "",
+    script_args: list[str] | None = None,
 ) -> str:
     """Submit ``count`` array tasks for ``manifest`` and return the array job id."""
     if count < 1:
@@ -122,7 +123,7 @@ def submit_array(
         argv.append("--requeue")
     if dependency:
         argv.extend(["--dependency", dependency])
-    argv.extend([str(script), str(manifest)])
+    argv.extend([str(script), str(manifest), *(script_args or [])])
 
     stdout = _run(argv).strip()
     if not stdout:

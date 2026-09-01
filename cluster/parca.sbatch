@@ -17,7 +17,13 @@
 
 set -euo pipefail
 
-REPO_ROOT="${WCECOLI_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# NOT from BASH_SOURCE: sbatch runs a *copy* of this script from its spool directory.
+REPO_ROOT="${WCECOLI_REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
+if [[ ! -d "${REPO_ROOT}/runscripts" ]]; then
+    echo "FATAL: ${REPO_ROOT} is not the wcEcoli repo root (submit from it, or set" \
+         "WCECOLI_REPO_ROOT)." >&2
+    exit 1
+fi
 BACKEND_ROOT="${REPO_ROOT}/interface/backend"
 
 # Pick up campaign paths and SLURM defaults. sbatch exports the submitting environment by
