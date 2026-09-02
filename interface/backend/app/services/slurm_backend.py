@@ -48,16 +48,16 @@ class SlurmError(RuntimeError):
 class SlurmResources:
     """Per-array-task resource request.
 
-    Defaults are the plan's starting point, not measured values: klone's ``DefMemPerCPU`` is
-    1024 MB, which will OOM a wcEcoli generation, so memory must always be set explicitly.
-    Retune ``mem`` and ``time_limit`` from ``sacct -o MaxRSS,Elapsed`` after the first tier.
+    Defaults are measured, not guessed: the first T1 job peaked at 2.03 GB RSS and ran
+    1h16m for 4 generations. klone's ``DefMemPerCPU`` is 1024 MB, which would OOM a
+    generation, so memory is always set explicitly.
     """
 
     account: str = "ckpt-stf"
     partition: str = "ckpt"
     cpus: int = 1
-    mem: str = "8G"
-    time_limit: str = "02:00:00"
+    mem: str = "4G"
+    time_limit: str = "03:00:00"
     throttle: int = 1
     requeue: bool = True
 

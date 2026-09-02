@@ -31,12 +31,14 @@ export WCECOLI_API_ENV="${WCECOLI_API_ENV:-wcecoli-api}"
 
 # ── SLURM defaults (slurm_backend.SlurmResources.from_env) ───────────────────
 # ckpt is preemptible with ~18k CPUs; jobs are ~25 min so a preemption costs little.
-# mem/time are starting points -- retune from `sacct -o MaxRSS,Elapsed` after the first tier.
+# Measured on klone from the first T1 job (39439210_0): MaxRSS 2.03 GB, 1h16m wall for
+# 4 generations (~14 min/generation, ~3x the 6.3 min baseline quoted in RUN.md).
+# 4G leaves ~2x headroom; 03:00:00 leaves ~2.4x. Re-measure if the model changes.
 export WCECOLI_SLURM_ACCOUNT="${WCECOLI_SLURM_ACCOUNT:-ckpt-stf}"
 export WCECOLI_SLURM_PARTITION="${WCECOLI_SLURM_PARTITION:-ckpt}"
 export WCECOLI_SLURM_CPUS="${WCECOLI_SLURM_CPUS:-1}"
-export WCECOLI_SLURM_MEM="${WCECOLI_SLURM_MEM:-8G}"
-export WCECOLI_SLURM_TIME="${WCECOLI_SLURM_TIME:-02:00:00}"
+export WCECOLI_SLURM_MEM="${WCECOLI_SLURM_MEM:-4G}"
+export WCECOLI_SLURM_TIME="${WCECOLI_SLURM_TIME:-03:00:00}"
 export WCECOLI_SLURM_THROTTLE="${WCECOLI_SLURM_THROTTLE:-1}"
 # MaxSubmitJobsPU is 2000 on ckpt; stay well below it so sbatch never hits DenyOnLimit.
 export WCECOLI_MAX_IN_FLIGHT="${WCECOLI_MAX_IN_FLIGHT:-800}"

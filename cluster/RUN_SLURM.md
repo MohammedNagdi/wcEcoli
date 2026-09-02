@@ -104,6 +104,31 @@ find    "$WCECOLI_CAMPAIGN_ROOT/out/$RUN" | wc -l     # <-- the number that matt
 at 98% of its 15,000,000-file allocation, with ~300,000 free and shared across the whole
 group. Multiply the file count above by the tier's job count before submitting it.
 
+Measured on the first T1 job (39439210_0):
+
+| Quantity | Measured |
+|---|---|
+| Wall time (4 generations) | 1 h 16 m (~14 min/generation) |
+| Peak memory | 2.03 GB |
+| Disk | 2.8 GB per job |
+| Files | 1,259 per job |
+
+So T1 (168 jobs) needs ~470 GB and **~211,500 inodes** -- about 70% of the group's
+remaining headroom. The full 56,136-job matrix would need ~157 TB and ~70.7M files,
+roughly 4.7x the entire allocation. Do not start a large tier without either a quota
+increase or pruning enabled.
+
+### Pruning
+
+`WCECOLI_PRUNE_SIMOUT=1` makes each task convert its generations to a compressed
+`export/channels.h5` and then delete the raw `simOut` trees, cutting a job from ~1,259
+files to a handful. `WCECOLI_PRUNE_KEEP_TENSORS=1` additionally stores the per-gene and
+per-reaction matrices (`RnaSynthProb`, `RibosomeData` and friends) that dominate the volume.
+
+Pruning is **off by default**. It is irreversible, and `run_export` currently reads raw
+`simOut` -- so with pruning on, export must be taught to prefer the per-job HDF5 first.
+That change is the outstanding follow-up before any large tier runs.
+
 ## 4. Scale up
 
 ```bash

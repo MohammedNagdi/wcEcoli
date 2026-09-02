@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import shlex
+import shutil
 import sys
 import traceback
 import uuid
@@ -33,6 +34,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SENTINEL_VERSION = 1
+
+# Measured on klone: one 4-generation job produces ~2.8 GB across ~1259 files, dominated by
+# the per-molecule matrix listeners (RnaSynthProb ~339 MB/gen, RibosomeData ~166 MB/gen).
+# At that rate the full 56k-job matrix would need ~157 TB and ~70M inodes -- several times
+# the entire /gscratch/amath allocation. Pruning converts each generation to a compressed
+# HDF5 and deletes the raw simOut tree, trading `--full-tensors` for feasibility.
+#
+# OFF by default: it is irreversible, and run_export() reads raw simOut today.
+PRUNE_SIMOUT = os.environ.get("WCECOLI_PRUNE_SIMOUT", "0") == "1"
+PRUNE_KEEP_TENSORS = os.environ.get("WCECOLI_PRUNE_KEEP_TENSORS", "0") == "1"
 
 
 @dataclass
@@ -64,6 +75,68 @@ def write_sentinel(path: Path, payload: dict):
     temporary = path.with_suffix(".{}.tmp".format(uuid.uuid4().hex))
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n")
     temporary.replace(path)
+
+
+def convert_and_prune(sim_dir: str, log: list[str]) -> dict:
+    """Write a per-generation HDF5 next to the run, then delete the raw simOut tree.
+
+    Returns a summary of what was converted and reclaimed. Raises on any failure: the
+    caller must never delete simOut when conversion did not demonstrably succeed.
+    """
+    import h5py
+    from app.config import settings
+    from app.services.table_reader_bridge import (
+        SimOutReader, find_sim_outs, parse_sim_out_path,
+    )
+    from hf_export.converter import MATRIX_CHANNELS, write_matrix_channels, write_sim
+
+    base = settings.sim_output_dir / sim_dir
+    sim_outs = find_sim_outs(base)
+    if not sim_outs:
+        raise RuntimeError("no simOut directories to convert")
+
+    export_dir = base / "export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    h5_path = export_dir / "channels.h5"
+    temporary = h5_path.with_suffix(".{}.tmp".format(uuid.uuid4().hex))
+
+    converted = 0
+    with h5py.File(temporary, "w") as h5:
+        for sim_out_path in sim_outs:
+            info = parse_sim_out_path(sim_out_path)
+            reader = SimOutReader(sim_out_path)
+            group = "seed{}/gen{}".format(info.get("seed", 0), info.get("generation", 0))
+            write_sim(h5, group, reader.extract_all_channels(), {
+                "seed": int(info.get("seed", 0)),
+                "generation": int(info.get("generation", 0)),
+                "sim_dir": sim_dir,
+            })
+            if PRUNE_KEEP_TENSORS:
+                # The same per-gene/per-reaction tensors run_export writes for --full-tensors.
+                # Without these the pruned dataset keeps only the V0 scalar channels.
+                matrices = {}
+                for channel_name, molecule_type in MATRIX_CHANNELS.items():
+                    matrix = reader.extract_full_matrix(molecule_type)
+                    if matrix is not None:
+                        matrices[channel_name] = matrix
+                write_matrix_channels(h5, group + "/matrices", matrices)
+            converted += 1
+    temporary.replace(h5_path)
+
+    if converted != len(sim_outs):
+        raise RuntimeError("converted {} of {} generations".format(converted, len(sim_outs)))
+
+    reclaimed_files = 0
+    for sim_out_path in sim_outs:
+        reclaimed_files += sum(1 for _ in sim_out_path.rglob("*"))
+        shutil.rmtree(sim_out_path)
+    log.append("Pruned {} simOut tree(s), reclaimed ~{} files".format(len(sim_outs), reclaimed_files))
+    return {
+        "generations": converted,
+        "h5": str(h5_path),
+        "h5_bytes": h5_path.stat().st_size,
+        "reclaimed_files": reclaimed_files,
+    }
 
 
 def _result_to_dict(result) -> dict:
@@ -117,6 +190,9 @@ def ingest(manifest: Path, index: int, returncode: int) -> dict:
         results = _collect_results(job, None, log_buffer)
         payload["status"] = "done"
         payload["results"] = [_result_to_dict(r) for r in results]
+        if PRUNE_SIMOUT:
+            # Only after results were extracted successfully -- pruning is irreversible.
+            payload["prune"] = convert_and_prune(entry["sim_dir"], list(log_buffer))
     except Exception as exc:  # noqa: BLE001 - the sentinel is the only channel back
         payload["status"] = "failed"
         payload["error"] = "{}: {}".format(type(exc).__name__, exc)

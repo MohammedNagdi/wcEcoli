@@ -169,6 +169,37 @@ quota are both in place.
 
 ---
 
+## 4a. Measured results (T1 gate 4, job 39439210_0)
+
+Everything below is measured on klone, not estimated.
+
+| Quantity | Measured | Plan assumption |
+|---|---|---|
+| Wall time, 4 generations | **1 h 16 m** (~14 min/gen) | 25 min (6.3 min/gen) |
+| Peak memory (MaxRSS) | **2.03 GB** | 8 GB requested |
+| Disk, one job | **2.8 GB** | unknown |
+| **Files (inodes), one job** | **1,259** | unknown |
+| Parca build | 13 m 24 s | 4.3 min |
+| Environment build | 48 min (compute node) | — |
+
+Resource defaults were retuned from this: `--mem` 8G -> **4G**, `--time` 02:00:00 -> **03:00:00**.
+
+### What this means for scale
+
+| | Jobs | Disk | Inodes |
+|---|---:|---:|---:|
+| T1 | 168 | 470 GB | **211,512** |
+| Full matrix | 56,136 | ~157 TB | **~70,700,000** |
+
+`/gscratch/amath` has **~2.1 TB and ~300,000 inodes free**, shared across the whole group.
+
+- **T1 alone consumes ~70% of the group's remaining inode headroom.**
+- The full matrix needs ~4.7x the entire 15,000,000-file allocation.
+- Runtime is ~3x the `RUN.md` baseline, so the full matrix is ~71,000 core-hours, not ~23,600.
+
+Storage, not CPU, decides whether this campaign is possible. Pruning is no longer optional
+for anything beyond T1.
+
 ## 5. Open risks
 
 - **Inodes are the binding constraint, not CPU or bytes.** ~300k free across all of `amath`,
