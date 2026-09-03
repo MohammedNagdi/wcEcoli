@@ -125,9 +125,16 @@ increase or pruning enabled.
 files to a handful. `WCECOLI_PRUNE_KEEP_TENSORS=1` additionally stores the per-gene and
 per-reaction matrices (`RnaSynthProb`, `RibosomeData` and friends) that dominate the volume.
 
-Pruning is **off by default**. It is irreversible, and `run_export` currently reads raw
-`simOut` -- so with pruning on, export must be taught to prefer the per-job HDF5 first.
-That change is the outstanding follow-up before any large tier runs.
+Both are **on by default**. Measured on job 39439210_0: 2.8 GB / 1,259 files becomes
+129 MB / 26 files, for ~22 s of CPU, with the per-gene and per-reaction tensors retained.
+
+`run_export` reads either form transparently via `hf_export/pruned_reader.py`, so nothing
+downstream changes. A run pruned with `WCECOLI_PRUNE_KEEP_TENSORS=0` cannot satisfy
+`--full-tensors`; that is reported as `tensors_pruned` in `export_qc.jsonl` rather than
+silently producing a thinner dataset.
+
+Pruning is irreversible: it runs only after results were extracted successfully, and never
+deletes anything unless the HDF5 conversion demonstrably succeeded.
 
 ## 4. Scale up
 

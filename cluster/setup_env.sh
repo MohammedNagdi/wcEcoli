@@ -69,6 +69,12 @@ if [[ "${DO_SIM}" -eq 1 ]]; then
   mm run -n "${SIM_ENV}" pip install --no-cache-dir "Equation==1.2.01" --no-build-isolation
   mm run -n "${SIM_ENV}" pip install --no-cache-dir qdldl osqp
 
+  # aesara needs a *linkable* LP64 BLAS. numpy's bundled libopenblas64_p-*.so is ILP64
+  # with mangled symbols, so without this aesara silently falls back to its slow
+  # NumPy C-API path for every dot/gemm. See cluster/campaign_env.sh for AESARA_FLAGS.
+  echo "=== Installing a linkable OpenBLAS for aesara ==="
+  mm install -y -n "${SIM_ENV}" -c conda-forge openblas libopenblas
+
   echo "=== Installing requirements.txt ==="
   FILTERED="$(mktemp)"
   trap 'rm -f "${FILTERED}"' EXIT
@@ -83,6 +89,13 @@ if [[ "${DO_SIM}" -eq 1 ]]; then
   ( cd "${ROOT_DIR}" && OPENBLAS_NUM_THREADS=1 PYTHONPATH="${ROOT_DIR}" \
       mm run -n "${SIM_ENV}" python -c \
       "import numpy, scipy, aesara, Bio; from wholecell.utils import filepath; print('sim env OK', numpy.__version__)" )
+
+  echo "=== Checking aesara found a real BLAS ==="
+  ( cd "${ROOT_DIR}" \
+    && AESARA_FLAGS="blas__ldflags=-L${MAMBA_ROOT_PREFIX}/envs/${SIM_ENV}/lib -lopenblas" \
+       LD_LIBRARY_PATH="${MAMBA_ROOT_PREFIX}/envs/${SIM_ENV}/lib:${LD_LIBRARY_PATH:-}" \
+       mm run -n "${SIM_ENV}" python -c \
+      "import aesara; f=aesara.config.blas__ldflags; assert f, 'aesara found no BLAS'; print('aesara BLAS OK:', f)" )
 fi
 
 # ------------------------------------------------------------------ control env

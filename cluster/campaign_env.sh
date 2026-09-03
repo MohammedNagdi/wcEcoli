@@ -43,6 +43,37 @@ export WCECOLI_SLURM_THROTTLE="${WCECOLI_SLURM_THROTTLE:-1}"
 # MaxSubmitJobsPU is 2000 on ckpt; stay well below it so sbatch never hits DenyOnLimit.
 export WCECOLI_MAX_IN_FLIGHT="${WCECOLI_MAX_IN_FLIGHT:-800}"
 
+# ── BLAS ─────────────────────────────────────────────────────────────────────
+# numpy/scipy come from pip wheels that bundle an ILP64 OpenBLAS under numpy.libs/ with
+# mangled symbol names, so there is nothing aesara can link against: it reports
+# "Using NumPy C-API based implementation for BLAS functions" and falls back to a slow
+# path for every dot/gemm. conda-forge's LP64 openblas is installed into the sim env by
+# setup_env.sh purely to give aesara a real library.
+#
+# No -Wl,-rpath here: aesara splits ldflags on commas, which mangles it. LD_LIBRARY_PATH
+# is what makes the compiled ops find the library at run time.
+_WCE_SIM_LIB="${MAMBA_ROOT_PREFIX}/envs/${WCECOLI_SIM_ENV}/lib"
+export AESARA_FLAGS="${AESARA_FLAGS:-blas__ldflags=-L${_WCE_SIM_LIB} -lopenblas}"
+export LD_LIBRARY_PATH="${_WCE_SIM_LIB}:${LD_LIBRARY_PATH:-}"
+unset _WCE_SIM_LIB
+
+# One thread: many single-core tasks share a node, and multi-threaded OpenBLAS both
+# changes results slightly and runs slower under that contention (see requirements.txt).
+export OPENBLAS_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+
+# ── Output pruning ───────────────────────────────────────────────────────────
+# Each task converts its generations to a compressed per-job HDF5 and deletes the raw
+# simOut tree. Measured on job 39439210_0: 2.8 GB / 1259 files -> 129 MB / 26 files,
+# for ~22 s of CPU. Without this, the full campaign would need ~157 TB and ~70M inodes
+# against an allocation of 15M files that is already 98% consumed.
+#
+# KEEP_TENSORS retains the per-gene and per-reaction matrices that are the dataset's real
+# value (mrna_counts, protein_counts, reaction_flux, exchange_flux). run_export reads the
+# pruned form transparently -- see hf_export/pruned_reader.py.
+export WCECOLI_PRUNE_SIMOUT="${WCECOLI_PRUNE_SIMOUT:-1}"
+export WCECOLI_PRUNE_KEEP_TENSORS="${WCECOLI_PRUNE_KEEP_TENSORS:-1}"
+
 export PYTHONPATH="${WCECOLI_REPO_ROOT}/interface/backend"
 
 # ── Layout ───────────────────────────────────────────────────────────────────

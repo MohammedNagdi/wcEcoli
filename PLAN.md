@@ -197,8 +197,33 @@ Resource defaults were retuned from this: `--mem` 8G -> **4G**, `--time` 02:00:0
 - The full matrix needs ~4.7x the entire 15,000,000-file allocation.
 - Runtime is ~3x the `RUN.md` baseline, so the full matrix is ~71,000 core-hours, not ~23,600.
 
-Storage, not CPU, decides whether this campaign is possible. Pruning is no longer optional
-for anything beyond T1.
+Storage, not CPU, decides whether this campaign is possible.
+
+### Pruning: measured, enabled
+
+Pruning is now **on by default**, retaining full tensors. Measured on the same job:
+
+| | Raw | Pruned (tensors kept) |
+|---|---:|---:|
+| Disk per job | 2.8 GB | **129 MB** (22x) |
+| Files per job | 1,259 | **26** (48x) |
+| Cost | — | ~22 s CPU |
+
+Re-projected:
+
+| | Jobs | Disk | Inodes |
+|---|---:|---:|---:|
+| T1 | 168 | 22 GB | **4,400** |
+| T1+T3+T4+T5 | 9,152 | 1.2 TB | **238,000** |
+| Full matrix | 56,136 | ~7.2 TB | **~1,460,000** |
+
+T1 now costs 1.5% of the free inodes instead of 70%. The full matrix still exceeds both
+free disk (~2.1 TB) and free inodes (~300k), so a quota increase remains required for T2 --
+but everything up to and including T5 is now feasible.
+
+`run_export` reads either form transparently (`hf_export/pruned_reader.py`), verified by
+exporting the same job before and after pruning: 4 records, **zero field mismatches**, with
+tensors, column-id maps and units intact.
 
 ## 5. Open risks
 

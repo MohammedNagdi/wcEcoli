@@ -207,3 +207,100 @@ def test_ingest_reports_a_failed_simulation_without_reading_output(tmp_path):
     assert payload["status"] == "failed"
     assert "42" in payload["error"]
     assert payload["results"] == []
+
+
+# ── pruned runs ──────────────────────────────────────────────────────────────
+
+def _write_pruned(base: Path, *, keeps_tensors: bool = True):
+    """Build a pruned run the way convert_and_prune does."""
+    import h5py
+    import numpy as np
+
+    export_dir = base / "export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    with h5py.File(export_dir / "channels.h5", "w") as h5:
+        h5.attrs["sim_dir"] = base.name
+        h5.attrs["keeps_tensors"] = keeps_tensors
+        for generation in (0, 1):
+            group = h5.require_group(f"seed0/gen{generation}")
+            group.attrs["seed"] = 0
+            group.attrs["generation"] = generation
+            group.attrs["channels"] = "cell_mass"
+            group.attrs["summary_keys"] = "final_mass_fg,divided"
+            group.attrs["final_mass_fg"] = 2357.0 + generation
+            group.attrs["divided"] = True
+            sub = group.require_group("cell_mass")
+            sub.create_dataset("time", data=np.arange(5, dtype="f4"))
+            value = sub.create_dataset("value", data=np.arange(5, dtype="f4") * 2)
+            value.attrs["unit"] = "fg"
+            if keeps_tensors:
+                mat = group.require_group("matrices/mrna_counts_matrix")
+                mat.create_dataset("time", data=np.arange(5, dtype="f4"))
+                mat.create_dataset("value", data=np.ones((5, 3), dtype="f4"))
+        if keeps_tensors:
+            h5.create_dataset("reference/mrna_counts_matrix",
+                              data=["TU-1", "TU-2", "TU-3"], dtype=h5py.string_dtype())
+
+
+def test_pruned_run_round_trips_channels_and_summary(tmp_path):
+    from hf_export.pruned_reader import PrunedRun, is_pruned
+
+    base = tmp_path / "run1"
+    assert not is_pruned(base)
+    _write_pruned(base)
+    assert is_pruned(base)
+
+    with PrunedRun(base) as run:
+        generations = run.generations()
+        assert [(s, g) for s, g, _ in generations] == [(0, 0), (0, 1)]
+        _, _, group = generations[0]
+
+        channels = run.channels(group)
+        assert set(channels) == {"cell_mass"}
+        assert channels["cell_mass"]["unit"] == "fg"
+        assert len(channels["cell_mass"]["values"]) == 5
+
+        # The summary cannot be recomputed once simOut is deleted, so it must survive.
+        summary = run.summary(group)
+        assert summary["final_mass_fg"] == 2357.0
+        assert summary["divided"] is True
+        # Structural bookkeeping must not leak into the summary.
+        assert "channels" not in summary and "seed" not in summary
+
+
+def test_pruned_run_recovers_matrix_column_ids(tmp_path):
+    # Column ids are far too large to hold as HDF5 attributes (thousands of gene ids blow
+    # the 64KB object-header limit), so they live once per file under /reference.
+    from hf_export.pruned_reader import PrunedRun
+
+    base = tmp_path / "run2"
+    _write_pruned(base, keeps_tensors=True)
+    with PrunedRun(base) as run:
+        _, _, group = run.generations()[0]
+        matrices = run.matrices(group)
+        assert matrices["mrna_counts_matrix"]["matrix"].shape == (5, 3)
+        assert matrices["mrna_counts_matrix"]["ids"] == ["TU-1", "TU-2", "TU-3"]
+
+
+def test_pruned_without_tensors_reports_them_as_unavailable(tmp_path):
+    from hf_export.run_export import _read_units
+
+    base = tmp_path / "run3"
+    _write_pruned(base, keeps_tensors=False)
+    units = _read_units(base)
+    assert len(units) == 2
+    # Not merely absent -- irrecoverable, so --full-tensors must say so rather than
+    # silently emitting a thinner dataset.
+    assert units[0].tensors_unavailable is True
+    assert units[0].matrices() == {}
+    assert units[0].summary()["final_mass_fg"] == 2357.0
+
+
+def test_read_units_prefers_the_pruned_form(tmp_path):
+    from hf_export.run_export import _PrunedUnit, _read_units
+
+    base = tmp_path / "run4"
+    _write_pruned(base)
+    units = _read_units(base)
+    assert all(isinstance(u, _PrunedUnit) for u in units)
+    assert units[0].tensors_unavailable is False

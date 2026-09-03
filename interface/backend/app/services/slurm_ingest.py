@@ -77,6 +77,10 @@ def write_sentinel(path: Path, payload: dict):
     temporary.replace(path)
 
 
+PRUNED_H5_NAME = "channels.h5"
+PRUNED_MARKER = "pruned.json"
+
+
 def convert_and_prune(sim_dir: str, log: list[str]) -> dict:
     """Write a per-generation HDF5 next to the run, then delete the raw simOut tree.
 
@@ -102,15 +106,26 @@ def convert_and_prune(sim_dir: str, log: list[str]) -> dict:
 
     converted = 0
     with h5py.File(temporary, "w") as h5:
+        h5.attrs["sim_dir"] = sim_dir
+        h5.attrs["keeps_tensors"] = bool(PRUNE_KEEP_TENSORS)
         for sim_out_path in sim_outs:
             info = parse_sim_out_path(sim_out_path)
             reader = SimOutReader(sim_out_path)
             group = "seed{}/gen{}".format(info.get("seed", 0), info.get("generation", 0))
-            write_sim(h5, group, reader.extract_all_channels(), {
+            # The summary must travel with the channels: once simOut is gone it cannot be
+            # recomputed, and run_export needs it for both the HDF5 attrs and metadata.jsonl.
+            summary = reader.extract_summary()
+            attrs = {
                 "seed": int(info.get("seed", 0)),
                 "generation": int(info.get("generation", 0)),
                 "sim_dir": sim_dir,
-            })
+                "variant_dir": str(info.get("variant_dir", "")),
+            }
+            attrs.update({k: ("" if v is None else v) for k, v in summary.items()})
+            write_sim(h5, group, reader.extract_all_channels(), attrs)
+            # Record which summary keys came from the reader so the exporter can separate
+            # them from the structural attrs without hardcoding a list.
+            h5[group].attrs["summary_keys"] = ",".join(sorted(summary))
             if PRUNE_KEEP_TENSORS:
                 # The same per-gene/per-reaction tensors run_export writes for --full-tensors.
                 # Without these the pruned dataset keeps only the V0 scalar channels.
@@ -119,7 +134,23 @@ def convert_and_prune(sim_dir: str, log: list[str]) -> dict:
                     matrix = reader.extract_full_matrix(molecule_type)
                     if matrix is not None:
                         matrices[channel_name] = matrix
-                write_matrix_channels(h5, group + "/matrices", matrices)
+                ids_by_channel = write_matrix_channels(h5, group + "/matrices", matrices)
+                # write_matrix_channels only returns the column ids; persist them, or the
+                # exporter cannot rebuild the /reference id maps after simOut is deleted.
+                #
+                # As datasets, not attributes: these lists run to thousands of gene and
+                # reaction ids and blow HDF5's 64 KB object-header limit as attributes.
+                # They are model-wide, so one copy per file under /reference is enough.
+                for channel_name, ids in ids_by_channel.items():
+                    reference = "reference/" + channel_name
+                    if reference not in h5:
+                        h5.create_dataset(
+                            reference,
+                            data=[str(i) for i in ids],
+                            dtype=h5py.string_dtype(),
+                            compression="gzip",
+                            compression_opts=4,
+                        )
             converted += 1
     temporary.replace(h5_path)
 
@@ -130,6 +161,13 @@ def convert_and_prune(sim_dir: str, log: list[str]) -> dict:
     for sim_out_path in sim_outs:
         reclaimed_files += sum(1 for _ in sim_out_path.rglob("*"))
         shutil.rmtree(sim_out_path)
+    # A marker so run_export (and a human) can tell "pruned" from "never ran".
+    (export_dir / PRUNED_MARKER).write_text(json.dumps({
+        "pruned_at": __import__("datetime").datetime.now().astimezone().isoformat(),
+        "generations": converted,
+        "keeps_tensors": bool(PRUNE_KEEP_TENSORS),
+        "reclaimed_files": reclaimed_files,
+    }, indent=2) + "\n")
     log.append("Pruned {} simOut tree(s), reclaimed ~{} files".format(len(sim_outs), reclaimed_files))
     return {
         "generations": converted,
