@@ -81,8 +81,11 @@ PRUNED_H5_NAME = "channels.h5"
 PRUNED_MARKER = "pruned.json"
 
 
-def convert_and_prune(sim_dir: str, log: list[str]) -> dict:
+def convert_and_prune(sim_dir: str, log) -> dict:
     """Write a per-generation HDF5 next to the run, then delete the raw simOut tree.
+
+    ``log`` is appended to in place (a deque or list), so pass the caller's own buffer --
+    a copy silently discards the summary line.
 
     Returns a summary of what was converted and reclaimed. Raises on any failure: the
     caller must never delete simOut when conversion did not demonstrably succeed.
@@ -230,7 +233,7 @@ def ingest(manifest: Path, index: int, returncode: int) -> dict:
         payload["results"] = [_result_to_dict(r) for r in results]
         if PRUNE_SIMOUT:
             # Only after results were extracted successfully -- pruning is irreversible.
-            payload["prune"] = convert_and_prune(entry["sim_dir"], list(log_buffer))
+            payload["prune"] = convert_and_prune(entry["sim_dir"], log_buffer)
     except Exception as exc:  # noqa: BLE001 - the sentinel is the only channel back
         payload["status"] = "failed"
         payload["error"] = "{}: {}".format(type(exc).__name__, exc)
