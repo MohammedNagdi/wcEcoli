@@ -39,6 +39,14 @@ export MAMBA_ROOT_PREFIX="${MAMBA_ROOT_PREFIX:-$HOME/storage/micromamba}"
 SIM_ENV="${WCECOLI_SIM_ENV:-wcecoli-sim}"
 API_ENV="${WCECOLI_API_ENV:-wcecoli-api}"
 
+# Invoke the environment's interpreter directly rather than through `micromamba run`:
+# that takes an exclusive lock on ~/.cache/mamba/proc, so concurrent array tasks serialize
+# on one lock file on GPFS and each logs "Waiting for other mamba process to finish".
+# Nothing here needs the activation hooks -- campaign_env.sh sets PYTHONPATH and
+# LD_LIBRARY_PATH itself.
+SIM_PYTHON="${MAMBA_ROOT_PREFIX}/envs/${SIM_ENV}/bin/python"
+API_PYTHON="${MAMBA_ROOT_PREFIX}/envs/${API_ENV}/bin/python"
+
 # Multi-threaded BLAS changes results and runs slower when many single-core simulations share
 # a node (see the note at the top of requirements.txt). One thread per task, always.
 export OPENBLAS_NUM_THREADS=1
@@ -52,8 +60,8 @@ echo "=== wcEcoli task ${SLURM_ARRAY_JOB_ID:-?}_${INDEX} on $(hostname) at $(dat
 # ---------------------------------------------------------------- read the manifest entry
 PRELUDE="$(mktemp)"
 trap 'rm -f "${PRELUDE}"' EXIT
-if ! PYTHONPATH="${BACKEND_ROOT}" "${MAMBA_BIN}" run -n "${API_ENV}" \
-        python -m app.services.slurm_ingest prelude \
+if ! PYTHONPATH="${BACKEND_ROOT}" "${API_PYTHON}" \
+        -m app.services.slurm_ingest prelude \
         --manifest "${MANIFEST}" --index "${INDEX}" > "${PRELUDE}"; then
     echo "FATAL: could not read manifest ${MANIFEST} index ${INDEX}" >&2
     exit 1
@@ -88,7 +96,15 @@ ln -sfn "../${WCE_PARCA_RUN_ID}/kb" "${RUN_DIR}/kb"
 # ---------------------------------------------------------------------------- run the simulation
 cd "${REPO_ROOT}"
 echo "--- sim: ${WCE_SIM_ARGV[*]}"
-PYTHONPATH="${REPO_ROOT}" "${MAMBA_BIN}" run -n "${SIM_ENV}" "${WCE_SIM_ARGV[@]}"
+# _build_sim_command emits argv[0] == "python"; swap it for the sim env's interpreter.
+# Guarded rather than assumed: blindly dropping argv[0] would silently eat a real argument
+# if that ever changed.
+if [[ "${WCE_SIM_ARGV[0]}" == "python" || "${WCE_SIM_ARGV[0]}" == "python3" ]]; then
+    PYTHONPATH="${REPO_ROOT}" "${SIM_PYTHON}" "${WCE_SIM_ARGV[@]:1}"
+else
+    echo "WARNING: unexpected argv[0] '${WCE_SIM_ARGV[0]}'; running it as given" >&2
+    PYTHONPATH="${REPO_ROOT}" "${WCE_SIM_ARGV[@]}"
+fi
 SIM_RC=$?
 echo "--- sim exited with code ${SIM_RC}"
 
@@ -97,8 +113,8 @@ echo "--- sim exited with code ${SIM_RC}"
 # export parallelize across the cluster instead of serializing through one core.
 # It always exits 0; the sentinel carries the real outcome. A non-zero exit would make SLURM
 # requeue a simulation that had already succeeded.
-PYTHONPATH="${BACKEND_ROOT}" "${MAMBA_BIN}" run -n "${API_ENV}" \
-    python -m app.services.slurm_ingest ingest \
+PYTHONPATH="${BACKEND_ROOT}" "${API_PYTHON}" \
+    -m app.services.slurm_ingest ingest \
     --manifest "${MANIFEST}" --index "${INDEX}" --returncode "${SIM_RC}"
 INGEST_RC=$?
 

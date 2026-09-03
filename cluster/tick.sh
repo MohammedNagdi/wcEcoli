@@ -9,7 +9,12 @@ REPO_ROOT="${WCECOLI_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/cluster/campaign_env.sh" >/dev/null
 
-exec "${MICROMAMBA_BIN}" run -n "${WCECOLI_API_ENV}" \
-    python -m app.services.slurm_campaign tick \
+# Invoke the environment's interpreter directly rather than through `micromamba run`:
+# that takes an exclusive lock on ~/.cache/mamba/proc, so concurrent array tasks serialize
+# on one lock file on GPFS and each logs "Waiting for other mamba process to finish".
+# Nothing here needs the activation hooks -- campaign_env.sh sets PYTHONPATH and
+# LD_LIBRARY_PATH itself.
+exec "${MAMBA_ROOT_PREFIX}/envs/${WCECOLI_API_ENV}/bin/python" \
+    -m app.services.slurm_campaign tick \
     --limit "${WCECOLI_TICK_LIMIT:-200}" \
     --max-in-flight "${WCECOLI_MAX_IN_FLIGHT}"
