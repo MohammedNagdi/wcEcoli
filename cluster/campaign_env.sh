@@ -85,6 +85,17 @@ export WCECOLI_PRUNE_KEEP_TENSORS="${WCECOLI_PRUNE_KEEP_TENSORS:-1}"
 
 export PYTHONPATH="${WCECOLI_REPO_ROOT}/interface/backend"
 
+# Put the control-plane interpreter on PATH so `python -m app.services.slurm_campaign ...`
+# just works after sourcing this, the way the runbook describes. Every controller command
+# (dispatch, reconcile, status, submit_campaign, run_export) runs in the api environment;
+# the sim environment is only ever invoked by the array tasks, by explicit path.
+WCECOLI_API_PYTHON="${MAMBA_ROOT_PREFIX}/envs/${WCECOLI_API_ENV}/bin/python"
+export WCECOLI_API_PYTHON
+case ":${PATH}:" in
+    *":${MAMBA_ROOT_PREFIX}/envs/${WCECOLI_API_ENV}/bin:"*) ;;
+    *) export PATH="${MAMBA_ROOT_PREFIX}/envs/${WCECOLI_API_ENV}/bin:${PATH}" ;;
+esac
+
 # ── Layout ───────────────────────────────────────────────────────────────────
 # Checked individually rather than behind one guard: keying the whole block on a single
 # directory silently skips the others when that one already exists. Three stats is cheap

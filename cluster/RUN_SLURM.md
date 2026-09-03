@@ -57,8 +57,8 @@ check-and-maybe-build it would put thousands of tasks in a race over the same di
 ```bash
 sbatch --account=<acct> --partition=<part> cluster/parca.sbatch
 # when it finishes, pin the name so nothing re-hashes reconstruction/ and models/:
-export WCECOLI_PARCA_RUN_ID=$(python -m app.services.slurm_campaign parca-id)
-python -m app.services.slurm_campaign verify-parca
+export WCECOLI_PARCA_RUN_ID=$(cluster/wce parca-id)
+cluster/wce verify-parca
 ```
 
 The cache is `chmod -R a-w` on completion so a buggy task cannot corrupt the shared input.
@@ -84,11 +84,11 @@ whether the larger tiers are feasible at all.
 
 ```bash
 export WCECOLI_SLURM_THROTTLE=1
-python -m app.services.slurm_campaign dispatch --limit 1
+cluster/wce dispatch --limit 1
 squeue -u "$USER"
 # once it finishes:
-python -m app.services.slurm_campaign reconcile
-python -m app.services.slurm_campaign status
+cluster/wce reconcile
+cluster/wce status
 ```
 
 Then measure:
@@ -140,7 +140,7 @@ deletes anything unless the HDF5 conversion demonstrably succeeded.
 
 ```bash
 export WCECOLI_SLURM_THROTTLE=200
-python -m app.services.slurm_campaign dispatch --limit 200
+cluster/wce dispatch --limit 200
 ```
 
 `--limit` sizes one array; `WCECOLI_MAX_IN_FLIGHT` (default 800) caps the total active
@@ -176,8 +176,15 @@ One command answers most of it -- progress, per-status counts, grouped failures,
 the loop last ran:
 
 ```bash
+cluster/wce status              # add --json for scripting
+```
+
+`cluster/wce` needs nothing sourced first. If you have sourced `campaign_env.sh`, the API
+environment is on `PATH` and the longer form works too:
+
+```bash
 source cluster/campaign_env.sh
-python -m app.services.slurm_campaign status        # add --json for scripting
+python -m app.services.slurm_campaign status
 ```
 
 ```
