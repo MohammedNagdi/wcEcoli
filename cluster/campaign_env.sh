@@ -43,6 +43,15 @@ export WCECOLI_SLURM_THROTTLE="${WCECOLI_SLURM_THROTTLE:-1}"
 # MaxSubmitJobsPU is 2000 on ckpt; stay well below it so sbatch never hits DenyOnLimit.
 export WCECOLI_MAX_IN_FLIGHT="${WCECOLI_MAX_IN_FLIGHT:-800}"
 
+# ── Parca cache id ───────────────────────────────────────────────────────────
+# Naming the cache means hashing all of reconstruction/ and models/ -- ~54 s. Fine once,
+# but ruinous for a loop that ticks every few minutes. parca.sbatch records the id here
+# when it builds the cache; pick it up rather than recomputing.
+if [[ -z "${WCECOLI_PARCA_RUN_ID:-}" && -r "${WCECOLI_CAMPAIGN_ROOT}/state/parca_run_id" ]]; then
+    WCECOLI_PARCA_RUN_ID="$(cat "${WCECOLI_CAMPAIGN_ROOT}/state/parca_run_id")"
+    export WCECOLI_PARCA_RUN_ID
+fi
+
 # ── BLAS ─────────────────────────────────────────────────────────────────────
 # numpy/scipy come from pip wheels that bundle an ILP64 OpenBLAS under numpy.libs/ with
 # mangled symbol names, so there is nothing aesara can link against: it reports

@@ -70,6 +70,11 @@ PYTHONPATH="${BACKEND_ROOT}" WCECOLI_PARCA_RUN_ID="${PARCA_RUN_ID}" \
 # Freeze. Simulation tasks only ever read this.
 chmod -R a-w "${TARGET}"
 
+# Record the id so campaign_env.sh can pin it, sparing every later command (and every
+# loop tick) the ~54 s tree hash.
+mkdir -p "${WCECOLI_CAMPAIGN_ROOT}/state"
+printf '%s\n' "${PARCA_RUN_ID}" > "${WCECOLI_CAMPAIGN_ROOT}/state/parca_run_id"
+
 echo
 echo "Parca cache frozen at ${TARGET}"
 echo "Pin it for every later command:"
