@@ -170,6 +170,45 @@ silently and strand the campaign. For interactive development, a `tmux` loop wor
 while true; do python -m app.services.slurm_campaign tick --limit 200; sleep 60; done
 ```
 
+## 5a. Checking on a running campaign
+
+One command answers most of it -- progress, per-status counts, grouped failures, and when
+the loop last ran:
+
+```bash
+source cluster/campaign_env.sh
+python -m app.services.slurm_campaign status        # add --json for scripting
+```
+
+```
+campaign: 10/168 jobs complete (6.0%)
+  done=2, failed=8, running_sim=158
+last tick: 2026-09-03T20:38:41+00:00
+failures:
+  8 job(s): Simulation failed with exit code 1
+     ids: 105, 106, 107, 108, 109, 110 (+2 more)
+```
+
+`last tick` is the loop's heartbeat: if it stops advancing, the scrontab entry is not
+firing. Check the loop itself with:
+
+```bash
+scrontab -l                                  # is the entry there?
+sacct -n --name=wce-tick --starttime=today --format=JobID,State,Start,Elapsed
+```
+
+For the simulations and for one failure's real cause:
+
+```bash
+squeue -u "$USER" -o "%.12i %.9T %.10M %R"   # what SLURM is running now
+sacct -X -n --starttime=today --format=JobID,JobName%18,State,Elapsed,MaxRSS
+grep -iE "Traceback|Error" "$WCECOLI_CAMPAIGN_ROOT"/logs/*_<index>.out | tail
+```
+
+Note that `status` groups failures by message, because a whole condition failing the same
+way is one problem rather than N -- and that distinction decides whether a retry is worth
+attempting.
+
 ## 6. Preemption
 
 `ckpt` is `PreemptMode=REQUEUE` with `GraceTime=0`: a preempted task is killed instantly,

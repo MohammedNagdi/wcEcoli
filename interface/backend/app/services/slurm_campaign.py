@@ -418,6 +418,7 @@ def reconcile() -> dict:
         "Reconciled: %d done, %d failed, %d requeued, %d still running, %d unknown",
         counts["done"], counts["failed"], counts["requeued"], counts["running"], counts["unknown"],
     )
+    _record_tick(counts)
     return counts
 
 
@@ -556,14 +557,73 @@ def init_db():
     logger.info("Database ready at %s", settings.database_path)
 
 
+LAST_TICK = "last_tick.json"
+
+
+def _record_tick(counts: dict):
+    """Leave a heartbeat so `status` can show whether the loop is actually firing."""
+    try:
+        payload = {"at": _now(), "counts": counts}
+        path = state_dir() / LAST_TICK
+        temporary = path.with_suffix(".{}.tmp".format(uuid.uuid4().hex))
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        temporary.replace(path)
+    except OSError:
+        logger.debug("could not write tick heartbeat", exc_info=True)
+
+
 def status() -> dict:
+    """Everything needed to answer 'how is the campaign going' in one call."""
     engine = _engine()
     with Session(engine) as session:
         rows = session.exec(select(SimulationJob)).all()
+
     tally: dict[str, int] = {}
+    failures: dict[str, list[int]] = {}
     for job in rows:
         tally[job.status] = tally.get(job.status, 0) + 1
-    return tally
+        if job.status == "failed":
+            # Group by message: a whole condition failing the same way is one problem,
+            # not N problems, and that distinction decides whether retrying is worth it.
+            failures.setdefault((job.error_message or "unknown").strip(), []).append(job.id)
+
+    last_tick = None
+    tick_path = state_dir() / LAST_TICK
+    if tick_path.is_file():
+        try:
+            last_tick = json.loads(tick_path.read_text()).get("at")
+        except (OSError, json.JSONDecodeError):
+            last_tick = None
+
+    terminal = tally.get("done", 0) + tally.get("failed", 0) + tally.get("cancelled", 0)
+    return {
+        "counts": tally,
+        "total": len(rows),
+        "complete": terminal,
+        "percent_complete": round(100.0 * terminal / len(rows), 1) if rows else 0.0,
+        "failures": {message: sorted(ids) for message, ids in failures.items()},
+        "last_tick": last_tick,
+    }
+
+
+def format_status(report: dict) -> str:
+    lines = [
+        "campaign: {}/{} jobs complete ({}%)".format(
+            report["complete"], report["total"], report["percent_complete"]
+        ),
+        "  " + ", ".join(
+            "{}={}".format(name, count) for name, count in sorted(report["counts"].items())
+        ) if report["counts"] else "  (no jobs)",
+        "last tick: {}".format(report["last_tick"] or "never -- is the loop running?"),
+    ]
+    if report["failures"]:
+        lines.append("failures:")
+        for message, ids in report["failures"].items():
+            shown = ", ".join(str(i) for i in ids[:6])
+            more = " (+{} more)".format(len(ids) - 6) if len(ids) > 6 else ""
+            lines.append("  {} job(s): {}".format(len(ids), message[:100]))
+            lines.append("     ids: {}{}".format(shown, more))
+    return "\n".join(lines)
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -580,7 +640,8 @@ def main(argv: list[str] | None = None) -> int:
                                  help="cap on simultaneously active tasks (klone limit is 2000)")
 
     sub.add_parser("reconcile", help="ingest sentinels and reconcile against the scheduler")
-    sub.add_parser("status", help="show job status counts")
+    status_parser = sub.add_parser("status", help="show campaign progress and failures")
+    status_parser.add_argument("--json", action="store_true", help="machine-readable output")
     sub.add_parser("init-db", help="create and seed the campaign database")
     sub.add_parser("verify-parca", help="check that the frozen Parca cache is complete")
     sub.add_parser("parca-id", help="print the content-addressed Parca cache directory name")
@@ -598,7 +659,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "parca-id":
         print(resolve_parca_run_id())
     elif args.command == "status":
-        print(json.dumps(status(), indent=2, sort_keys=True))
+        report = status()
+        print(json.dumps(report, indent=2, sort_keys=True) if args.json
+              else format_status(report))
     elif args.command == "verify-parca":
         parca_run_id = resolve_parca_run_id()
         print("Parca cache OK: {}".format(verify_parca(parca_run_id)))
