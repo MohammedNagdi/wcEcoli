@@ -198,7 +198,14 @@ class PolypeptideElongation(wholecell.processes.process.Process):
 			return
 
 		# Calculate elongation resource capacity
-		aaCountInSequence = np.bincount(sequences[(sequences != polymerize.PAD_VALUE)])
+		# minlength is required: bincount otherwise returns an array only as long as the
+		# highest amino acid index actually present in the sequences, and RibosomeData
+		# allocates aaCountInSequence at a fixed len(aaNames). When translation falls off
+		# enough that the last amino acids appear in no ribosome sequence, the short array
+		# fails the table writer's fixed-width check partway through a run.
+		aaCountInSequence = np.bincount(
+			sequences[(sequences != polymerize.PAD_VALUE)],
+			minlength=len(self.aaNames))
 		total_aa_counts = self.aas.counts()
 
 		# MODEL SPECIFIC: Get amino acid counts
