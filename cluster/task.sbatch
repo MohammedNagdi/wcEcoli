@@ -96,16 +96,27 @@ ln -sfn "../${WCE_PARCA_RUN_ID}/kb" "${RUN_DIR}/kb"
 # ---------------------------------------------------------------------------- run the simulation
 cd "${REPO_ROOT}"
 echo "--- sim: ${WCE_SIM_ARGV[*]}"
+# Tee to SIM_LOG as well as to this task's stdout. The sentinel's log_tail is the only
+# record of a failure that reaches the database, and the ingest step cannot read the SLURM
+# .out file (its path is not knowable from inside the task). stderr is folded in so the
+# traceback lands in the same stream as the output that preceded it, in order -- reading
+# the .out alone is misleading, because Python leaves stderr unbuffered while stdout is
+# block-buffered, so tracebacks surface thousands of lines above where they happened.
+# slurm_ingest deletes SIM_LOG once it has taken the tail.
+SIM_LOG="${RUN_DIR}/sim.log"
+export WCE_SIM_LOG="${SIM_LOG}"
 # _build_sim_command emits argv[0] == "python"; swap it for the sim env's interpreter.
 # Guarded rather than assumed: blindly dropping argv[0] would silently eat a real argument
 # if that ever changed.
 if [[ "${WCE_SIM_ARGV[0]}" == "python" || "${WCE_SIM_ARGV[0]}" == "python3" ]]; then
-    PYTHONPATH="${REPO_ROOT}" "${SIM_PYTHON}" "${WCE_SIM_ARGV[@]:1}"
+    PYTHONPATH="${REPO_ROOT}" "${SIM_PYTHON}" "${WCE_SIM_ARGV[@]:1}" 2>&1 | tee "${SIM_LOG}"
 else
     echo "WARNING: unexpected argv[0] '${WCE_SIM_ARGV[0]}'; running it as given" >&2
-    PYTHONPATH="${REPO_ROOT}" "${WCE_SIM_ARGV[@]}"
+    PYTHONPATH="${REPO_ROOT}" "${WCE_SIM_ARGV[@]}" 2>&1 | tee "${SIM_LOG}"
 fi
-SIM_RC=$?
+# Not $?: that is tee's status, and under `set -o pipefail` it is whichever stage failed
+# last. The simulation's own exit code is what the sentinel reports.
+SIM_RC="${PIPESTATUS[0]}"
 echo "--- sim exited with code ${SIM_RC}"
 
 # ------------------------------------------------------------------------------------ ingest

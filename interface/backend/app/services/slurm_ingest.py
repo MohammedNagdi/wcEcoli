@@ -180,6 +180,31 @@ def convert_and_prune(sim_dir: str, log) -> dict:
     }
 
 
+def _consume_sim_log(log) -> None:
+    """Append the tail of the simulation's own output to ``log``, then delete the file.
+
+    cluster/task.sbatch tees the run to $WCE_SIM_LOG. It is the only route by which a
+    traceback reaches the database: the SLURM .out path is not knowable from inside the
+    task, and log_tail is what `wce status` and the failure triage read. The file is
+    removed once read -- the .out file is the archive, this is only the handoff -- so a
+    ~1 MB-per-run log does not accumulate across a 63k-job matrix.
+    """
+    path = os.environ.get("WCE_SIM_LOG", "")
+    if not path or not Path(path).is_file():
+        return
+    try:
+        lines = Path(path).read_text(errors="replace").splitlines()
+        # ``log`` is a bounded deque; extending it keeps only the last maxlen lines.
+        log.extend(lines)
+    except OSError as exc:
+        log.append("Could not read sim log {}: {}".format(path, exc))
+        return
+    try:
+        Path(path).unlink()
+    except OSError:
+        pass
+
+
 def _result_to_dict(result) -> dict:
     return {
         "job_id": result.job_id,
@@ -214,7 +239,8 @@ def ingest(manifest: Path, index: int, returncode: int) -> dict:
         payload["status"] = "failed"
         payload["error"] = "Simulation failed with exit code {}".format(returncode)
         payload["results"] = []
-        payload["log_tail"] = ""
+        _consume_sim_log(log_buffer)
+        payload["log_tail"] = "\n".join(log_buffer)
         return payload
 
     job = ManifestJob(
@@ -225,6 +251,7 @@ def ingest(manifest: Path, index: int, returncode: int) -> dict:
         generations=entry["generations"],
     )
 
+    _consume_sim_log(log_buffer)
     try:
         from app.services.sim_worker import _collect_results
 
