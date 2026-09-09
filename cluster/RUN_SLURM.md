@@ -13,7 +13,7 @@ allowed on login nodes. See `PLAN.md` for the design and the reasoning behind ea
 | Result ingestion | On the worker | **In the array task** — parallelized across the cluster |
 | Parca | Built lazily, cached, lock per process | Built **once** up front and frozen read-only |
 | Runtime | Two Docker images | Two micromamba envs (same split, same reason) |
-| Concurrency cap | `SIM_RUNNER_CONCURRENCY` | `--array=...%N` plus `WCECOLI_MAX_IN_FLIGHT` |
+| Concurrency cap | `SIM_RUNNER_CONCURRENCY` | `WCECOLI_MAX_IN_FLIGHT` |
 
 Unchanged: `submit_campaign`, `run_export`, the database schema, and the on-disk output
 layout. `SIM_OUTPUT_DIR` is simply repointed.
@@ -83,7 +83,6 @@ Do not skip this. It sets the real `--mem` and `--time`, and its file count dete
 whether the larger tiers are feasible at all.
 
 ```bash
-export WCECOLI_SLURM_THROTTLE=1
 cluster/wce dispatch --limit 1
 squeue -u "$USER"
 # once it finishes:
@@ -139,13 +138,26 @@ deletes anything unless the HDF5 conversion demonstrably succeeded.
 ## 4. Scale up
 
 ```bash
-export WCECOLI_SLURM_THROTTLE=200
-cluster/wce dispatch --limit 200
+export WCECOLI_MAX_IN_FLIGHT=150
+cluster/wce dispatch --limit 150
 ```
 
-`--limit` sizes one array; `WCECOLI_MAX_IN_FLIGHT` (default 800) caps the total active
-across arrays. Keep it well under klone's `MaxSubmitJobsPU` of 2000 on `ckpt` so `sbatch`
-never hits `DenyOnLimit`. `MaxArraySize` is 10001, so no single array may exceed that.
+**`WCECOLI_MAX_IN_FLIGHT` is the only concurrency knob.** It caps the tasks the controller
+keeps submitted, and because arrays carry no `%N` cap by default, every submitted task is
+runnable — so it is also how many run. Keep it well under klone's `MaxSubmitJobsPU` of 2000
+on `ckpt` so `sbatch` never hits `DenyOnLimit`. `MaxArraySize` is 10001, so no single array
+may exceed that.
+
+`--limit` sizes one array and should equal `WCECOLI_MAX_IN_FLIGHT`: each dispatch claims
+`min(limit, max_in_flight - in_flight)`, so a smaller limit only stretches the ramp over
+`ceil(max_in_flight / limit)` ticks. `cluster/tick.sh` defaults `--limit` to
+`WCECOLI_MAX_IN_FLIGHT` for exactly this reason; `WCECOLI_TICK_LIMIT` overrides it if you
+want a gentler ramp.
+
+`WCECOLI_SLURM_THROTTLE` adds a `%N` cap *inside* each array and defaults to `0` (none).
+Do not reach for it as a second concurrency limit — the two caps are in different units and
+multiply. `%40` on arrays of 200 under `MAX_IN_FLIGHT=800` holds 800 tasks but runs only
+four arrays x 40 = **160**, and the number drifts upward as arrays drain and fragment.
 
 Tiers below ~2000 jobs (T1 168, T4 512, T5 3000 in two chunks) need nothing more than a few
 `dispatch` calls and a `reconcile` when convenient. Only T2's ~47k jobs need a scheduled loop.
@@ -167,7 +179,7 @@ scrontab -e
 silently and strand the campaign. For interactive development, a `tmux` loop works too:
 
 ```bash
-while true; do python -m app.services.slurm_campaign tick --limit 200; sleep 60; done
+while true; do python -m app.services.slurm_campaign tick --limit 800; sleep 60; done
 ```
 
 ## 5a. Checking on a running campaign

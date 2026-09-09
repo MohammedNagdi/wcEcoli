@@ -39,9 +39,16 @@ export WCECOLI_SLURM_PARTITION="${WCECOLI_SLURM_PARTITION:-ckpt}"
 export WCECOLI_SLURM_CPUS="${WCECOLI_SLURM_CPUS:-1}"
 export WCECOLI_SLURM_MEM="${WCECOLI_SLURM_MEM:-4G}"
 export WCECOLI_SLURM_TIME="${WCECOLI_SLURM_TIME:-03:00:00}"
-export WCECOLI_SLURM_THROTTLE="${WCECOLI_SLURM_THROTTLE:-1}"
-# MaxSubmitJobsPU is 2000 on ckpt; stay well below it so sbatch never hits DenyOnLimit.
-export WCECOLI_MAX_IN_FLIGHT="${WCECOLI_MAX_IN_FLIGHT:-800}"
+# WCECOLI_MAX_IN_FLIGHT is THE concurrency knob: the controller keeps this many tasks
+# submitted, and with no per-array throttle every submitted task is runnable, so it is also
+# how many run. MaxSubmitJobsPU is 2000 on ckpt (`sacctmgr show qos`), and sbatch fails with
+# DenyOnLimit at that ceiling, so stay well below it.
+export WCECOLI_MAX_IN_FLIGHT="${WCECOLI_MAX_IN_FLIGHT:-150}"
+# 0 = no `%N` cap inside each array. Do not use this as a second concurrency limit: a
+# per-array cap and a submit cap are in different units and multiply. %40 on arrays of 200
+# under MAX_IN_FLIGHT=800 gives four arrays holding 800 tasks of which only 160 ever run,
+# and the figure drifts as arrays drain and fragment. Set it only for a deliberate brake.
+export WCECOLI_SLURM_THROTTLE="${WCECOLI_SLURM_THROTTLE:-0}"
 
 # ── Parca cache id ───────────────────────────────────────────────────────────
 # Naming the cache means hashing all of reconstruction/ and models/ -- ~54 s. Fine once,

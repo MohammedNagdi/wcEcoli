@@ -58,7 +58,12 @@ class SlurmResources:
     cpus: int = 1
     mem: str = "4G"
     time_limit: str = "03:00:00"
-    throttle: int = 1
+    # 0 = no per-array cap, which is the intended setting. Concurrency is governed by how
+    # many tasks the controller submits (WCECOLI_MAX_IN_FLIGHT), not by a second limit
+    # inside each array. Two caps in different units multiply: with %40 on arrays of 200
+    # under a 800-task submit cap, four arrays hold 800 tasks but only 4x40 = 160 ever run.
+    # Leave this at 0 unless you deliberately want a per-array brake.
+    throttle: int = 0
     requeue: bool = True
 
     @classmethod
@@ -89,6 +94,18 @@ def _run(argv: list[str], *, timeout: int = 120) -> str:
     return proc.stdout
 
 
+def _array_spec(count: int, throttle: int) -> str:
+    """Build the ``--array`` argument, omitting ``%N`` when no per-array cap is wanted.
+
+    Every submitted task should be runnable: then "submitted" and "running" are the same
+    number and there is one knob to reason about instead of two that multiply.
+    """
+    spec = "0-{}".format(count - 1)
+    if throttle > 0:
+        spec += "%{}".format(throttle)
+    return spec
+
+
 def submit_array(
     script: Path,
     manifest: Path,
@@ -109,7 +126,7 @@ def submit_array(
         "--job-name", job_name,
         "--account", resources.account,
         "--partition", resources.partition,
-        "--array", "0-{}%{}".format(count - 1, max(1, resources.throttle)),
+        "--array", _array_spec(count, resources.throttle),
         "--cpus-per-task", str(resources.cpus),
         "--mem", resources.mem,
         "--time", resources.time_limit,

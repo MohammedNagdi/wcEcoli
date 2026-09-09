@@ -67,6 +67,20 @@ def test_submit_array_honours_no_requeue(tmp_path, captured):
     assert "0-0%1" in captured[0]
 
 
+def test_submit_array_omits_throttle_when_uncapped(tmp_path, captured):
+    """The default is no ``%N``: every submitted task must be runnable.
+
+    A per-array cap and the controller's submit cap are in different units, so having both
+    multiplies -- %40 on arrays of 200 under an 800-task submit cap runs only 160.
+    """
+    slurm_backend.submit_array(
+        tmp_path / "t.sbatch", tmp_path / "m.jsonl", 800, SlurmResources(), log_dir=tmp_path,
+    )
+    argv = captured[0]
+    # The log paths legitimately contain %x/%A/%a, so check the --array value itself.
+    assert argv[argv.index("--array") + 1] == "0-799"
+
+
 def test_submit_array_rejects_empty_array(tmp_path, captured):
     with pytest.raises(ValueError):
         slurm_backend.submit_array(
