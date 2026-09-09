@@ -239,6 +239,20 @@ def ingest(manifest: Path, index: int, returncode: int) -> dict:
         payload["status"] = "failed"
         payload["error"] = "Simulation failed with exit code {}".format(returncode)
         payload["results"] = []
+        if PRUNE_SIMOUT:
+            # Prune failed runs too. Pruning used to be success-only, so every failed job
+            # kept its full raw tree forever -- 19.7 GiB across 14 jobs in T4 alone, and
+            # that scales with the tier. The generations that did complete are still
+            # converted to HDF5 first, so this reclaims space without discarding them;
+            # the traceback is the diagnostic for a failure, not the raw simOut.
+            # Best-effort by design: on any error the tree is left exactly as it is.
+            try:
+                payload["prune"] = convert_and_prune(entry["sim_dir"], log_buffer)
+            except Exception as exc:  # noqa: BLE001 - reclaiming space must never mask the failure
+                log_buffer.append("Could not prune failed run: {}: {}".format(
+                    type(exc).__name__, exc))
+        # Last, so that on a full buffer the traceback evicts the pruning chatter and not
+        # the other way round.
         _consume_sim_log(log_buffer)
         payload["log_tail"] = "\n".join(log_buffer)
         return payload
