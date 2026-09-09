@@ -509,21 +509,69 @@ def _resolve_timeline(session: Session, timeline_name: str) -> str:
     return timeline_name
 
 
+def _timeline_events(definition: str) -> list[tuple[str, str]]:
+    """Split a timeline definition into its (time, media) pairs."""
+    pairs = []
+    for part in (definition or "").strip('"').strip("'").split(","):
+        fields = part.strip().split(None, 1)
+        if len(fields) == 2:
+            pairs.append((fields[0], fields[1]))
+    return pairs
+
+
+def _shift_timeline_for_media(session: Session, media: str) -> str | None:
+    """Find a timelines_def entry that *shifts into* ``media`` from plain minimal.
+
+    Only consulted when no static timeline covers the media. Several conditions name a
+    medium the initial state cannot survive at t=0 -- the initial state is parameterised
+    for glucose-minimal growth, so dropping a cell straight into e.g. minimal_no_glucose
+    starves it before it is established and the run dies with NegativeCountsError. The
+    repo's own timelines model those as a downshift after ~20 min; that is the intended
+    biology and the only form of them the model can actually run.
+
+    Deliberately narrow, so conditions that work today keep their exact semantics:
+      * a static "0 <media>" timeline always wins (checked by the caller), and
+      * the shift must start at plain ``minimal``, which excludes the GLC ramps
+        (they start at minimal_GLC_20mM / minimal_GLC_2mM, not minimal).
+    """
+    for timeline in session.exec(select(Timeline)).all():
+        events = _timeline_events(timeline.definition)
+        if len(events) > 1 and events[0][1] == "minimal" and events[-1][1] == media:
+            logger.info(
+                "Media '%s' has no static timeline; using shift timeline '%s'",
+                media, timeline.name,
+            )
+            return ", ".join("{} {}".format(t, m) for t, m in events)
+    return None
+
+
 def _resolve_condition_timeline(session: Session, condition_name: str) -> str:
     """Convert a growth condition name (e.g. 'acetate') to a timeline string
     (e.g. '0 minimal_acetate') by looking up the condition's nutrients field.
 
     The WCM's --timeline flag accepts "time nutrients" pairs. A static
-    condition is just a single-entry timeline at time 0.
+    condition is just a single-entry timeline at time 0 -- but only where
+    timelines_def.tsv actually defines the media as a static timeline. Where it
+    does not, and defines a shift into that media instead, use the shift; see
+    _shift_timeline_for_media.
     """
     from app.db.models import Condition as ConditionModel
     cond = session.exec(
         select(ConditionModel).where(ConditionModel.name == condition_name)
     ).first()
     if cond and cond.nutrients:
-        timeline_str = "0 " + cond.nutrients
-        logger.info("Condition '%s' → timeline '%s'", condition_name, timeline_str)
-        return timeline_str
+        static = "0 " + cond.nutrients
+        known_static = any(
+            _timeline_events(t.definition) == [("0", cond.nutrients)]
+            for t in session.exec(select(Timeline)).all()
+        )
+        if not known_static:
+            shift = _shift_timeline_for_media(session, cond.nutrients)
+            if shift:
+                logger.info("Condition '%s' → timeline '%s'", condition_name, shift)
+                return shift
+        logger.info("Condition '%s' → timeline '%s'", condition_name, static)
+        return static
 
     logger.warning("Condition '%s' not found in DB — falling back to basal", condition_name)
     return "0 minimal"
