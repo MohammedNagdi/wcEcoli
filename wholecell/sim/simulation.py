@@ -103,6 +103,19 @@ LINEAGE_TERMINATING_EXCEPTIONS = (NegativeCountsError,)
 LINEAGE_TERMINATION_FILE = 'lineage_termination.json'
 
 
+class TimeLimitReached(SimulationException):
+	"""The cell did not divide within `lengthSec`.
+
+	A cell that cannot grow (an auxotroph without its amino acid, a depleted
+	medium) never reaches the critical mass that triggers replication and so
+	never divides; it just crawls until the time limit. Splitting it into
+	daughters at the limit, as the simulator used to, manufactures a smaller
+	non-growing cell for the next generation. Ending the lineage records the
+	generations it did run and stops the lineage there instead.
+	"""
+	pass
+
+
 class LineageTerminated(SimulationException):
 	"""The cell died before dividing: the lineage ends with this generation.
 
@@ -291,8 +304,11 @@ class Simulation():
 		termination = None
 		try:
 			self.run_incremental(self._lengthSec + self.initialTime())
-			if not self._raise_on_time_limit:
-				self.cellCycleComplete()
+			if not self._cellCycleComplete and not self._raise_on_time_limit:
+				# The time limit passed without a division: end the lineage
+				# rather than divide an undivided cell (see TimeLimitReached).
+				termination = LineageTerminated(self, TimeLimitReached(
+					'Time limit of {:.0f} s reached without cell division'.format(self._lengthSec)))
 		except LINEAGE_TERMINATING_EXCEPTIONS as cause:
 			# Not a re-raise yet: finalize first so the loggers flush and the
 			# partial generation on disk is complete. The state is inconsistent

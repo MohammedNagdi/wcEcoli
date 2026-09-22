@@ -2200,7 +2200,19 @@ def amino_acid_synthesis_jit(counts_per_aa_fwd, counts_per_aa_rev, aa_conc,
 	aa_upstream_kms, aa_kis, aa_reverse_kms, 
 	aa_degradation_kms, aa_forward_stoich, aa_kcats_fwd,
 	aa_reverse_stoich, aa_kcats_rev):
-	km_saturation = np_prod(1 / (1 + aa_upstream_kms / aa_conc), axis=1)
+	# Saturation of each pathway by its upstream amino acids. An entry of 0 in
+	# aa_upstream_kms means "no dependency", so its factor is 1. Writing the
+	# factor as c / (c + KM) rather than 1 / (1 + KM / c) keeps it finite at
+	# c == 0: the old form gave 0 / 0 = NaN for every unused KM as soon as any
+	# amino acid pool was empty, and the NaN spread through the product to all
+	# pathways and into the tRNA charging ODE (issues.md, Issue 4a).
+	n_aas = aa_conc.shape[0]
+	km_saturation = np.ones(n_aas)
+	for i in range(aa_upstream_kms.shape[0]):
+		for j in range(aa_upstream_kms.shape[1]):
+			km = aa_upstream_kms[i, j]
+			if km > 0:
+				km_saturation[i] *= aa_conc[j] / (aa_conc[j] + km)
 
 	# Determine saturation fraction for reactions
 	forward_fraction = 1 / (1 + aa_conc / aa_kis) * km_saturation

@@ -17,10 +17,17 @@ for the validation pilot and the resubmission):
 | 7 | `WCECOLI_SLURM_TIME` 03:00:00 -> **04:00:00**. | `cluster/campaign_env.sh` |
 | — | `cluster/wce requeue` returns terminal jobs to `pending` (backs up the DB, deletes stale results, optionally purges old output). `status` reports lineage-terminated jobs grouped by reason. | `app/services/slurm_campaign.py` |
 
-Not fixed: **4a** (tRNA charging divergence, 380 jobs) and the GLPK `GLP_ESING`/`GLP_EFAIL`
-half of 4c, plus the ppGpp and negative-equilibrium classes in Issue 6. Those jobs were
-re-dispatched anyway, because a cell that stalls before it hits one of those numerical paths
-may now die through `NegativeCountsError` first and be recorded as a terminated lineage.
+**4a fixed later the same day** (see [4a](#4a--trna-charging-ode-diverges)): it was never a
+charging-ODE divergence but a `0/0` in the amino-acid synthesis rate law the moment an
+auxotroph's pool reaches zero molecules. The rate law is now finite at zero, and a generation
+that reaches the time limit without dividing ends the lineage (`TimeLimitReached`) instead of
+splitting the undivided cell, so these non-growing cells are recorded the same way as the
+`NegativeCountsError` ones. The 380 jobs were requeued once more after that fix.
+
+Not fixed: the GLPK `GLP_ESING`/`GLP_EFAIL` half of 4c, plus the ppGpp and
+negative-equilibrium classes in Issue 6. Those jobs were re-dispatched anyway, because a cell
+that stalls before it hits one of those numerical paths may now die through
+`NegativeCountsError` first and be recorded as a terminated lineage.
 
 Four tiers have been dispatched and all four are terminal — **9,152 jobs, 7,100 done /
 2,052 failed**, nothing pending, nothing in flight. Last tick 2026-09-19T14:20:23Z. T2_CORE,
@@ -399,7 +406,7 @@ transient raw tree.
 The rate is strongly condition-dependent: **1.9% in T5** (static media) against **11.3% of
 T3's non-starvation jobs** (media shifts). A shift roughly sextuples it.
 
-### 4a — tRNA charging ODE diverges
+### 4a — "tRNA charging ODE diverges" — FIXED 2026-09-22: a `0/0` in the synthesis rate law
 
 ```
 models/ecoli/processes/polypeptide_elongation.py:1081  solve_ivp(dcdt, ..., method='BDF')
@@ -407,13 +414,47 @@ scipy/integrate/_ivp/bdf.py:364                        LU = self.lu(self.I - c *
 ValueError: array must not contain infs or NaNs
 ```
 
-Preceded by divide-by-zero warnings in the charging model (`polypeptide_elongation.py:856`,
-`:1076`, `:1098`) and `invalid value encountered in subtract` from the BDF integrator. The
-charging state goes non-finite and the next Jacobian factorisation rejects it. Growth stalls
-first — dry-mass fold change pinned near 1.0.
+**The earlier reading of this class was wrong.** It is not an integrator divergence, and the
+divide-by-zero warnings in the charging model do not precede it (they appear in 9 of the 380
+log tails, from the ppGpp code). The 380 jobs were re-analysed from their `log_tail`, their
+exported `channels.h5`, and three jobs whose raw `simOut` had survived pruning (glyA 7127,
+argA 7021, cysE 4662); the crashing `calculate_trna_charging` call was replayed from those
+three jobs' bulk counts and reproduced the exception exactly.
 
-This is now the **second-largest failure class in the campaign**, and the largest that is not
-a media artefact. Unfixed.
+**Cause.** Every one of the 380 jobs is an amino-acid-pathway genotype: in T3 the 19
+knockouts aroA/aroC/pheA, leuA–D, hisC/D/G, argA/E/G, glyA, cysE, metA, ilvC, lysA (10–26 of
+48 jobs each) and one alaS; in T5 exactly the double knockouts gdhA+gltB (21/40), metL+thrA
+(8/40) and lysC+thrA (7/40), and nothing else; in T4 one argP-active cell. The knocked-out
+amino acid's synthesis rate is zero from generation 0, the supply-minus-use feedback in
+`metabolism.py:271` walks its homeostatic target down until it is clamped at **1 molecule**,
+and the pool then sits at a median of 1 molecule for the rest of the run while translation
+crawls (charged tRNA for that amino acid at 0.003–0.02 µM). The crash comes when the count
+touches **exactly zero**, at a division or by fluctuation:
+`amino_acid_synthesis_jit` computed `prod(1 / (1 + aa_upstream_kms / aa_conc))`, the KM
+matrix is 0 wherever there is no dependency (420 of 441 entries), so a zero concentration
+gave `0/0 = NaN`, the product spread it to all 21 amino acids, and the NaN entered the
+charging ODE's right-hand side on its first evaluation. One molecule instead of zero made the
+identical call succeed. That is why the failure is deterministic per seed but spread across
+seeds and times, and why 343 of 377 crash in generation 3: the cells are dead long before —
+280 never doubled in any completed generation and 196 had the previous generation run to the
+10,800 s cap without dividing.
+
+**Fix, in two parts, both required.**
+
+1. `reconstruction/ecoli/dataclasses/process/metabolism.py`: the upstream-saturation factor
+   is `c / (c + KM)` over the entries with `KM > 0` and 1 elsewhere. Identical to the old form
+   for `c > 0`, finite at `c == 0`. Tested in `reconstruction/ecoli/tests/test_amino_acid_synthesis.py`.
+2. `wholecell/sim/simulation.py`: a generation that reaches `lengthSec` without dividing now
+   ends the lineage (`TimeLimitReached`, recorded through the same `LineageTerminated` path as
+   `NegativeCountsError`) instead of splitting the undivided cell into daughters. Without this
+   the guard alone would be a loss: a cell that no longer crashes crawls every remaining
+   generation to the cap, and the job lands as `done` with generations that never doubled — which
+   is what 166 already-`done` jobs look like (124 of them sibling seeds of 4a cells, the rest
+   lysC+thrA and metL+thrA on acetate/succinate, lysA on rich_to_minimal, aroE). With both, a 4a
+   cell runs its shrinking generations and is terminated at the first capped one.
+
+The per-protocol gene filter in Issue 5 remains the campaign-level remedy: a knockout of a
+sole amino-acid route paired with a medium lacking that amino acid always lands here.
 
 ### 4b — `aaCountInSequence` written at the wrong width — FIXED AND VALIDATED
 

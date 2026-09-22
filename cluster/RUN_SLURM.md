@@ -229,10 +229,12 @@ way is one problem rather than N -- and that distinction decides whether a retry
 attempting.
 
 `status` also reports **lineage terminated** jobs. These are `done`, not `failed`: the cell
-stopped growing and died before its last generation (the simulator raised
-`NegativeCountsError` -- a process allocated more of a molecule than existed), and the
-generations it did run are ingested as results, the dying one flagged `terminated` with the
-molecule that ran out as its reason. A starving cell in a depleted medium, or an auxotroph
+stopped growing before its last generation, either because it died (the simulator raised
+`NegativeCountsError` -- a process allocated more of a molecule than existed) or because it
+never divided within the generation's time limit (`TimeLimitReached`; the simulator used to
+split the undivided cell into daughters at the limit). The generations it did run are ingested
+as results, the dying one flagged `terminated` with the molecule that ran out, or the time
+limit, as its reason. A starving cell in a depleted medium, or an auxotroph
 shifted away from its amino acid, ends this way; it is a model prediction, not a crash. See
 `issues.md`, Issues 1 and 5.
 
