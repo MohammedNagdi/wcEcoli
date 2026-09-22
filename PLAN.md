@@ -183,6 +183,8 @@ Everything below is measured on klone, not estimated.
 | Environment build | 48 min (compute node) | — |
 
 Resource defaults were retuned from this: `--mem` 8G -> **4G**, `--time` 02:00:00 -> **03:00:00**.
+Raised again to **04:00:00** on 2026-09-22: three of 9,360 tasks hit the 3 h wall (`issues.md`, Issue 7), and a longer
+limit reserves nothing on the preemptible `ckpt` partition.
 
 ### What this means for scale
 

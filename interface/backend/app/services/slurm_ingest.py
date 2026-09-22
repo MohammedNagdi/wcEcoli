@@ -93,7 +93,8 @@ def convert_and_prune(sim_dir: str, log) -> dict:
     import h5py
     from app.config import settings
     from app.services.table_reader_bridge import (
-        SimOutReader, find_sim_outs, parse_sim_out_path,
+        SimOutReader, find_sim_outs, parse_sim_out_path, read_lineage_terminations,
+        termination_reason,
     )
     from hf_export.converter import MATRIX_CHANNELS, write_matrix_channels, write_sim
 
@@ -101,6 +102,7 @@ def convert_and_prune(sim_dir: str, log) -> dict:
     sim_outs = find_sim_outs(base)
     if not sim_outs:
         raise RuntimeError("no simOut directories to convert")
+    terminations = read_lineage_terminations(base)
 
     export_dir = base / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -118,6 +120,11 @@ def convert_and_prune(sim_dir: str, log) -> dict:
             # The summary must travel with the channels: once simOut is gone it cannot be
             # recomputed, and run_export needs it for both the HDF5 attrs and metadata.jsonl.
             summary = reader.extract_summary()
+            # The dying generation of a terminated lineage is a result with a cause;
+            # carry that into the HDF5 so run_export can label it without the database.
+            termination = terminations.get((int(info.get("seed", 0)), int(info.get("generation", 0))))
+            summary["terminated"] = termination is not None
+            summary["termination_reason"] = termination_reason(termination) if termination else ""
             attrs = {
                 "seed": int(info.get("seed", 0)),
                 "generation": int(info.get("generation", 0)),
@@ -217,6 +224,8 @@ def _result_to_dict(result) -> dict:
         "doubling_time_min": result.doubling_time_min,
         "divided": result.divided,
         "created_at": result.created_at,
+        "terminated": bool(getattr(result, "terminated", False)),
+        "termination_reason": getattr(result, "termination_reason", "") or "",
     }
 
 
@@ -272,6 +281,9 @@ def ingest(manifest: Path, index: int, returncode: int) -> dict:
         results = _collect_results(job, None, log_buffer)
         payload["status"] = "done"
         payload["results"] = [_result_to_dict(r) for r in results]
+        terminated = [r for r in results if getattr(r, "terminated", False)]
+        payload["lineage_terminated"] = bool(terminated)
+        payload["termination_reason"] = terminated[0].termination_reason if terminated else ""
         if PRUNE_SIMOUT:
             # Only after results were extracted successfully -- pruning is irreversible.
             payload["prune"] = convert_and_prune(entry["sim_dir"], log_buffer)

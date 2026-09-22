@@ -88,6 +88,11 @@ class ChromosomeReplication(wholecell.processes.process.Process):
 
 		# Get critical initiation mass for current simulation environment
 		current_media_id = self._external_states['Environment'].current_media_id
+		if current_media_id not in self.nutrientToDoublingTime:
+			raise KeyError(
+				'No doubling time for medium {!r}: it is missing from '
+				'reconstruction/ecoli/flat/condition/condition_defs.tsv (known media: {})'
+				.format(current_media_id, ', '.join(sorted(self.nutrientToDoublingTime))))
 		self.criticalInitiationMass = self.get_dna_critical_mass(
 			self.nutrientToDoublingTime[current_media_id])
 

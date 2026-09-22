@@ -33,12 +33,14 @@ export WCECOLI_API_ENV="${WCECOLI_API_ENV:-wcecoli-api}"
 # ckpt is preemptible with ~18k CPUs; jobs are ~25 min so a preemption costs little.
 # Measured on klone from the first T1 job (39439210_0): MaxRSS 2.03 GB, 1h16m wall for
 # 4 generations (~14 min/generation, ~3x the 6.3 min baseline quoted in RUN.md).
-# 4G leaves ~2x headroom; 03:00:00 leaves ~2.4x. Re-measure if the model changes.
+# 4G leaves ~2x headroom. Over 9,360 tasks the mean completed job was 72-85 min, and
+# three genuine outliers still hit a 03:00:00 wall (issues.md, Issue 7); 04:00:00 costs
+# nothing on ckpt (preemptible, so a longer limit reserves nothing) and removes the class.
 export WCECOLI_SLURM_ACCOUNT="${WCECOLI_SLURM_ACCOUNT:-ckpt-stf}"
 export WCECOLI_SLURM_PARTITION="${WCECOLI_SLURM_PARTITION:-ckpt}"
 export WCECOLI_SLURM_CPUS="${WCECOLI_SLURM_CPUS:-1}"
 export WCECOLI_SLURM_MEM="${WCECOLI_SLURM_MEM:-4G}"
-export WCECOLI_SLURM_TIME="${WCECOLI_SLURM_TIME:-03:00:00}"
+export WCECOLI_SLURM_TIME="${WCECOLI_SLURM_TIME:-04:00:00}"
 # WCECOLI_MAX_IN_FLIGHT is THE concurrency knob: the controller keeps this many tasks
 # submitted, and with no per-array throttle every submitted task is runnable, so it is also
 # how many run. MaxSubmitJobsPU is 2000 on ckpt (`sacctmgr show qos`), and sbatch fails with

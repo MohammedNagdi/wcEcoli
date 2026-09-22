@@ -82,8 +82,9 @@ docker exec interface-api-1 python -m hf_export.run_export --out /app/eval/hf_v0
 ```
 Output (`trajectories.h5`, `metadata.jsonl`, `manifest.json`) lands at `/app/eval/...` in the
 container = **`interface/backend/eval/...` on the host** (the eval bind mount). Export also writes
-`export_qc.jsonl`, a durable row-per-export-attempt ledger for exported, no-division, malformed, and
-missing-output trajectories.
+`export_qc.jsonl`, a durable row-per-export-attempt ledger for exported, no-division, terminated
+(the generation in which a lineage died -- exported, but short), malformed, and missing-output
+trajectories.
 
 > ⚠️ **Git Bash path mangling:** in MSYS/Git Bash a leading `/app/...` arg gets rewritten to
 > `C:/Program Files/Git/app/...`. Prefix with `MSYS_NO_PATHCONV=1`. **PowerShell is unaffected** —

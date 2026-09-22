@@ -649,6 +649,50 @@ def find_sim_outs(run_dir):
     return sorted(run_dir.rglob("simOut"))
 
 
+# Written by runscripts/manual/runSim.py (under <run_dir>/metadata/) when a cell died
+# before completing its generations. The simulator raises LineageTerminated for the
+# exception classes it treats as "the cell stopped growing" (NegativeCountsError), after
+# finalizing the loggers, so the dying generation's tables are complete on disk.
+LINEAGE_TERMINATION_FILE = "lineage_termination.json"
+
+
+def read_lineage_terminations(run_dir):
+    """Map ``(seed, generation)`` -> termination record for every lineage that died.
+
+    Returns an empty dict when the run has no marker, i.e. every lineage ran to its
+    requested generation count (or the run predates the marker).
+    """
+    import json
+
+    path = Path(run_dir) / "metadata" / LINEAGE_TERMINATION_FILE
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("Unreadable %s: %s", path, exc)
+        return {}
+    records = {}
+    for record in payload.get("terminations", []):
+        try:
+            key = (int(record["seed"]), int(record["generation"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        records[key] = record
+    return records
+
+
+def termination_reason(record):
+    """One line naming why a lineage ended: ``NegativeCountsError: ATP[c] in ...``."""
+    exception = str(record.get("exception", "") or "LineageTerminated")
+    message = str(record.get("message", "") or "")
+    # NegativeCountsError's message is "Negative value(s) in <field>:\n<molecule> in
+    # <process> (<count>)" -- the second line is the informative one.
+    lines = [line.strip() for line in message.splitlines() if line.strip()]
+    detail = lines[-1] if lines else ""
+    return "{}: {}".format(exception, detail) if detail else exception
+
+
 def parse_sim_out_path(sim_out_path):
     """Extract seed and generation info from a simOut path."""
     parts = sim_out_path.parts

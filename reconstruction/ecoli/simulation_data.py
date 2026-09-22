@@ -266,6 +266,24 @@ class SimulationDataEcoli(object):
 					"Multiple doubling times correspond to the same media conditions")
 			self.nutrient_to_doubling_time[nutrientLabel] = self.condition_to_doubling_time[condition]
 
+		# Every medium a TF condition can put a cell into must have a doubling time.
+		# Processes index nutrient_to_doubling_time by the live media id (e.g.
+		# chromosome_replication at each initiation check), so a tf_condition.tsv
+		# medium with no condition_defs.tsv row is a KeyError deep inside every
+		# simulation of that TF variant. Catch it here, at parca time, instead.
+		uncovered = sorted({
+			(tf, status, self.tf_to_active_inactive_conditions[tf]['{} nutrients'.format(status)])
+			for tf in self.tf_to_active_inactive_conditions
+			for status in ['active', 'inactive']
+			if self.tf_to_active_inactive_conditions[tf]['{} nutrients'.format(status)]
+				not in self.nutrient_to_doubling_time
+			})
+		if uncovered:
+			raise ValueError(
+				'tf_condition.tsv names media with no doubling time in condition_defs.tsv '
+				'(add a row with genotype perturbations {} for each): '
+				+ ', '.join('{} {} -> {}'.format(*entry) for entry in uncovered))
+
 		# Populate conditions and conditionToDboulingTime for active and inactive TF conditions
 		basal_dt = self.condition_to_doubling_time['basal']
 		for tf in sorted(self.tf_to_active_inactive_conditions):

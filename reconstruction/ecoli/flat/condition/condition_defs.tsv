@@ -24,3 +24,4 @@
 "plus_nitrite"	"minimal_plus_nitrite"	{}	44.0	[]	[]
 "plus_quercetin"	"minimal_plus_quercetin"	{}	44.0	[]	[]
 "plus_tungstate"	"minimal_plus_tungstate"	{}	44.0	[]	[]
+"plus_cytidine"	"minimal_plus_cytidine"	{}	44.0	[]	["CPLX0-7740"]

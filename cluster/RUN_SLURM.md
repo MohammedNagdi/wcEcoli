@@ -228,6 +228,31 @@ Note that `status` groups failures by message, because a whole condition failing
 way is one problem rather than N -- and that distinction decides whether a retry is worth
 attempting.
 
+`status` also reports **lineage terminated** jobs. These are `done`, not `failed`: the cell
+stopped growing and died before its last generation (the simulator raised
+`NegativeCountsError` -- a process allocated more of a molecule than existed), and the
+generations it did run are ingested as results, the dying one flagged `terminated` with the
+molecule that ran out as its reason. A starving cell in a depleted medium, or an auxotroph
+shifted away from its amino acid, ends this way; it is a model prediction, not a crash. See
+`issues.md`, Issues 1 and 5.
+
+## 5b. Re-running failed jobs
+
+`failed` is terminal. `reconcile` retries only tasks the *scheduler* lost (preemption, node
+failure, exit-zero-without-sentinel); a simulation that ran and exited non-zero is never retried
+on its own, because every such failure seen so far is deterministic. After a fix, re-run them
+explicitly:
+
+```bash
+cluster/wce requeue --dry-run                    # what would be selected (default: every failed job)
+cluster/wce requeue --purge-output               # back up the DB, return them to pending, delete old output
+cluster/wce requeue --ids 273 274 --purge-output # just these
+```
+
+The next tick (or `cluster/wce dispatch`) picks them up as new attempts. `--purge-output`
+removes each job's previous run directory: the new attempt writes a fresh one, so the old tree
+is only ever dead weight (a pruned failed job is ~94 MiB, an unpruned one up to several GiB).
+
 ## 6. Preemption
 
 `ckpt` is `PreemptMode=REQUEUE` with `GraceTime=0`: a preempted task is killed instantly,

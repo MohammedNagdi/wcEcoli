@@ -26,10 +26,18 @@ from models.ecoli.sim.variants.new_gene_internal_shift import (NEW_GENE_EXPRESSI
 	NEW_GENE_TRANSLATION_EFFICIENCY_VALUES, NEW_GENE_INDUCTION_GEN,
 	NEW_GENE_KNOCKOUT_GEN)
 from wholecell.fireworks.firetasks import SimulationDaughterTask, SimulationTask, VariantSimDataTask
+from wholecell.sim.simulation import LineageTerminated
 from wholecell.utils import constants, data, scriptBase
 import wholecell.utils.filepath as fp
 
 SIM_DIR_PATTERN = r'({})__(.+)'.format(fp.TIMESTAMP_PATTERN)
+
+# Written under <sim_path>/metadata/ when at least one lineage ended before
+# completing its generations. One record per (variant, seed); the generation is
+# the one that died, and every earlier generation of that seed is complete.
+# Result ingestion (interface/backend/app/services/sim_worker.py) reads this to
+# accept a short lineage as a finished job rather than a crashed one.
+LINEAGE_TERMINATION_FILE = 'lineage_termination.json'
 
 
 def multi_ko_variant_kwargs(variant_spec, multi_ko_indices, require_variants):
@@ -157,6 +165,7 @@ class RunSimulation(scriptBase.ScriptBase):
 
 		# args.sim_path is called INDIV_OUT_DIRECTORY in fw_queue.
 		failed_variants = []
+		terminated_lineages = []
 		for i, subdir in fp.iter_variants(*variant_spec):
 			try:
 				variant_directory = os.path.join(args.sim_path, subdir)
@@ -214,7 +223,24 @@ class RunSimulation(scriptBase.ScriptBase):
 								inherited_state_path=daughter_state_path,
 								**options
 								)
-						task.run_task({})
+
+						try:
+							task.run_task({})
+						except LineageTerminated as terminated:
+							# The cell died; there is no daughter state to
+							# inherit, so the lineage stops here. This is a
+							# result, not a failure: earlier generations are
+							# complete and this one is finalized on disk.
+							record = dict(terminated.record,
+								variant_index=i, variant_dir=subdir,
+								seed=j, generation=k,
+								generations_requested=args.generations)
+							terminated_lineages.append(record)
+							print("\n" + "=" * 60, file=sys.stderr)
+							print("LINEAGE TERMINATED: variant {} seed {} generation {} of {}: {}".format(
+								i, j, k, args.generations, terminated), file=sys.stderr)
+							print("=" * 60 + "\n", file=sys.stderr)
+							break
 
 			except Exception:
 				print("\n" + "=" * 60, file=sys.stderr)
@@ -222,6 +248,11 @@ class RunSimulation(scriptBase.ScriptBase):
 				traceback.print_exc(file=sys.stderr)
 				print("=" * 60 + "\n", file=sys.stderr)
 				failed_variants.append((i, subdir))
+
+		if terminated_lineages:
+			fp.write_json_file(
+				os.path.join(metadata_dir, LINEAGE_TERMINATION_FILE),
+				{'version': 1, 'terminations': terminated_lineages})
 
 		if failed_variants:
 			print("\n" + "=" * 60, file=sys.stderr)

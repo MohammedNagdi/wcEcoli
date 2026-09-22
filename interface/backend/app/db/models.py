@@ -289,6 +289,17 @@ class SimulationJob(SQLModel, table=True):
     finished_at: str = ""                        # ISO timestamp
     error_message: str = ""                      # error detail on failure
     created_at: str = ""                         # ISO timestamp
+    # A done job whose cell died before completing its generations: the lineage ended
+    # (e.g. NegativeCountsError in a medium it cannot grow in). Its results cover the
+    # generations that ran, the last of them flagged terminated.
+    lineage_terminated: bool = Field(
+        default=False,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
+    termination_reason: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=""),
+    )                                             # "<ExceptionClass>: <first line>" when terminated
 
     # Simulation parameters (denormalized from Experiment for worker independence)
     variant_type: str = ""
@@ -314,3 +325,11 @@ class SimulationResult(SQLModel, table=True):
     doubling_time_min: Optional[float] = None    # derived doubling time (min)
     divided: bool = True                         # did the cell divide?
     created_at: str = ""                         # ISO timestamp
+    terminated: bool = Field(
+        default=False,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )                                             # this generation ended the lineage (cell died)
+    termination_reason: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=""),
+    )

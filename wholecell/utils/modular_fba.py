@@ -7,6 +7,12 @@ from wholecell.utils._netflow._base import NetworkFlowProblemBase
 
 NUMERICAL_ZERO = 1e-20
 
+# Homeostatic targets are concentrations derived from counts, volumes and unit
+# conversions; a target that is negative by rounding (observed: -4.5e-07 for
+# BIOTIN[c]) is a zero, not a negative demand. Anything more negative than this
+# is still rejected as the modelling error it would be.
+HOMEOSTATIC_TARGET_TOLERANCE = 1e-6
+
 # can add additional solvers to have more options but need to implement NetworkFlow wrapper
 S_CPLEX_QUAD = "cplex-quad"
 S_CPLEX_LINEAR = "cplex-linear"
@@ -1201,7 +1207,12 @@ class FluxBalanceAnalysis(object):
 
 		for molecule_id, coeff in objective.items():
 			if coeff < 0:
-				raise ValueError(f'Homeostatic target must be non-negative. It is {coeff} for {molecule_id}.')
+				if coeff < -HOMEOSTATIC_TARGET_TOLERANCE:
+					raise ValueError(f'Homeostatic target must be non-negative. It is {coeff} for {molecule_id}.')
+				warnings.warn(
+					f'Homeostatic target for {molecule_id} was {coeff}; clamped to 0'
+					f' (within tolerance {HOMEOSTATIC_TARGET_TOLERANCE}).')
+				coeff = 0.
 
 			if molecule_id not in self._outputMoleculeIDs:
 				raise FBAError(
@@ -1389,7 +1400,14 @@ class FluxBalanceAnalysis(object):
 
 				relax = relaxUp + relaxDown + self.kinetic_objective_weight_in_range * (below_in_range + above_in_range)
 
-				assert relaxUp <= NUMERICAL_ZERO or relaxDown <= NUMERICAL_ZERO
+				# A solution should never relax a target in both directions at
+				# once; when a degenerate LP basis does, the reported objective
+				# value is still meaningful (it is only written to a listener),
+				# so say which reaction did it rather than killing the cell.
+				if relaxUp > NUMERICAL_ZERO and relaxDown > NUMERICAL_ZERO:
+					warnings.warn(
+						f'Kinetic target for {reactionID} relaxed both up ({relaxUp})'
+						f' and down ({relaxDown}) in the same solution.')
 
 			values[idx] = relax
 		return values

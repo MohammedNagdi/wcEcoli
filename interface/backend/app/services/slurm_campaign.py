@@ -55,6 +55,7 @@ from app.services.sim_worker import (
     _requeue_lost_runner_task,
     claim_next_pending_job,
 )
+from app.services.job_queue import sync_experiment_status
 from app.services.slurm_ingest import sentinel_path
 
 logging.basicConfig(
@@ -446,6 +447,8 @@ def _apply_sentinel(engine, row: dict, payload: dict, counts: dict):
             doubling_time_min=entry["doubling_time_min"],
             divided=entry["divided"],
             created_at=entry["created_at"] or _now(),
+            terminated=bool(entry.get("terminated", False)),
+            termination_reason=entry.get("termination_reason", "") or "",
         )
         for entry in payload.get("results", [])
     ]
@@ -550,10 +553,14 @@ def init_db():
     timelines, variants, which submit_campaign resolves against -- have to be built here.
     """
     from app.db.init_db import init_database
+    from app.db.migrations import run_migrations
 
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     with db_lock():
         init_database()
+        # Additive column migrations for a database that predates them. On the Docker
+        # path the API's startup hook does this; here nothing else would.
+        run_migrations()
     logger.info("Database ready at %s", settings.database_path)
 
 
@@ -580,12 +587,17 @@ def status() -> dict:
 
     tally: dict[str, int] = {}
     failures: dict[str, list[int]] = {}
+    terminations: dict[str, list[int]] = {}
     for job in rows:
         tally[job.status] = tally.get(job.status, 0) + 1
         if job.status == "failed":
             # Group by message: a whole condition failing the same way is one problem,
             # not N problems, and that distinction decides whether retrying is worth it.
             failures.setdefault((job.error_message or "unknown").strip(), []).append(job.id)
+        elif job.status == "done" and getattr(job, "lineage_terminated", False):
+            # Done, but the cell died before its last generation. Grouped the same way:
+            # which molecule ran out says which condition the model cannot grow in.
+            terminations.setdefault((job.termination_reason or "unknown").strip(), []).append(job.id)
 
     last_tick = None
     tick_path = state_dir() / LAST_TICK
@@ -602,8 +614,18 @@ def status() -> dict:
         "complete": terminal,
         "percent_complete": round(100.0 * terminal / len(rows), 1) if rows else 0.0,
         "failures": {message: sorted(ids) for message, ids in failures.items()},
+        "lineage_terminated": sum(len(ids) for ids in terminations.values()),
+        "terminations": {message: sorted(ids) for message, ids in terminations.items()},
         "last_tick": last_tick,
     }
+
+
+def _format_grouped(lines: list[str], groups: dict[str, list[int]]):
+    for message, ids in groups.items():
+        shown = ", ".join(str(i) for i in ids[:6])
+        more = " (+{} more)".format(len(ids) - 6) if len(ids) > 6 else ""
+        lines.append("  {} job(s): {}".format(len(ids), message[:100]))
+        lines.append("     ids: {}{}".format(shown, more))
 
 
 def format_status(report: dict) -> str:
@@ -616,14 +638,96 @@ def format_status(report: dict) -> str:
         ) if report["counts"] else "  (no jobs)",
         "last tick: {}".format(report["last_tick"] or "never -- is the loop running?"),
     ]
+    if report.get("lineage_terminated"):
+        lines.append("lineage terminated (done, cell died before its last generation): {}".format(
+            report["lineage_terminated"]))
+        _format_grouped(lines, report.get("terminations", {}))
     if report["failures"]:
         lines.append("failures:")
-        for message, ids in report["failures"].items():
-            shown = ", ".join(str(i) for i in ids[:6])
-            more = " (+{} more)".format(len(ids) - 6) if len(ids) > 6 else ""
-            lines.append("  {} job(s): {}".format(len(ids), message[:100]))
-            lines.append("     ids: {}{}".format(shown, more))
+        _format_grouped(lines, report["failures"])
     return "\n".join(lines)
+
+
+# ── Requeue ──────────────────────────────────────────────────────────────────
+
+def _backup_database() -> Path:
+    """Copy the database aside before a bulk edit; the caller holds the writer lock."""
+    source = settings.database_path
+    target = source.with_name(source.name + ".bak-" + datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"))
+    shutil.copy2(source, target)
+    logger.info("Database backed up to %s", target)
+    return target
+
+
+def requeue(job_ids: list[int] | None, statuses: set[str], *, purge_output: bool,
+            dry_run: bool) -> dict:
+    """Return terminal jobs to ``pending`` so the next dispatch re-runs them.
+
+    ``failed`` is terminal: reconcile only retries tasks the *scheduler* lost, never a
+    simulation that ran and exited non-zero (that would loop a deterministic failure
+    forever). So re-running a job after a fix is an explicit act, and this is it. Each
+    job's stale results are deleted, its parent experiment is set back to ``queued``, and
+    with ``purge_output`` its previous attempt's output tree is removed -- the new attempt
+    gets a fresh run directory either way, so the old one is only ever dead weight.
+    """
+    from sqlalchemy import delete
+
+    engine = _engine()
+    with db_lock():
+        with Session(engine) as session:
+            query = select(SimulationJob).where(col(SimulationJob.status).in_(sorted(statuses)))
+            if job_ids:
+                query = query.where(col(SimulationJob.id).in_(job_ids))
+            jobs = session.exec(query.order_by(SimulationJob.id)).all()
+            if job_ids:
+                missing = sorted(set(job_ids) - {job.id for job in jobs})
+                if missing:
+                    logger.warning("%d requested job(s) not in status %s: %s",
+                                   len(missing), sorted(statuses), missing[:20])
+            by_status: dict[str, int] = {}
+            for job in jobs:
+                by_status[job.status] = by_status.get(job.status, 0) + 1
+            logger.info("Requeue: %d job(s) selected %s%s", len(jobs), by_status,
+                        " (dry run)" if dry_run else "")
+            if dry_run or not jobs:
+                return {"requeued": 0, "selected": len(jobs), "by_status": by_status,
+                        "job_ids": [job.id for job in jobs]}
+
+            backup = _backup_database()
+            purge: list[str] = []
+            experiments: set[int] = set()
+            for job in jobs:
+                purge.append(job.sim_dir)
+                experiments.add(job.experiment_id)
+                session.exec(delete(SimulationResult).where(SimulationResult.job_id == job.id))
+                job.status = "pending"
+                job.phase = "Requeued by hand after attempt {}".format(job.attempt)
+                job.sim_dir = ""
+                job.worker_id = ""
+                job.runner_task_id = ""
+                job.heartbeat_at = ""
+                job.lease_expires_at = ""
+                job.started_at = ""
+                job.finished_at = ""
+                job.error_message = ""
+                job.log_tail = ""
+                job.lineage_terminated = False
+                job.termination_reason = ""
+                session.add(job)
+            for experiment_id in sorted(experiments):
+                sync_experiment_status(session, experiment_id)
+            session.commit()
+            requeued = [job.id for job in jobs]
+
+        if purge_output:
+            for sim_dir in purge:
+                _purge_run_dir(sim_dir)
+
+    logger.info("Requeued %d job(s) across %d experiment(s); backup at %s",
+                len(requeued), len(experiments), backup)
+    return {"requeued": len(requeued), "selected": len(requeued), "by_status": by_status,
+            "job_ids": requeued, "experiments": len(experiments), "backup": str(backup),
+            "purged": len([p for p in purge if p]) if purge_output else 0}
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -651,6 +755,18 @@ def main(argv: list[str] | None = None) -> int:
     tick_parser.add_argument("--max-in-flight", type=int,
                              default=int(os.environ.get("WCECOLI_MAX_IN_FLIGHT", "800")))
 
+    requeue_parser = sub.add_parser(
+        "requeue", help="return terminal jobs to pending so the next dispatch re-runs them")
+    requeue_parser.add_argument("--status", action="append", default=None,
+                                choices=["failed", "done", "cancelled"],
+                                help="which terminal status to select (repeatable; default: failed)")
+    requeue_parser.add_argument("--ids", type=int, nargs="+", default=None,
+                                help="restrict to these job ids")
+    requeue_parser.add_argument("--purge-output", action="store_true",
+                                help="delete each job's previous output tree")
+    requeue_parser.add_argument("--dry-run", action="store_true",
+                                help="report what would be requeued and change nothing")
+
     args = parser.parse_args(argv)
     resources = SlurmResources.from_env()
 
@@ -673,6 +789,10 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "tick":
         reconcile()
         dispatch(args.limit, resources, max_in_flight=args.max_in_flight)
+    elif args.command == "requeue":
+        report = requeue(args.ids, set(args.status or ["failed"]),
+                         purge_output=args.purge_output, dry_run=args.dry_run)
+        print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 
 

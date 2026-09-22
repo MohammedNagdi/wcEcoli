@@ -243,7 +243,12 @@ def export(out_dir: Path, limit: int | None, full_tensors: bool = False) -> dict
                     written = written + list(matrices.keys())
 
                 n_traj += 1
-                qc_status = "exported" if summary.get("divided") is not False else "no_division"
+                # "terminated": the generation in which a lineage died (cell stopped
+                # growing); it is exported like any other, this just says why it is short.
+                if summary.get("terminated"):
+                    qc_status = "terminated"
+                else:
+                    qc_status = "exported" if summary.get("divided") is not False else "no_division"
                 qc_records.append({
                     "experiment_id": experiment_id, "job_id": int(job.id), "status": qc_status,
                     "reason": "", "sim_dir": job.sim_dir, "export_path": path,

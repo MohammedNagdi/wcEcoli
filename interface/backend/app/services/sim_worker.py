@@ -893,8 +893,17 @@ def _ingest_results(
 
 
 def _collect_results(job, experiment, log_buffer, check_control=None):
-    """Validate and parse outputs without holding a SQLite write transaction."""
-    from app.services.table_reader_bridge import SimOutReader, find_sim_outs, parse_sim_out_path
+    """Validate and parse outputs without holding a SQLite write transaction.
+
+    A lineage that died before its last generation (see ``read_lineage_terminations``) is
+    accepted as complete through the generation it died in: those generations are all on
+    disk, and the dying one is flagged ``terminated`` on its result. Anything short of the
+    requested count *without* a termination record is still an error.
+    """
+    from app.services.table_reader_bridge import (
+        SimOutReader, find_sim_outs, parse_sim_out_path, read_lineage_terminations,
+        termination_reason,
+    )
 
     sim_out_base = settings.sim_output_dir / job.sim_dir
     sim_outs = find_sim_outs(sim_out_base)
@@ -904,6 +913,16 @@ def _collect_results(job, experiment, log_buffer, check_control=None):
         raise RuntimeError("Simulation completed without producing any simOut directories")
 
     expected_generations = set(range(job.generations))
+    terminations = {
+        generation: record
+        for (seed, generation), record in read_lineage_terminations(sim_out_base).items()
+        if seed == job.seed
+    }
+    if terminations:
+        dying_generation = min(terminations)
+        expected_generations = set(range(dying_generation + 1))
+        log_buffer.append("Lineage terminated in generation {} of {}: {}".format(
+            dying_generation, job.generations, termination_reason(terminations[dying_generation])))
     observed: dict[tuple[int, int], Path] = {}
     for sim_out_path in sim_outs:
         path_info = parse_sim_out_path(sim_out_path)
@@ -938,8 +957,13 @@ def _collect_results(job, experiment, log_buffer, check_control=None):
             summary = reader.extract_summary()
         except Exception as exc:
             raise RuntimeError("TableReader failed for {}: {}".format(sim_out_path, exc)) from exc
+        termination = terminations.get(generation)
         if summary.get("final_mass_fg") is None:
-            raise RuntimeError("TableReader returned no mass summary for {}".format(sim_out_path))
+            if termination is None:
+                raise RuntimeError("TableReader returned no mass summary for {}".format(sim_out_path))
+            # A cell that died on its first step has no mass rows; the record of
+            # its death is still the result.
+            log_buffer.append("QC: no mass rows for terminated generation {}".format(generation))
 
         result = SimulationResult(
             job_id=job.id,
@@ -952,6 +976,8 @@ def _collect_results(job, experiment, log_buffer, check_control=None):
             doubling_time_min=summary["doubling_time_min"],
             divided=summary.get("divided", False),
             created_at=_now(),
+            terminated=termination is not None,
+            termination_reason=termination_reason(termination) if termination else "",
         )
         results.append(result)
         exports.append((seed, generation, reader))
@@ -994,9 +1020,18 @@ def _commit_results_and_complete(engine, job_id, worker_id, attempt, results, lo
         session.exec(delete(SimulationResult).where(SimulationResult.job_id == job_id))
         for simulation_result in results:
             session.add(simulation_result)
+        terminated = [r for r in results if getattr(r, "terminated", False)]
         job = session.get(SimulationJob, job_id)
         job.status = "done"
-        job.phase = "Complete"
+        if terminated:
+            job.lineage_terminated = True
+            job.termination_reason = terminated[0].termination_reason
+            job.phase = "Complete (lineage terminated in generation {})".format(
+                terminated[0].generation)
+        else:
+            job.lineage_terminated = False
+            job.termination_reason = ""
+            job.phase = "Complete"
         job.finished_at = _now()
         job.runner_task_id = ""
         job.lease_expires_at = ""

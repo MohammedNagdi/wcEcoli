@@ -158,5 +158,7 @@ def build_record(
         "final_mass_fg": summary.get("final_mass_fg"),
         "growth_rate": summary.get("growth_rate"),
         "doubling_time_min": summary.get("doubling_time_min"),
+        "terminated": bool(summary.get("terminated", False)),
+        "termination_reason": summary.get("termination_reason", "") or "",
         **{f"prov_{k}": v for k, v in provenance.items()},
     }

@@ -376,9 +376,18 @@ class Equilibrium(object):
 					derivatives, [0, time_limit], y_init,
 					method=method, t_eval=[0, time_limit],
 					jac=derivatives_jacobian)
-				break
 			except ValueError as e:
 				print(f'Warning: switching solver method in equilibrium, {e!r}')
+				continue
+			# A solver that gives up before reaching the first t_eval point does
+			# not raise: it returns status -1 with sol.y still an empty *list*,
+			# which used to surface as "'list' object has no attribute 'T'"
+			# below. Treat it like the ValueError case and try the next method.
+			if not sol.success:
+				print(f'Warning: switching solver method in equilibrium, '
+					f'{method} failed: {sol.message}')
+				continue
+			break
 		else:
 			raise RuntimeError('Could not solve ODEs in equilibrium to SS.'
 				' Try adjusting time step or changing methods.')

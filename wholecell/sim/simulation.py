@@ -14,6 +14,7 @@ import uuid
 import numpy as np
 
 from wholecell.listeners.evaluation_time import EvaluationTime
+from wholecell.states.bulk_molecules import NegativeCountsError
 from wholecell.utils import filepath
 
 import wholecell.loggers.shell
@@ -89,6 +90,40 @@ def _orderedAbstractionReference(iterableOfClasses):
 
 class SimulationException(Exception):
 	pass
+
+
+# Exceptions that mean "this cell stopped growing", not "the simulator broke".
+# A cell in a medium it cannot grow in (or an auxotroph shifted away from its
+# amino acid) drains a pool until a process allocates more than exists, and
+# BulkMolecules raises NegativeCountsError. That is the model's way of saying
+# the lineage ended, and the trajectory up to that point is a result.
+LINEAGE_TERMINATING_EXCEPTIONS = (NegativeCountsError,)
+
+# Written into the cell's simOut directory when its lineage is terminated.
+LINEAGE_TERMINATION_FILE = 'lineage_termination.json'
+
+
+class LineageTerminated(SimulationException):
+	"""The cell died before dividing: the lineage ends with this generation.
+
+	Raised by `Simulation.run` after the loggers have been finalized, so the
+	partial generation on disk is complete and readable. Callers that iterate
+	generations should stop the lineage rather than treat this as a crash.
+	"""
+
+	def __init__(self, sim, cause):
+		self.cause = cause
+		self.record = {
+			'version': 1,
+			'exception': type(cause).__name__,
+			'message': str(cause),
+			'time_sec': float(sim.time()),
+			'simulation_step': int(sim.simulationStep()),
+			'output_dir': sim._outputDir,
+			}
+		super().__init__('Lineage terminated at {:.0f} s (step {}): {}: {}'.format(
+			self.record['time_sec'], self.record['simulation_step'],
+			self.record['exception'], self.record['message'].splitlines()[0] if self.record['message'] else ''))
 
 
 DEFAULT_LISTENER_CLASSES = (
@@ -253,15 +288,34 @@ class Simulation():
 		Run the simulation for the time period specified in `self._lengthSec`
 		and then clean up.
 		"""
+		termination = None
 		try:
 			self.run_incremental(self._lengthSec + self.initialTime())
 			if not self._raise_on_time_limit:
 				self.cellCycleComplete()
+		except LINEAGE_TERMINATING_EXCEPTIONS as cause:
+			# Not a re-raise yet: finalize first so the loggers flush and the
+			# partial generation on disk is complete. The state is inconsistent
+			# after a failed merge, but nothing in finalize evolves it further.
+			termination = LineageTerminated(self, cause)
 		finally:
 			self.finalize()
 
+		if termination is not None:
+			self._record_lineage_termination(termination)
+			raise termination from termination.cause
+
 		if self._raise_on_time_limit and not self._cellCycleComplete:
 			raise SimulationException('Simulation time limit reached without cell division')
+
+	def _record_lineage_termination(self, termination):
+		"""Leave a machine-readable marker next to the cell's tables."""
+		try:
+			filepath.write_json_file(
+				os.path.join(self._outputDir, LINEAGE_TERMINATION_FILE),
+				termination.record)
+		except OSError as exc:
+			print('Warning: could not write {}: {}'.format(LINEAGE_TERMINATION_FILE, exc))
 
 	def run_incremental(self, run_until):
 		"""
