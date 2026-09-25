@@ -924,7 +924,15 @@ def ppgpp_metabolite_changes(uncharged_trna_conc, charged_trna_conc,
 
 			old_counts = final_counts
 	else:
-		raise ValueError('Failed to meet molecule limits with ppGpp reactions.')
+		# Trimming one reaction per iteration did not reach non-negative
+		# counts within the budget (synthesis and degradation can compete for
+		# the same limiting metabolite). Skip this step's ppGpp reactions
+		# rather than kill the cell: zero reactions never violate a limit.
+		print('Warning: could not meet molecule limits with ppGpp reactions'
+			' - skipping ppGpp synthesis and degradation this step.')
+		n_syn_reactions = 0
+		n_deg_reactions = 0
+		delta_metabolites = np.zeros_like(ppgpp_reaction_stoich[:, ppgpp_params['synthesis_index']])
 
 	return delta_metabolites, n_syn_reactions, n_deg_reactions, v_rela_syn, v_spot_syn, v_deg, v_deg_inhibited
 

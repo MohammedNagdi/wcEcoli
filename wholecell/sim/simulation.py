@@ -15,6 +15,7 @@ import numpy as np
 
 from wholecell.listeners.evaluation_time import EvaluationTime
 from wholecell.states.bulk_molecules import NegativeCountsError
+from wholecell.utils.cell_stopped import CellStoppedError
 from wholecell.utils import filepath
 
 import wholecell.loggers.shell
@@ -97,7 +98,11 @@ class SimulationException(Exception):
 # amino acid) drains a pool until a process allocates more than exists, and
 # BulkMolecules raises NegativeCountsError. That is the model's way of saying
 # the lineage ended, and the trajectory up to that point is a result.
-LINEAGE_TERMINATING_EXCEPTIONS = (NegativeCountsError,)
+# CellStoppedError covers the process-level failures that only ever happen in a
+# cell that has already stopped growing: an FBA solve the solver cannot finish
+# after every retry (FBASolveFailed) and an equilibrium ODE that goes negative
+# (EquilibriumUnstable). Each keeps its own class name as the reason prefix.
+LINEAGE_TERMINATING_EXCEPTIONS = (NegativeCountsError, CellStoppedError)
 
 # Written into the cell's simOut directory when its lineage is terminated.
 LINEAGE_TERMINATION_FILE = 'lineage_termination.json'

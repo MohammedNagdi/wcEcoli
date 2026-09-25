@@ -118,6 +118,7 @@ class NetworkFlowGLPK(NetworkFlowProblemBase):
 
 		self._eqConstBuilt = False
 		self._solved = False
+		self._presolve_next = False
 
 		self.inf = np.inf
 
@@ -126,6 +127,19 @@ class NetworkFlowGLPK(NetworkFlowProblemBase):
 
 	def __del__(self):
 		glp.glp_delete_prob(self._lp)
+
+	def reset_basis(self, presolve=False):
+		"""Rebuild the starting basis so a retry does not repeat a singular one.
+
+		glp_simplex warm-starts from the basis left by the previous call, so
+		after GLP_ESING / GLP_EFAIL an unchanged retry fails identically.
+		glp_adv_basis constructs a fresh advanced basis from the constraint
+		matrix; with `presolve` the next solve also runs GLPK's presolver,
+		which ignores the basis entirely.
+		"""
+		glp.glp_adv_basis(self._lp, 0)
+		self._presolve_next = bool(presolve)
+		self._solved = False
 
 
 	@property
@@ -460,7 +474,15 @@ class NetworkFlowGLPK(NetworkFlowProblemBase):
 		else:
 			glp.glp_set_obj_dir(self._lp, glp.GLP_MIN)
 
-		result = glp.glp_simplex(self._lp, self._smcp)
+		if self._presolve_next:
+			self._smcp.presolve = glp.GLP_ON
+			try:
+				result = glp.glp_simplex(self._lp, self._smcp)
+			finally:
+				self._smcp.presolve = glp.GLP_OFF
+				self._presolve_next = False
+		else:
+			result = glp.glp_simplex(self._lp, self._smcp)
 
 		# Adjust solver options for robustness
 		## If no solution within iteration limit, switch to dual method to find solution

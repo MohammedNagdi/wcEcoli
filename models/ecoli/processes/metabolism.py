@@ -17,7 +17,7 @@ import wholecell.processes.process
 from wholecell.utils import units
 from wholecell.utils.random import stochasticRound
 from wholecell.utils.constants import REQUEST_PRIORITY_METABOLISM
-from wholecell.utils.modular_fba import FluxBalanceAnalysis
+from wholecell.utils.modular_fba import FluxBalanceAnalysis, FBASolveFailed
 
 
 COUNTS_UNITS = units.mmol
@@ -192,7 +192,14 @@ class Metabolism(wholecell.processes.process.Process):
 		# Solve FBA problem and update states
 		n_retries = 3
 		fba = self.model.fba
-		fba.solve(n_retries)
+		try:
+			fba.solve(n_retries)
+		except RuntimeError as exc:
+			# The solver gave up after every retry (GLP_ESING, GLP_EFAIL,
+			# GLP_NOFEAS, GLP_UNBND). Every such cell seen so far had already
+			# stopped growing, so this ends the lineage as a result rather
+			# than failing the job; the reason keeps the solver's status.
+			raise FBASolveFailed(str(exc)) from exc
 
 		## Internal molecule changes
 		delta_metabolites = (1 / counts_to_molar) * (CONC_UNITS * fba.getOutputMoleculeLevelsChange())

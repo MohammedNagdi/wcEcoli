@@ -4,6 +4,17 @@ All functions required for implementation with modular_fba.py are listed.
 '''
 
 class NetworkFlowProblemBase(object):
+
+	def reset_basis(self, presolve=False):
+		"""Discard any warm-start state so the next solve starts afresh.
+
+		Solvers that warm-start from the last basis repeat a singular basis
+		exactly on a plain retry; overriding this lets `modular_fba.solve`
+		make each retry different. `presolve` asks for the solver's presolver
+		on the next solve as well. The default does nothing.
+		"""
+		pass
+
 	_maximize = True
 	quadratic_objective = False
 	inf = float('inf')

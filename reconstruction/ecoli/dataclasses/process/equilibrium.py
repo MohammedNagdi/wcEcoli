@@ -7,6 +7,8 @@ fluxesAndMoleculesToSS()
 """
 
 import numpy as np
+
+from wholecell.utils.cell_stopped import CellStoppedError
 from scipy import integrate
 import sympy as sp
 
@@ -19,6 +21,11 @@ class EquilibriumError(Exception):
 
 class MoleculeNotFoundError(EquilibriumError):
 	pass
+
+class EquilibriumUnstable(CellStoppedError):
+	"""The equilibrium ODE settled on negative counts; the cell cannot go on."""
+	pass
+
 
 class Equilibrium(object):
 	def __init__(self, raw_data, sim_data):
@@ -395,7 +402,9 @@ class Equilibrium(object):
 		y = sol.y.T
 
 		if np.any(y[-1, :] * (cellVolume * nAvogadro) <= -1):
-			raise ValueError('Have negative values at equilibrium steady state -- probably due to numerical instability.')
+			# Seen only in cells that had already stopped growing; recorded as a
+			# terminated lineage with this class name as the reason prefix.
+			raise EquilibriumUnstable('Have negative values at equilibrium steady state -- probably due to numerical instability.')
 		if np.linalg.norm(derivatives(0, y[-1, :]), np.inf) * (cellVolume * nAvogadro) > 1:
 			raise RuntimeError('Did not reach steady state for equilibrium.')
 		y[y < 0] = 0

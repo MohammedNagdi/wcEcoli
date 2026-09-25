@@ -4,6 +4,7 @@ import warnings
 import numpy as np
 
 from wholecell.utils._netflow._base import NetworkFlowProblemBase
+from wholecell.utils.cell_stopped import CellStoppedError
 
 NUMERICAL_ZERO = 1e-20
 
@@ -60,6 +61,16 @@ else:
 	raise Exception("Could not choose a default solver.")
 
 # Errors
+
+class FBASolveFailed(CellStoppedError):
+	"""The solver could not finish the FBA problem after every retry.
+
+	Raised by the Metabolism process, not by `solve` itself, so that the
+	simulation records the cell as a terminated lineage with the solver's own
+	status (GLP_ESING, GLP_EFAIL, GLP_NOFEAS, GLP_UNBND) as the reason.
+	"""
+	pass
+
 
 class FBAError(Exception):
 	pass
@@ -1546,12 +1557,23 @@ class FluxBalanceAnalysis(object):
 		return self._solver.getFlowRates(self._massExchangeOutName)
 
 	def solve(self, iterations):
-		if iterations == 0:
-			self._solver._solve()
-		else:
+		"""Solve the problem, retrying up to `iterations` more times.
+
+		A plain retry used to repeat the identical call, and GLPK warm-starts
+		from the basis the failed call left behind, so a singular basis
+		(GLP_ESING / GLP_EFAIL) failed four times in a row exactly the same way
+		(issues.md, Issue 4c). Each retry now discards that basis, and the last
+		one also runs the presolver. The final failure re-raises the solver's
+		own exception.
+		"""
+		for attempt in range(iterations + 1):
 			try:
 				self._solver._solve()
 				return
 			except Exception as inst:
-				print("Warning: {} error while solving FBA - repeating FBA solve".format(inst))
-			self.solve(iterations - 1)
+				if attempt == iterations:
+					raise
+				print("Warning: {} error while solving FBA - repeating FBA solve"
+					" with a fresh basis{}".format(
+						inst, " and presolve" if attempt == iterations - 1 else ""))
+				self._solver.reset_basis(presolve=(attempt == iterations - 1))

@@ -1,9 +1,10 @@
 # issues.md — Known simulation failures in the klone SLURM campaigns
 
-Status: **fixes applied 2026-09-22; all 2,052 failed jobs re-dispatched.** Recorded 2026-09-22
-from `state/wcecoli.db`, `state/campaign_ledger.jsonl`, `sacct`, and a walk of
-`$WCECOLI_CAMPAIGN_ROOT/out`. Companion docs: `cluster/RUN_SLURM.md` (runbook), `PLAN.md`
-(design).
+Status: **fixes applied 2026-09-22 and 2026-09-25; every failed job re-dispatched.** Recorded
+2026-09-22 from `state/wcecoli.db`, `state/campaign_ledger.jsonl`, `sacct`, and a walk of
+`$WCECOLI_CAMPAIGN_ROOT/out`; updated 2026-09-25 (see [Re-dispatch, 2026-09-25](#re-dispatch-2026-09-25)
+at the end for the state the 2026-09-22 re-run left and the second round of fixes). Companion
+docs: `cluster/RUN_SLURM.md` (runbook), `PLAN.md` (design).
 
 **Fixes applied 2026-09-22** (see [Re-dispatch, 2026-09-22](#re-dispatch-2026-09-22) at the end
 for the validation pilot and the resubmission):
@@ -24,10 +25,21 @@ that reaches the time limit without dividing ends the lineage (`TimeLimitReached
 splitting the undivided cell, so these non-growing cells are recorded the same way as the
 `NegativeCountsError` ones. The 380 jobs were requeued once more after that fix.
 
-Not fixed: the GLPK `GLP_ESING`/`GLP_EFAIL` half of 4c, plus the ppGpp and
-negative-equilibrium classes in Issue 6. Those jobs were re-dispatched anyway, because a cell
-that stalls before it hits one of those numerical paths may now die through
-`NegativeCountsError` first and be recorded as a terminated lineage.
+**Fixed 2026-09-25** (the 90 jobs that were still failing after the 2026-09-22 re-run; see
+the last section for the counts):
+
+| Issue | Change | Where |
+|---|---|---|
+| 4c GLPK | The FBA retry ladder now changes something between attempts: each retry discards GLPK's warm-start basis (`glp_adv_basis`) and the last one also runs the presolver. Before, the four attempts were identical calls against the same singular basis. | `wholecell/utils/modular_fba.py`, `wholecell/utils/_netflow/{_base,nf_glpk}.py` |
+| 4c GLPK | A solve that still fails after the ladder ends the lineage as `FBASolveFailed: <solver status>` instead of failing the job. | `models/ecoli/processes/metabolism.py`, `wholecell/utils/cell_stopped.py`, `wholecell/sim/simulation.py` |
+| 6 ppGpp | When the reaction-trimming loop cannot meet molecule limits, the step's ppGpp synthesis and degradation are skipped with a warning instead of raising. | `models/ecoli/processes/polypeptide_elongation.py` |
+| 6 equilibrium | Negative counts at the equilibrium steady state end the lineage as `EquilibriumUnstable: ...`. | `reconstruction/ecoli/dataclasses/process/equilibrium.py` |
+
+Termination reasons are prefixed by the exception class, so `wce status` and the export QC
+keep the four kinds apart: `NegativeCountsError` (the cell died), `TimeLimitReached` (it never
+divided), `FBASolveFailed` and `EquilibriumUnstable` (a numerical path gave out in a cell that
+had already stopped growing). Not fixed: the homeostatic target for `CA+2[c]` at `-5.7e-05`
+in job 461 (T4 narL active), which is above the `1e-6` clamp and was deliberately left alone.
 
 Four tiers have been dispatched and all four are terminal — **9,152 jobs, 7,100 done /
 2,052 failed**, nothing pending, nothing in flight. Last tick 2026-09-19T14:20:23Z. T2_CORE,
@@ -478,7 +490,7 @@ fails, but now with `GLP_NOFEAS` — its trajectory was sick independently of th
 `aaCounts` was audited alongside and needs no change: it derives from `self.aas.counts()` and
 is always full width.
 
-### 4c — FBA solve degenerates
+### 4c — FBA solve degenerates — GLPK half fixed 2026-09-25
 
 ```
 models/ecoli/processes/metabolism.py:195   fba.solve(n_retries)
@@ -499,6 +511,24 @@ The BIOTIN target is negative by 4e-07 — a rounding artefact, not a biological
 demand. `modular_fba.py:1204` rejects it with a strict `< 0` test rather than clamping small
 negatives to zero. `GLP_ESING` / `GLP_EFAIL` are the same family: the LP drifts into a
 degenerate basis and the retry ladder in `modular_fba.py:1539` runs out.
+
+**Why the retry ladder never helped (found 2026-09-25).** `FluxBalanceAnalysis.solve(n)`
+called the solver up to four times with nothing changed in between, and `glp_simplex`
+warm-starts from the basis the previous call left behind, so a singular basis failed four
+times identically. Every one of the 77 `GLP_ESING`/`GLP_EFAIL` tails shows the same warning
+repeated before the raise. The wrapper already knew how to escape this for the
+iteration-limit case (switch to dual, then presolve) but not for a singular or failed basis.
+
+**Fix.** Each retry now calls `reset_basis()` on the solver, which rebuilds an advanced basis
+with `glp_adv_basis`; the last retry also enables GLPK's presolver for that one solve, which
+ignores the basis entirely. The final failure re-raises the solver's own `RuntimeError`, and
+the Metabolism process turns that into `FBASolveFailed` (a `CellStoppedError`), which
+`Simulation.run` records as a terminated lineage with the solver status as the reason —
+`FBASolveFailed: GLP_ESING: Basis matrix is singular`. Of the 77 cells, 49 crashed with a
+dry-mass fold under 1.5 and all were cysE, metA, or T5 amino-acid pairs, i.e. cells that had
+stopped growing; the remaining third were still growing, and for those the distinct prefix
+is what keeps "solver gave up" separable from "cell died" in the exports. Unit-tested in
+`models/ecoli/tests/test_cell_stopped.py`; `reset_basis` smoke-tested against GLPK.
 
 ### Determinism — answered: these are deterministic
 
@@ -627,7 +657,20 @@ The last two are genuine code defects rather than numerical drift and were fixed
   `sol.y.T`. It now checks `sol.success` and tries BDF, as it already did for a raised
   `ValueError`, and raises the existing "Could not solve ODEs" error if both fail.
 
-The ppGpp and negative-equilibrium classes are unchanged.
+The ppGpp and negative-equilibrium classes were fixed on 2026-09-25:
+
+* **ppGpp molecule limits.** `ppgpp_metabolite_changes` trims one reaction per iteration
+  until no metabolite goes negative, with a budget of `n_syn + n_deg + 1` iterations. When
+  synthesis and degradation compete for the same limiting metabolite the budget can run out
+  before the counts are non-negative, and the function raised. It now skips that step's
+  ppGpp reactions (both counts zero, no metabolite change) with a warning; zero reactions can
+  never violate a limit. Six of the eight cells were growing normally (dry-mass fold above
+  1.5) when they died, so this recovers real trajectories.
+* **Negative equilibrium steady state.** The `ValueError` in `equilibrium.py` is now
+  `EquilibriumUnstable`, a `CellStoppedError`, so the lineage ends as a result with that
+  prefix. Both cells seen were fully stalled (fold under 1.05). The message still blames
+  numerical instability, so if this reason ever appears on a growing cell it is a solver
+  problem, not biology — which is exactly why it keeps its own prefix.
 
 ---
 
@@ -868,3 +911,43 @@ runs on, or pause the loop first, when doing anything that must be atomic with r
 * **Issue 4c homeostatic (1), Issue 6 equilibrium (1), Issue 7 (5):** expected `done`.
 * The per-tier table at the top of this file is superseded once these land; re-derive it
   with the appendix script, splitting `done` by `lineage_terminated`.
+
+---
+
+## Re-dispatch, 2026-09-25
+
+### Where the 2026-09-22 re-run ended
+
+All 9,152 jobs were terminal again by 2026-09-23 11:50 UTC. The 2,052 failures were down to
+90, none of them a class that had already been fixed:
+
+| tier | queued | running | failed | succeeded | of which terminated | total |
+|---|---:|---:|---:|---:|---:|---:|
+| T1 | 0 | 0 | 0 | 168 | 15 | 168 |
+| T4 | 0 | 0 | 4 | 508 | 0 | 512 |
+| T5 | 0 | 0 | 17 | 2,983 | 39 | 3,000 |
+| T3 | 0 | 0 | 69 | 5,403 | 1,849 | 5,472 |
+| **all** | **0** | **0** | **90** | **9,062** | **1,903** | **9,152** |
+
+The 4a fix held: no job that ran on it died with `infs or NaNs`; the 380 4a jobs ended as
+128 `TimeLimitReached`, 2 `NegativeCountsError`, 3 completed all four generations, and the
+rest went on to the GLPK class below.
+
+| Error | Jobs | Where it concentrates |
+|---|---:|---|
+| `GLP_ESING: Basis matrix is singular` | 53 | cysE (21), metA (16) in T3; scattered T5 pairs |
+| `GLP_EFAIL: Solver failure` | 24 | cysE (10), metA (4), lysC+thrA (3) |
+| `Failed to meet molecule limits with ppGpp reactions` | 8 | argG, leuA–D, cysE, alaS on rich_to_minimal |
+| `Have negative values at equilibrium steady state` | 2 | glyA |
+| `GLP_NOFEAS`, `GLP_UNBND`, homeostatic target `CA+2` at `-5.7e-05` | 3 | one each |
+
+### Fixes and resubmission
+
+The four changes in the table at the top of this file (retry ladder, `FBASolveFailed`,
+ppGpp fallback, `EquilibriumUnstable`) were applied, tested (`models/ecoli/tests/test_cell_stopped.py`,
+the ingest suite, a 60 s wild-type pilot), committed, and all 90 failed jobs were returned to
+`pending` with `cluster/wce requeue --purge-output` for the live tick loop to dispatch.
+Expected outcome: `GLP_NOFEAS`/`GLP_UNBND` and the two GLPK classes either recover on the
+new retry ladder or land as `done` with an `FBASolveFailed` reason; the 8 ppGpp cells run
+on; the 2 glyA cells land as `EquilibriumUnstable`. Job 461 (homeostatic target, T4) is
+expected to fail again and is the one accepted loss.
