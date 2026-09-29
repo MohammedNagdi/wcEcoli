@@ -45,7 +45,7 @@ export WCECOLI_SLURM_TIME="${WCECOLI_SLURM_TIME:-04:00:00}"
 # submitted, and with no per-array throttle every submitted task is runnable, so it is also
 # how many run. MaxSubmitJobsPU is 2000 on ckpt (`sacctmgr show qos`), and sbatch fails with
 # DenyOnLimit at that ceiling, so stay well below it.
-export WCECOLI_MAX_IN_FLIGHT="${WCECOLI_MAX_IN_FLIGHT:-150}"
+export WCECOLI_MAX_IN_FLIGHT="${WCECOLI_MAX_IN_FLIGHT:-600}"
 # 0 = no `%N` cap inside each array. Do not use this as a second concurrency limit: a
 # per-array cap and a submit cap are in different units and multiply. %40 on arrays of 200
 # under MAX_IN_FLIGHT=800 gives four arrays holding 800 tasks of which only 160 ever run,
