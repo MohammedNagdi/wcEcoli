@@ -471,9 +471,14 @@ def _reconcile_missing(engine, rows: list[dict], counts: dict):
     try:
         live = slurm_backend.live_task_states(task_ids)
     except slurm_backend.SlurmError as exc:
-        logger.warning("squeue unavailable, deferring: %s", exc)
-        counts["running"] += len(rows)
-        return
+        # squeue exits non-zero ("Invalid job id specified") as soon as *any* queried array
+        # has aged out of slurmctld, which is the normal end state of a finished array. It is
+        # not evidence that the task is still running, and deferring on it strands the row in
+        # `running_sim` forever: the array never returns to the queue, so every later tick
+        # fails the same call. sacct is the authority for tasks that left the queue -- it
+        # reports RUNNING for live ones too -- so fall through to it with nothing live.
+        logger.warning("squeue unusable (%s); deciding from sacct instead", exc)
+        live = {}
 
     still_missing = []
     for row in rows:

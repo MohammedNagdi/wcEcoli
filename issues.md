@@ -1,6 +1,8 @@
 # issues.md — Known simulation failures in the klone SLURM campaigns
 
-Status: **fixes applied 2026-09-22 and 2026-09-25; every failed job re-dispatched.** Recorded
+Status: **fixes applied 2026-09-22, 2026-09-25 and 2026-09-29; every failed job re-dispatched.**
+T2_CORE has since run and is terminal; see [Issue 8](#issue-8--two-jobs-stuck-in-running_sim-forever-after-their-array-aged-out-of-squeue)
+for the reconcile defect it exposed. Recorded
 2026-09-22 from `state/wcecoli.db`, `state/campaign_ledger.jsonl`, `sacct`, and a walk of
 `$WCECOLI_CAMPAIGN_ROOT/out`; updated 2026-09-25 (see [Re-dispatch, 2026-09-25](#re-dispatch-2026-09-25)
 at the end for the state the 2026-09-22 re-run left and the second round of fixes). Companion
@@ -85,7 +87,7 @@ Two headline changes since the previous revision of this file:
 
 **Note on retries.** `failed` is a terminal status. `reconcile` requeues only lost or
 preempted array tasks (`COMPLETED`-without-sentinel, `PREEMPTED`, `NODE_FAIL`, `REQUEUED`,
-`BOOT_FAIL`, `REVOKED` — `app/services/slurm_campaign.py:505-530`); a job that ran and exited
+`BOOT_FAIL`, `REVOKED` — `app/services/slurm_campaign.py:510-535`); a job that ran and exited
 non-zero is never retried automatically. Re-running one is now an explicit command,
 `cluster/wce requeue` (`--dry-run`, `--ids`, `--purge-output`), which backs up the database,
 deletes the jobs' stale `simulation_results` rows, sets them and their experiments back to
@@ -951,3 +953,109 @@ Expected outcome: `GLP_NOFEAS`/`GLP_UNBND` and the two GLPK classes either recov
 new retry ladder or land as `done` with an `FBASolveFailed` reason; the 8 ppGpp cells run
 on; the 2 glyA cells land as `EquilibriumUnstable`. Job 461 (homeostatic target, T4) is
 expected to fail again and is the one accepted loss.
+
+---
+
+## Issue 8 — Two jobs stuck in `running_sim` forever after their array aged out of `squeue`
+
+**Status: fixed 2026-09-29; the two stranded jobs reconciled to `failed`.** Found while
+tallying T2_CORE, which reported 2 jobs `running` two days after the last dispatch.
+
+Jobs **31233** and **31241** (`rplA_KO`, T2_CORE, array `40775992` tasks `_70` and `_78`) sat
+at `status=running_sim` from 2026-09-27 18:30 UTC until 2026-09-29 17:14 UTC. Both had in fact
+been killed by SLURM at the 4 h wall on 2026-09-27 at 22:31:31 UTC — 42 h earlier — and `sacct`
+said so the whole time:
+
+```
+$ sacct --noheader --parsable2 --allocations --jobs 40775992_70,40775992_78 \
+        --format JobID,State,ExitCode
+40775992_70|TIMEOUT|0:0
+40775992_78|TIMEOUT|0:0
+```
+
+The `*/10 * * * *` scrontab tick ran ~250 times across those two days and reported
+`running: 2` on every one of them. The tick was healthy; it was being told the wrong thing.
+
+### Symptom
+
+`wce status` and any per-tier tally show jobs in flight that no longer exist. The campaign
+cannot reach a terminal state, so "is the tier finished?" has no answer. The stranded rows
+also keep their unpruned `simOut` trees (6.8 GB for these two), because pruning runs in the
+task and the task is gone.
+
+### Cause
+
+Neither task wrote a completion sentinel — SLURM killed them before they reached the ingest
+path, which is Issue 7's signature and is expected. Rows without a sentinel go to
+`_reconcile_missing`, which is designed to ask `squeue` first and fall back to `sacct`.
+`live_task_states` documents exactly that contract: *"Tasks absent from the result are either
+finished or never existed; `accounted_task_states` disambiguates."*
+
+That fallback was unreachable. `live_task_states` queries the **parent array id**, not the
+task ids (`slurm_backend.py`, `{j.split("_", 1)[0] for j in job_ids}`), and once an array has
+aged out of `slurmctld` `squeue` does not return an empty list — it exits non-zero:
+
+```
+$ squeue --noheader --array --jobs 40775992 --format "%i|%T"
+slurm_load_jobs error: Invalid job id specified
+(exit 1)
+```
+
+`_run` turns any non-zero exit into `SlurmError`, and `_reconcile_missing` caught it as
+"scheduler unavailable", counted every row as `running`, and **returned before reaching
+`sacct`**. `TIMEOUT` is in `DEAD_SLURM_STATES`, so had that line been reached both rows would
+have been failed on the first tick after they died, exactly as the other 46 wall-clock kills
+in this campaign were.
+
+The condition is self-perpetuating: a finished array never returns to the queue, so the same
+call fails identically forever. **Waiting cannot clear it.**
+
+Second-order: the `squeue` call covers the whole batch of sentinel-less rows at once and
+returned on the first failure, so a single aged-out array could stall reconciliation for every
+other unsentinelled job in the same tick. Only these two were affected here, but the exposure
+was general.
+
+### Fix — applied 2026-09-29
+
+`app/services/slurm_campaign.py:_reconcile_missing` no longer returns when `squeue` fails. It
+logs and continues with an empty live map, letting `sacct` decide:
+
+```python
+except slurm_backend.SlurmError as exc:
+    logger.warning("squeue unusable (%s); deciding from sacct instead", exc)
+    live = {}
+```
+
+Three lines, and it restores the disambiguation the design already intended. Deliberately
+**not** done: parsing `squeue`'s stderr for "Invalid job id specified" (brittle), or querying
+per task id (turns one scheduler call into hundreds). `sacct` reports `RUNNING` for live tasks
+too, so nothing is lost by skipping the cheap path when it is unusable — and the safety
+property is intact: if `sacct` is *also* unusable the rows are still counted `unknown` and
+deferred, never invented into a terminal state.
+
+Regression tests in `app/tests/test_slurm_backend.py` cover both halves — a purged array
+reconciles to `failed` via `sacct`, and a genuine outage of both schedulers still defers.
+Both fail against the unfixed code.
+
+### Resolution
+
+`cluster/wce reconcile` (database backed up first to
+`state/wcecoli.db.bak-20260929_reconcile`) closed them out on the new code path:
+
+```
+WARNING slurm_campaign — squeue unusable (squeue exited 1: slurm_load_jobs error:
+                         Invalid job id specified); deciding from sacct instead
+ERROR   sim_worker      — Job 31233 failed: SLURM reported TIMEOUT
+ERROR   sim_worker      — Job 31241 failed: SLURM reported TIMEOUT
+INFO    slurm_campaign  — Reconciled: 0 done, 2 failed, 0 requeued, 0 still running, 0 unknown
+```
+
+T2_CORE is now terminal at **22,920 jobs — 21,949 done / 971 failed**, nothing pending,
+nothing in flight. Campaign-wide: 32,072 jobs, 31,101 done, 971 failed.
+
+### Note for the next campaign
+
+`MISSING_TASK_GRACE_SEC` (180 s) only covers the window between `sbatch` returning and the
+controller seeing the array. It never applied here, because the grace check lives *after* the
+`sacct` query that was never reached. It is not a backstop for this class and should not be
+relied on as one.

@@ -318,3 +318,65 @@ def test_read_units_prefers_the_pruned_form(tmp_path):
     units = _read_units(base)
     assert all(isinstance(u, _PrunedUnit) for u in units)
     assert units[0].tensors_unavailable is False
+
+
+# ── reconcile: a finished array is not evidence of a running task ────────────
+
+def test_reconcile_missing_falls_back_to_sacct_when_squeue_errors(monkeypatch):
+    """squeue exits non-zero once an array ages out of slurmctld.
+
+    That is the normal end state of a finished array, not a scheduler outage. Deferring on
+    it stranded the row in `running_sim` forever, because the array never comes back and
+    every later tick failed the same call. sacct still knows the task timed out.
+    """
+    from app.services import slurm_campaign
+
+    def squeue_rejects_a_purged_array(task_ids):
+        raise slurm_backend.SlurmError(
+            "squeue exited 1: slurm_load_jobs error: Invalid job id specified"
+        )
+
+    failed: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        slurm_campaign.slurm_backend, "live_task_states", squeue_rejects_a_purged_array)
+    monkeypatch.setattr(
+        slurm_campaign.slurm_backend, "accounted_task_states",
+        lambda task_ids: {t: "TIMEOUT" for t in task_ids})
+    monkeypatch.setattr(
+        slurm_campaign, "_fail_owned_job",
+        lambda engine, job_id, worker, attempt, buf, message: failed.append((job_id, message)))
+
+    counts = {"done": 0, "failed": 0, "requeued": 0, "running": 0, "unknown": 0}
+    rows = [{
+        "id": 31233, "attempt": 1, "task": "40775992_70",
+        "sim_dir": "run_job31233_attempt1", "started_at": "2026-09-27T18:30:41+00:00",
+    }]
+    slurm_campaign._reconcile_missing(object(), rows, counts)
+
+    assert failed == [(31233, "SLURM reported TIMEOUT")]
+    assert counts["failed"] == 1
+    assert counts["running"] == 0
+
+
+def test_reconcile_missing_defers_when_both_schedulers_are_unusable(monkeypatch):
+    """A real outage must still defer rather than invent a terminal state."""
+    from app.services import slurm_campaign
+
+    def unusable(task_ids):
+        raise slurm_backend.SlurmError("connection refused")
+
+    monkeypatch.setattr(slurm_campaign.slurm_backend, "live_task_states", unusable)
+    monkeypatch.setattr(slurm_campaign.slurm_backend, "accounted_task_states", unusable)
+    monkeypatch.setattr(
+        slurm_campaign, "_fail_owned_job",
+        lambda *a, **k: pytest.fail("must not fail a job when sacct is unusable"))
+
+    counts = {"done": 0, "failed": 0, "requeued": 0, "running": 0, "unknown": 0}
+    rows = [{
+        "id": 31233, "attempt": 1, "task": "40775992_70",
+        "sim_dir": "run_job31233_attempt1", "started_at": "2026-09-27T18:30:41+00:00",
+    }]
+    slurm_campaign._reconcile_missing(object(), rows, counts)
+
+    assert counts["unknown"] == 1
+    assert counts["failed"] == 0
