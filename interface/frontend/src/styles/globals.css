@@ -3,29 +3,29 @@
 @tailwind utilities;
 
 :root {
-  --color-app: 249 250 251;
+  --color-app: 247 247 250;
   --color-surface: 255 255 255;
   --color-elevated: 255 255 255;
-  --color-subtle: 243 244 246;
-  --color-border-subtle: 229 231 235;
-  --color-border-strong: 209 213 219;
-  --color-text-primary: 17 24 39;
-  --color-text-secondary: 75 85 99;
-  --color-text-muted: 107 114 128;
-  --color-focus: 55 138 221;
+  --color-subtle: 240 240 245;
+  --color-border-subtle: 228 228 236;
+  --color-border-strong: 196 196 209;
+  --color-text-primary: 28 28 36;
+  --color-text-secondary: 82 82 95;
+  --color-text-muted: 104 104 116;
+  --color-focus: 109 40 217;
 }
 
 .dark {
-  --color-app: 12 14 18;
-  --color-surface: 18 22 29;
-  --color-elevated: 28 34 44;
-  --color-subtle: 24 29 38;
-  --color-border-subtle: 48 55 66;
-  --color-border-strong: 68 76 89;
-  --color-text-primary: 241 245 249;
-  --color-text-secondary: 203 213 225;
-  --color-text-muted: 148 163 184;
-  --color-focus: 96 165 250;
+  --color-app: 17 17 22;
+  --color-surface: 25 25 31;
+  --color-elevated: 34 34 42;
+  --color-subtle: 29 29 37;
+  --color-border-subtle: 54 54 64;
+  --color-border-strong: 78 78 92;
+  --color-text-primary: 244 244 247;
+  --color-text-secondary: 205 205 216;
+  --color-text-muted: 163 163 180;
+  --color-focus: 196 181 253;
 }
 
 body {
@@ -38,7 +38,23 @@ code, .font-mono {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
+/* Compatibility mappings refresh neutral colours without changing working-page layouts. */
 @layer utilities {
+  .bg-white { background-color: rgb(var(--color-surface)); }
+  .bg-gray-50, .bg-slate-50 { background-color: rgb(var(--color-app)); }
+  .bg-gray-100, .bg-slate-100 { background-color: rgb(var(--color-subtle)); }
+  .bg-gray-200, .bg-slate-200 { background-color: rgb(var(--color-border-subtle)); }
+  .text-gray-950, .text-gray-900, .text-slate-950, .text-slate-900 { color: rgb(var(--color-text-primary)); }
+  .text-gray-800, .text-gray-700, .text-gray-600,
+  .text-slate-800, .text-slate-700, .text-slate-600 { color: rgb(var(--color-text-secondary)); }
+  .text-gray-500, .text-gray-400, .text-slate-500, .text-slate-400 { color: rgb(var(--color-text-muted)); }
+  .border-gray-100, .border-gray-200, .border-slate-100, .border-slate-200,
+  .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+  .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(var(--color-border-subtle)); }
+  .border-gray-300, .border-slate-300 { border-color: rgb(var(--color-border-strong)); }
+  .hover\:bg-gray-50:hover, .hover\:bg-slate-50:hover { background-color: rgb(var(--color-app)); }
+  .hover\:bg-gray-100:hover, .hover\:bg-slate-100:hover { background-color: rgb(var(--color-subtle)); }
+
   .dark .bg-white { background-color: rgb(var(--color-surface)); }
   .dark .bg-white\/60,
   .dark .bg-white\/70,
@@ -107,10 +123,10 @@ code, .font-mono {
   .dark .hover\:text-slate-800:hover,
   .dark .hover\:text-slate-700:hover { color: rgb(var(--color-text-primary)); }
 
-  .dark .bg-brand-50 { background-color: rgb(12 68 124 / 0.35); }
-  .dark .text-brand-700 { color: rgb(147 197 253); }
-  .dark .border-brand-500 { border-color: rgb(96 165 250); }
-  .dark .ring-brand-500 { --tw-ring-color: rgb(96 165 250); }
+  .dark .bg-brand-50 { background-color: rgb(76 29 149 / 0.35); }
+  .dark .text-brand-700 { color: rgb(196 181 253); }
+  .dark .border-brand-500 { border-color: rgb(196 181 253); }
+  .dark .ring-brand-500 { --tw-ring-color: rgb(196 181 253); }
 
   .dark .bg-blue-50,
   .dark .bg-cyan-50,
@@ -165,4 +181,31 @@ code, .font-mono {
   .dark .border-purple-200,
   .dark .border-indigo-200,
   .dark .border-violet-200 { border-color: rgb(99 102 241 / 0.55); }
+}
+
+:root {
+  --duration-feedback: 120ms;
+  --duration-menu: 180ms;
+  --duration-disclosure: 200ms;
+  --duration-entrance: 240ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+}
+
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid rgb(var(--color-focus));
+  outline-offset: 3px;
+}
+
+@layer utilities {
+  .dark .text-brand-500, .dark .text-brand-600 { color: rgb(196 181 253); }
+}
+
+.app-shell nav a, .app-shell [data-testid="theme-control"] button {
+  transition: color var(--duration-feedback) var(--ease-out),
+    background-color var(--duration-feedback) var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell aside, .app-shell nav a, .app-shell [data-testid="theme-control"] button {
+    transition: none;
+  }
 }

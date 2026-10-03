@@ -1179,7 +1179,7 @@ function suggestedActions(context: AssistantContext): Array<{
             title: 'Open gene in Workspace',
             description: `Review linked biological context for ${gene}.`,
             kind: 'link' as const,
-            path: `/?gene=${encodeURIComponent(gene)}`,
+            path: `/explore?gene=${encodeURIComponent(gene)}`,
           }]
         : []),
     ]
@@ -1196,7 +1196,7 @@ function suggestedActions(context: AssistantContext): Array<{
             title: 'Open selected gene in Workspace',
             description: `Review model state IDs and genomic context for ${gene}.`,
             kind: 'link' as const,
-            path: `/?gene=${encodeURIComponent(gene)}`,
+            path: `/explore?gene=${encodeURIComponent(gene)}`,
           }]
         : []),
     ]

@@ -1,4 +1,5 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Outlet, Routes, Route, useLocation } from 'react-router-dom'
+import { HomePage } from './components/home/HomePage'
 import { Shell } from './components/layout/Shell'
 import { ExploreWorkspacePage } from './components/explore/ExploreWorkspacePage'
 import { GeneCatalogPage } from './components/genes/GeneCatalogPage'
@@ -19,31 +20,51 @@ import { PathwaysPage } from './components/pathways/PathwaysPage'
 import { WorkspaceUrlSync } from './hooks/useUrlWorkspaceState'
 import { AssistantProvider } from './components/assistant/AssistantProvider'
 
+function HomeEntry() {
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
+  const legacyWorkspace = ['gene', 'q', 'category', 'condition', 'view'].some((key) =>
+    params.has(key),
+  )
+  return legacyWorkspace ? (
+    <Navigate replace to={{ pathname: '/explore', search: location.search, hash: location.hash }} />
+  ) : (
+    <HomePage />
+  )
+}
+
 export default function App() {
   return (
     <AssistantProvider>
-      <Shell>
       <WorkspaceUrlSync />
       <Routes>
-        <Route path="/" element={<ExploreWorkspacePage />} />
-        <Route path="/genes" element={<GeneCatalogPage />} />
-        <Route path="/network" element={<TFNetworkPage />} />
-        <Route path="/genome" element={<GenomeViewerPage />} />
-        <Route path="/pathways" element={<PathwaysPage />} />
-        <Route path="/experiments" element={<ExperimentListPage />} />
-        <Route path="/experiments/new" element={<ExperimentDesigner />} />
-        <Route path="/experiments/batch" element={<TypedBatchBuilder />} />
-        <Route path="/environment-builder" element={<EnvironmentBuilderPage />} />
-        <Route path="/experiments/environment-builder" element={<EnvironmentBuilderPage />} />
-        <Route path="/guide" element={<ExperimentGuidePage />} />
-        <Route path="/results" element={<ResultsBrowserPage />} />
-        <Route path="/results/compare" element={<ComparisonDashboard />} />
-        <Route path="/results/:jobId" element={<ResultsPage />} />
-        <Route path="/assistant" element={<AssistantPage />} />
-        <Route path="/ml" element={<MLPage />} />
-        <Route path="/design" element={<DesignPage />} />
+        <Route path="/" element={<HomeEntry />} />
+        <Route
+          element={
+            <Shell>
+              <Outlet />
+            </Shell>
+          }
+        >
+          <Route path="/explore" element={<ExploreWorkspacePage />} />
+          <Route path="/genes" element={<GeneCatalogPage />} />
+          <Route path="/network" element={<TFNetworkPage />} />
+          <Route path="/genome" element={<GenomeViewerPage />} />
+          <Route path="/pathways" element={<PathwaysPage />} />
+          <Route path="/experiments" element={<ExperimentListPage />} />
+          <Route path="/experiments/new" element={<ExperimentDesigner />} />
+          <Route path="/experiments/batch" element={<TypedBatchBuilder />} />
+          <Route path="/environment-builder" element={<EnvironmentBuilderPage />} />
+          <Route path="/experiments/environment-builder" element={<EnvironmentBuilderPage />} />
+          <Route path="/guide" element={<ExperimentGuidePage />} />
+          <Route path="/results" element={<ResultsBrowserPage />} />
+          <Route path="/results/compare" element={<ComparisonDashboard />} />
+          <Route path="/results/:jobId" element={<ResultsPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/ml" element={<MLPage />} />
+          <Route path="/design" element={<DesignPage />} />
+        </Route>
       </Routes>
-      </Shell>
     </AssistantProvider>
   )
 }

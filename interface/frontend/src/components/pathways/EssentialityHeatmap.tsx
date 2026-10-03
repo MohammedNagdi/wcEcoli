@@ -259,7 +259,7 @@ export function EssentialityHeatmap({ essentiality, genes, onAssistantSnapshot }
                     onClick={() => {
                       setWorkspaceUrlState(
                         { selectedGene: gene.gene_symbol, selectedCategory: gene.category, exploreView: 'genes' },
-                        { pathname: '/', replace: false }
+                        { pathname: '/explore', replace: false }
                       )
                     }}
                   />

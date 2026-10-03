@@ -31,7 +31,7 @@ function parseId(value: string | null): number | null {
 }
 
 function exploreViewFromPath(pathname: string, viewParam: string | null): ExploreView | null {
-  if (pathname === '/') {
+  if (pathname === '/explore') {
     return viewParam && EXPLORE_VIEWS.has(viewParam as ExploreView)
       ? viewParam as ExploreView
       : 'genes'

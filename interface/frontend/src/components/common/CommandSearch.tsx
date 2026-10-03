@@ -47,7 +47,7 @@ export function CommandSearch({ open, onClose }: Props) {
 
   const handleSelect = useCallback((gene: Gene) => {
     onClose()
-    navigate(`/?gene=${encodeURIComponent(gene.symbol)}`)
+    navigate(`/explore?gene=${encodeURIComponent(gene.symbol)}`)
   }, [navigate, onClose])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {

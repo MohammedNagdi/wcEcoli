@@ -119,6 +119,8 @@ services:
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/index.html:/app/index.html
+      - ./frontend/public:/app/public
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
     environment:
       - VITE_API_URL=http://api:8000
     depends_on:

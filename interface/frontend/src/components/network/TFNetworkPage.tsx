@@ -977,7 +977,7 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
 
             <div className="flex gap-2 border-t border-gray-100 pt-3">
               <Link
-                to={`/?gene=${encodeURIComponent(selectedInspector.symbol)}`}
+                to={`/explore?gene=${encodeURIComponent(selectedInspector.symbol)}`}
                 className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
               >
                 Open Workspace

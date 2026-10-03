@@ -299,7 +299,7 @@ export function CircularGenomeMap({
                     event.stopPropagation()
                     setWorkspaceUrlState(
                       { selectedGene: gene.symbol, exploreView: 'genes' },
-                      { pathname: '/', replace: false }
+                      { pathname: '/explore', replace: false }
                     )
                   }}
                 />

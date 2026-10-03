@@ -279,7 +279,7 @@ export function AAPathwayDiagram({ pathways, genes, onAssistantSnapshot }: Props
                     onClick={() => {
                       setWorkspaceUrlState(
                         { selectedGene: enzyme, exploreView: 'genes' },
-                        { pathname: '/', replace: false }
+                        { pathname: '/explore', replace: false }
                       )
                     }}
                     className="font-mono text-brand-700 hover:underline"
