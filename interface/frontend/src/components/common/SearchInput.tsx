@@ -1,13 +1,15 @@
-import { useState, useRef, useEffect } from 'react'
+import { useRef, useEffect } from 'react'
 
 interface Props {
   value: string
   onChange: (value: string) => void
   placeholder?: string
   className?: string
+  label?: string
+  id?: string
 }
 
-export function SearchInput({ value, onChange, placeholder = 'Search...', className = '' }: Props) {
+export function SearchInput({ value, onChange, placeholder = 'Search...', className = '', label, id }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -35,6 +37,8 @@ export function SearchInput({ value, onChange, placeholder = 'Search...', classN
       </svg>
       <input
         ref={inputRef}
+        id={id}
+        aria-label={label}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -45,7 +49,9 @@ export function SearchInput({ value, onChange, placeholder = 'Search...', classN
       />
       {value && (
         <button
-          onClick={() => onChange('')}
+          onClick={() => { onChange(''); inputRef.current?.focus() }}
+          type="button"
+          aria-label={label ? `Clear ${label.toLowerCase()}` : 'Clear search'}
           className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

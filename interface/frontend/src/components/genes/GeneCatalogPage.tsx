@@ -1,8 +1,9 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { useGeneDetail, useCategories } from '../../hooks/useGenes'
 import { getDesignOverview, getGenes } from '../../api/client'
+import { WorkspaceHelp, WORKSPACE_HELP } from '../workspace/WorkspaceHelp'
 import { SearchInput } from '../common/SearchInput'
 import { SkeletonTableRows } from '../common/Skeleton'
 import { CategoryBadge } from '../common/Badge'
@@ -26,6 +27,8 @@ type SortDir = 'asc' | 'desc'
 const PAGE_SIZE = 100
 
 interface GeneCatalogPageProps {
+  visible?: boolean
+  workspaceLayout?: boolean
   embedded?: boolean
   hideDetailPanel?: boolean
   heightClass?: string
@@ -33,7 +36,12 @@ interface GeneCatalogPageProps {
   onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }
 
-function FilterChip({ label, active, dotColor, onClick }: {
+function FilterChip({
+  label,
+  active,
+  dotColor,
+  onClick,
+}: {
   label: string
   active: boolean
   dotColor?: string
@@ -81,13 +89,17 @@ function PhenotypeBadge({
   const cls = styles[summary.phenotype] ?? styles.unknown
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${cls}`}>
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${cls}`}
+    >
       {labels[summary.phenotype] ?? summary.phenotype}
     </span>
   )
 }
 
 export function GeneCatalogPage({
+  visible = true,
+  workspaceLayout = false,
   embedded = false,
   hideDetailPanel = false,
   heightClass,
@@ -102,10 +114,16 @@ export function GeneCatalogPage({
     setSelectedGene,
     setSelectedCategory,
   } = useUrlWorkspaceState()
-  const [query, setQuery] = useState(() => searchParams.get('q') ?? searchParams.get('gene') ?? '')
-  const [category, setCategory] = useState<string | undefined>(() => searchParams.get('category') ?? undefined)
+  const [query, setQuery] = useState(
+    () => searchParams.get('q') ?? (workspaceLayout ? '' : (searchParams.get('gene') ?? '')),
+  )
+  const [category, setCategory] = useState<string | undefined>(
+    () => searchParams.get('category') ?? undefined,
+  )
   const [mechanisticFilter, setMechanisticFilter] = useState<boolean | undefined>()
-  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(() => searchParams.get('gene') ?? searchParams.get('q') ?? null)
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(
+    () => searchParams.get('gene') ?? searchParams.get('q') ?? null,
+  )
   const [sortKey, setSortKey] = useState<SortKey>('symbol')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
@@ -115,8 +133,19 @@ export function GeneCatalogPage({
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
+  const [moreError, setMoreError] = useState(false)
+  const requestGeneration = useRef(0)
+  const previousUrlQuery = useRef(searchParams.get('q') ?? '')
   const [phenotypeMap, setPhenotypeMap] = useState<Map<string, GeneKOSummary>>(new Map())
+  const savedScroll = useRef({ top: 0, left: 0 })
   const scrollRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (visible && workspaceLayout && scrollRef.current) {
+      scrollRef.current.scrollTop = savedScroll.current.top
+      scrollRef.current.scrollLeft = savedScroll.current.left
+    }
+  }, [visible, workspaceLayout])
   const assistantCapturedAt = useRef(new Date().toISOString()).current
   const tableColCount = showEssentiality ? 6 : 5
 
@@ -137,10 +166,12 @@ export function GeneCatalogPage({
     const urlGene = searchParams.get('gene') ?? ''
     const urlQuery = searchParams.get('q') ?? ''
     const urlCategory = searchParams.get('category') ?? ''
-    setQuery(urlQuery || (embedded ? '' : urlGene))
+    if (!workspaceLayout || urlQuery !== previousUrlQuery.current)
+      setQuery(urlQuery || (embedded ? '' : urlGene))
+    previousUrlQuery.current = urlQuery
     setSelectedSymbol(urlGene || urlQuery || null)
     setCategory(urlCategory || undefined)
-  }, [embedded, searchParams])
+  }, [embedded, searchParams, workspaceLayout])
 
   useEffect(() => {
     if (selectedGeneSymbol && selectedGeneSymbol !== selectedSymbol) {
@@ -148,9 +179,9 @@ export function GeneCatalogPage({
     } else if (!selectedGeneSymbol && embedded && selectedSymbol) {
       // Gene breadcrumb was cleared — reset table selection and search query
       setSelectedSymbol(null)
-      setQuery('')
+      if (!workspaceLayout) setQuery('')
     }
-  }, [selectedGeneSymbol, selectedSymbol, embedded])
+  }, [selectedGeneSymbol, selectedSymbol, embedded, workspaceLayout])
 
   useEffect(() => {
     const nextCategory = selectedCategory ?? undefined
@@ -160,28 +191,46 @@ export function GeneCatalogPage({
   }, [category, selectedCategory])
 
   useEffect(() => {
+    const controller = new AbortController()
+    const generation = ++requestGeneration.current
+    setMoreError(false)
+    setLoadingMore(false)
     setPage(1)
     setAllGenes([])
     setLoading(true)
     setError(null)
-    getGenes({
-      q: query || undefined,
-      category,
-      mechanistic: mechanisticFilter,
-      page: 1,
-      page_size: PAGE_SIZE,
-    })
+    getGenes(
+      {
+        q: query || undefined,
+        category,
+        mechanistic: mechanisticFilter,
+        page: 1,
+        page_size: PAGE_SIZE,
+      },
+      controller.signal,
+    )
       .then((data) => {
+        if (controller.signal.aborted || generation !== requestGeneration.current) return
         setAllGenes(data.genes)
         setTotal(data.total)
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [query, category, mechanisticFilter])
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => {
+      controller.abort()
+      requestGeneration.current += 1
+    }
+  }, [query, category, mechanisticFilter, reload])
 
   const loadMore = useCallback(() => {
     if (loadingMore || allGenes.length >= total) return
+    const generation = requestGeneration.current
     const nextPage = page + 1
+    setMoreError(false)
     setLoadingMore(true)
     getGenes({
       q: query || undefined,
@@ -191,24 +240,29 @@ export function GeneCatalogPage({
       page_size: PAGE_SIZE,
     })
       .then((data) => {
+        if (generation !== requestGeneration.current) return
         setAllGenes((prev) => [...prev, ...data.genes])
         setPage(nextPage)
       })
-      .catch(() => {})
-      .finally(() => setLoadingMore(false))
+      .catch(() => {
+        if (generation === requestGeneration.current) setMoreError(true)
+      })
+      .finally(() => {
+        if (generation === requestGeneration.current) setLoadingMore(false)
+      })
   }, [loadingMore, allGenes.length, total, page, query, category, mechanisticFilter])
 
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const handler = () => {
-      if (el.scrollHeight - el.scrollTop - el.clientHeight < 300) {
+      if (!moreError && el.scrollHeight - el.scrollTop - el.clientHeight < 300) {
         loadMore()
       }
     }
     el.addEventListener('scroll', handler)
     return () => el.removeEventListener('scroll', handler)
-  }, [loadMore])
+  }, [loadMore, moreError])
 
   const handleSelectGene = (gene: Gene) => {
     const nextGene = gene.symbol === selectedSymbol ? null : gene.symbol
@@ -248,11 +302,23 @@ export function GeneCatalogPage({
 
   const mechCount = useMemo(() => {
     const mechCats = new Set([
-      'amino_acid_biosynthesis', 'transport', 'cofactor_biosynthesis',
-      'regulation', 'trna', 'translation', 'central_carbon',
-      'dna_replication', 'energy', 'lipid_metabolism', 'rrna',
-      'cell_division', 'transcription', 'nucleotide_metabolism',
-      'cell_envelope', 'stress_response', 'motility',
+      'amino_acid_biosynthesis',
+      'transport',
+      'cofactor_biosynthesis',
+      'regulation',
+      'trna',
+      'translation',
+      'central_carbon',
+      'dna_replication',
+      'energy',
+      'lipid_metabolism',
+      'rrna',
+      'cell_division',
+      'transcription',
+      'nucleotide_metabolism',
+      'cell_envelope',
+      'stress_response',
+      'motility',
     ])
     return categories.filter((c) => mechCats.has(c.category)).reduce((s, c) => s + c.count, 0)
   }, [categories])
@@ -269,7 +335,7 @@ export function GeneCatalogPage({
         acc[summary.phenotype] += 1
         return acc
       },
-      { essential: 0, growth_defect: 0, neutral: 0, unknown: 0 }
+      { essential: 0, growth_defect: 0, neutral: 0, unknown: 0 },
     )
     return {
       kind: 'gene_catalog',
@@ -316,7 +382,8 @@ export function GeneCatalogPage({
         count: cat.count,
       })),
       category_options_truncated: categories.length > ASSISTANT_GENE_SAMPLE_LIMIT,
-      detail_panel_visible: !hideDetailPanel && Boolean(selectedGeneDetail || (detailLoading && selectedSymbol)),
+      detail_panel_visible:
+        !hideDetailPanel && Boolean(selectedGeneDetail || (detailLoading && selectedSymbol)),
       essentiality_visible: showEssentiality,
     }
   }, [
@@ -376,100 +443,251 @@ export function GeneCatalogPage({
       selected_gene: selectedSymbol,
       page_state: assistantPageState,
     },
-    suggestedPrompt: 'Help me interpret this gene catalog view. Explain the current filters, selected gene detail, KO phenotype context, and useful next Explore views.',
+    suggestedPrompt:
+      'Help me interpret this gene catalog view. Explain the current filters, selected gene detail, KO phenotype context, and useful next Explore views.',
   })
 
+  const clearFilters = () => {
+    setQuery('')
+    setCategory(undefined)
+    setMechanisticFilter(undefined)
+    setSelectedCategory(null)
+  }
+
   return (
-    <div className={`flex gap-4 ${heightClass ?? (embedded ? 'h-[calc(100vh-215px)] min-h-[520px]' : 'h-[calc(100vh-65px)]')}`}>
+    <div
+      className={`${workspaceLayout ? 'workspace-catalog' : ''} flex gap-4 ${heightClass ?? (embedded ? 'h-[calc(100vh-215px)] min-h-[520px]' : 'h-[calc(100vh-65px)]')}`}
+    >
       <div className="flex-1 flex flex-col min-w-0 max-w-6xl mx-auto">
-        <div className="flex items-center gap-2 flex-wrap mb-3">
-          <FilterChip
-            label={`All ${totalCount.toLocaleString()}`}
-            active={!category && mechanisticFilter === undefined}
-            onClick={() => {
-              setCategory(undefined)
-              setMechanisticFilter(undefined)
-              setSelectedCategory(null)
-            }}
-          />
-          <FilterChip
-            label={`Mechanistic ${mechCount.toLocaleString()}`}
-            active={mechanisticFilter === true}
-            dotColor="bg-emerald-400"
-            onClick={() => {
-              setCategory(undefined)
-              setMechanisticFilter(mechanisticFilter === true ? undefined : true)
-              setSelectedCategory(null)
-            }}
-          />
-          <FilterChip
-            label={`Expression ${(totalCount - mechCount).toLocaleString()}`}
-            active={mechanisticFilter === false}
-            dotColor="bg-gray-300"
-            onClick={() => {
-              setCategory(undefined)
-              setMechanisticFilter(mechanisticFilter === false ? undefined : false)
-              setSelectedCategory(null)
-            }}
-          />
-
-          <div className="relative ml-2">
-            <select
-              value={category ?? ''}
-              onChange={(e) => {
-                const val = e.target.value || undefined
-                setCategory(val)
-                setMechanisticFilter(undefined)
-                setSelectedCategory(val ?? null)
-              }}
-              className="appearance-none bg-white border border-gray-200 rounded-full px-3 py-1.5 pr-7 text-xs text-gray-600 cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <option value="">Category...</option>
-              {categories.map((cat) => (
-                <option key={cat.category} value={cat.category}>
-                  {categoryLabel(cat.category)} ({cat.count})
-                </option>
-              ))}
-            </select>
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 text-xs">
-              v
-            </span>
+        {workspaceLayout ? (
+          <div className="workspace-catalog-toolbar">
+            <label className="workspace-search-label" htmlFor="workspace-gene-search">
+              Search genes
+              <span className="workspace-search-shortcut">
+                Press <kbd>/</kbd> to search
+              </span>
+            </label>
+            <SearchInput
+              id="workspace-gene-search"
+              label="Search genes"
+              value={query}
+              onChange={setQuery}
+              placeholder="Symbol, synonym, or identifier"
+            />
+            <div className="workspace-filter-row">
+              <div className="workspace-filter-group" role="group" aria-label="Model coverage">
+                <button
+                  type="button"
+                  aria-pressed={!category && mechanisticFilter === undefined}
+                  onClick={() => {
+                    setCategory(undefined)
+                    setMechanisticFilter(undefined)
+                    setSelectedCategory(null)
+                  }}
+                >
+                  All <span>{totalCount.toLocaleString()}</span>
+                </button>
+                <span className="workspace-filter-with-help">
+                  <button
+                    type="button"
+                    aria-pressed={mechanisticFilter === true}
+                    onClick={() => {
+                      setCategory(undefined)
+                      setMechanisticFilter(mechanisticFilter === true ? undefined : true)
+                      setSelectedCategory(null)
+                    }}
+                  >
+                    Mechanistic <span>{mechCount.toLocaleString()}</span>
+                  </button>
+                  <WorkspaceHelp label="Mechanistic">{WORKSPACE_HELP.mechanistic}</WorkspaceHelp>
+                </span>
+                <span className="workspace-filter-with-help">
+                  <button
+                    type="button"
+                    aria-pressed={mechanisticFilter === false}
+                    onClick={() => {
+                      setCategory(undefined)
+                      setMechanisticFilter(mechanisticFilter === false ? undefined : false)
+                      setSelectedCategory(null)
+                    }}
+                  >
+                    Expression-only <span>{(totalCount - mechCount).toLocaleString()}</span>
+                  </button>
+                  <WorkspaceHelp label="Expression-only">{WORKSPACE_HELP.expression}</WorkspaceHelp>
+                </span>
+              </div>
+              <label className="workspace-category-label">
+                Category
+                <select
+                  aria-label="Category"
+                  value={category ?? ''}
+                  onChange={(event) => {
+                    const value = event.target.value || undefined
+                    setCategory(value)
+                    setMechanisticFilter(undefined)
+                    setSelectedCategory(value ?? null)
+                  }}
+                >
+                  <option value="">All categories</option>
+                  {categories.map((cat) => (
+                    <option key={cat.category} value={cat.category}>
+                      {categoryLabel(cat.category)} ({cat.count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="workspace-result-summary">
+              <span role="status" aria-live="polite">
+                {loading
+                  ? 'Loading genes…'
+                  : `${total.toLocaleString()} result${total === 1 ? '' : 's'}`}
+              </span>
+              <span>Sort applies to loaded rows</span>
+              {(query || category || mechanisticFilter !== undefined) && (
+                <button type="button" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 flex-wrap mb-3">
+              <FilterChip
+                label={`All ${totalCount.toLocaleString()}`}
+                active={!category && mechanisticFilter === undefined}
+                onClick={() => {
+                  setCategory(undefined)
+                  setMechanisticFilter(undefined)
+                  setSelectedCategory(null)
+                }}
+              />
+              <FilterChip
+                label={`Mechanistic ${mechCount.toLocaleString()}`}
+                active={mechanisticFilter === true}
+                dotColor="bg-emerald-400"
+                onClick={() => {
+                  setCategory(undefined)
+                  setMechanisticFilter(mechanisticFilter === true ? undefined : true)
+                  setSelectedCategory(null)
+                }}
+              />
+              <FilterChip
+                label={`Expression ${(totalCount - mechCount).toLocaleString()}`}
+                active={mechanisticFilter === false}
+                dotColor="bg-gray-300"
+                onClick={() => {
+                  setCategory(undefined)
+                  setMechanisticFilter(mechanisticFilter === false ? undefined : false)
+                  setSelectedCategory(null)
+                }}
+              />
 
-        <div className="flex items-center gap-4 mb-4">
-          <SearchInput
-            value={query}
-            onChange={setQuery}
-            placeholder="Search genes by symbol, synonym, or ID... (press /)"
-            className="flex-1 max-w-lg"
-          />
-          <span className="text-sm text-gray-400">
-            {total.toLocaleString()} result{total !== 1 ? 's' : ''}
-            {category ? ' in ' : ''}
-            {category ? <strong className="text-gray-600">{categoryLabel(category)}</strong> : null}
-            {mechanisticFilter === true ? ' (mechanistic only)' : ''}
-            {mechanisticFilter === false ? ' (expression-only)' : ''}
-          </span>
-        </div>
+              <div className="relative ml-2">
+                <select
+                  value={category ?? ''}
+                  onChange={(e) => {
+                    const val = e.target.value || undefined
+                    setCategory(val)
+                    setMechanisticFilter(undefined)
+                    setSelectedCategory(val ?? null)
+                  }}
+                  className="appearance-none bg-white border border-gray-200 rounded-full px-3 py-1.5 pr-7 text-xs text-gray-600 cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">Category...</option>
+                  {categories.map((cat) => (
+                    <option key={cat.category} value={cat.category}>
+                      {categoryLabel(cat.category)} ({cat.count})
+                    </option>
+                  ))}
+                </select>
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 text-xs">
+                  v
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 mb-4">
+              <SearchInput
+                value={query}
+                onChange={setQuery}
+                placeholder="Search genes by symbol, synonym, or ID... (press /)"
+                className="flex-1 max-w-lg"
+              />
+              <span className="text-sm text-gray-400">
+                {total.toLocaleString()} result{total !== 1 ? 's' : ''}
+                {category ? ' in ' : ''}
+                {category ? (
+                  <strong className="text-gray-600">{categoryLabel(category)}</strong>
+                ) : null}
+                {mechanisticFilter === true ? ' (mechanistic only)' : ''}
+                {mechanisticFilter === false ? ' (expression-only)' : ''}
+              </span>
+            </div>
+          </>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
             {'Failed to load genes: ' + error}
+            {workspaceLayout && (
+              <button
+                type="button"
+                className="workspace-secondary-button"
+                onClick={() => setReload((value) => value + 1)}
+              >
+                Retry catalog
+              </button>
+            )}
           </div>
         )}
 
-        <div ref={scrollRef} className="flex-1 overflow-auto rounded-lg border border-gray-200 bg-white">
+        <div
+          ref={scrollRef}
+          onScroll={(event) => {
+            if (event.currentTarget.getClientRects().length) {
+              savedScroll.current = {
+                top: event.currentTarget.scrollTop,
+                left: event.currentTarget.scrollLeft,
+              }
+            }
+          }}
+          className="flex-1 overflow-auto rounded-lg border border-gray-200 bg-white"
+        >
           <table className="w-full text-sm">
+            {workspaceLayout && (
+              <caption className="sr-only">
+                Gene catalog. Select a gene to inspect it. Sorting applies to loaded rows.
+              </caption>
+            )}
             <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10">
               <tr>
-                <SortHeader sortKey="symbol" activeKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="w-28 text-left">
+                <SortHeader
+                  sortKey="symbol"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onClick={toggleSort}
+                  className="w-28 text-left"
+                >
                   Gene
                 </SortHeader>
-                <SortHeader sortKey="category" activeKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="text-left">
+                <SortHeader
+                  sortKey="category"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onClick={toggleSort}
+                  className="text-left"
+                >
                   Category
                 </SortHeader>
-                <SortHeader sortKey="left_end_pos" activeKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="w-36 text-right">
+                <SortHeader
+                  sortKey="left_end_pos"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onClick={toggleSort}
+                  className="w-36 text-right"
+                >
                   Position
                 </SortHeader>
                 {showEssentiality && (
@@ -477,8 +695,14 @@ export function GeneCatalogPage({
                     Essentiality
                   </th>
                 )}
-                <SortHeader sortKey="ko_index" activeKey={sortKey} sortDir={sortDir} onClick={toggleSort} className="w-16 text-right">
-                  KO #
+                <SortHeader
+                  sortKey="ko_index"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onClick={toggleSort}
+                  className="w-16 text-right"
+                >
+                  {workspaceLayout ? 'Knockout index' : 'KO #'}
                 </SortHeader>
                 <th className="px-4 py-2.5 w-8" />
               </tr>
@@ -490,27 +714,57 @@ export function GeneCatalogPage({
                 <tr>
                   <td colSpan={tableColCount} className="text-center py-12 text-gray-400">
                     No genes match your search.
+                    {workspaceLayout && (
+                      <div>
+                        <button
+                          type="button"
+                          className="workspace-secondary-button"
+                          onClick={clearFilters}
+                        >
+                          Clear filters
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ) : (
                 sortedGenes.map((gene) => {
-                  const length = gene.left_end_pos && gene.right_end_pos
-                    ? Math.abs(gene.right_end_pos - gene.left_end_pos) + 1
-                    : null
+                  const length =
+                    gene.left_end_pos && gene.right_end_pos
+                      ? Math.abs(gene.right_end_pos - gene.left_end_pos) + 1
+                      : null
                   return (
                     <tr
                       key={gene.id}
+                      data-selected={gene.symbol === selectedSymbol}
                       onClick={() => handleSelectGene(gene)}
-                      className={'cursor-pointer transition-colors ' + (
-                        gene.symbol === selectedSymbol
-                          ? 'bg-brand-50'
-                          : 'hover:bg-gray-50'
-                      )}
+                      className={
+                        'cursor-pointer transition-colors ' +
+                        (gene.symbol === selectedSymbol ? 'bg-brand-50' : 'hover:bg-gray-50')
+                      }
                     >
                       <td className="px-4 py-2">
-                        <span className="font-mono font-medium text-bio-gene">{gene.symbol}</span>
+                        {workspaceLayout ? (
+                          <button
+                            type="button"
+                            className="workspace-gene-button font-mono text-bio-gene"
+                            aria-label={`Inspect ${gene.symbol}`}
+                            aria-pressed={gene.symbol === selectedSymbol}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleSelectGene(gene)
+                            }}
+                          >
+                            {gene.symbol}
+                          </button>
+                        ) : (
+                          <span className="font-mono font-medium text-bio-gene">{gene.symbol}</span>
+                        )}
                         {gene.is_mechanistic && (
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 ml-1.5 align-middle" title="Mechanistic" />
+                          <span
+                            className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 ml-1.5 align-middle"
+                            title="Mechanistic"
+                          />
                         )}
                       </td>
                       <td className="px-4 py-2">
@@ -519,12 +773,15 @@ export function GeneCatalogPage({
                       <td className="px-4 py-2 text-right">
                         <span className="font-mono text-xs text-gray-500">
                           {gene.left_end_pos && gene.right_end_pos
-                            ? gene.left_end_pos.toLocaleString() + '-' + gene.right_end_pos.toLocaleString()
+                            ? gene.left_end_pos.toLocaleString() +
+                              '-' +
+                              gene.right_end_pos.toLocaleString()
                             : '-'}
                         </span>
                         {length && (
                           <p className="text-[10px] text-gray-400 mt-0.5">
-                            {gene.direction === '+' ? '-> fwd' : '<- rev'} - {length.toLocaleString()} bp
+                            {gene.direction === '+' ? '-> fwd' : '<- rev'} -{' '}
+                            {length.toLocaleString()} bp
                           </p>
                         )}
                       </td>
@@ -551,10 +808,24 @@ export function GeneCatalogPage({
                   </td>
                 </tr>
               )}
-              {!loading && !loadingMore && allGenes.length < total && (
+              {workspaceLayout && moreError && (
+                <tr>
+                  <td colSpan={tableColCount} className="workspace-load-more-error">
+                    <span>Additional genes could not be loaded.</span>
+                    <button type="button" className="workspace-secondary-button" onClick={loadMore}>
+                      Retry loading more
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {!loading && !loadingMore && !moreError && allGenes.length < total && (
                 <tr>
                   <td colSpan={tableColCount} className="text-center py-3 text-xs text-gray-400">
-                    {'Showing ' + allGenes.length.toLocaleString() + ' of ' + total.toLocaleString() + ' - scroll for more'}
+                    {'Showing ' +
+                      allGenes.length.toLocaleString() +
+                      ' of ' +
+                      total.toLocaleString() +
+                      ' - scroll for more'}
                   </td>
                 </tr>
               )}
@@ -599,13 +870,19 @@ function SortHeader({
 }) {
   return (
     <th
-      onClick={() => onClick(sortKey)}
-      className={'px-4 py-2.5 font-medium text-gray-500 select-none cursor-pointer hover:text-gray-700 transition-colors ' + className}
+      scope="col"
+      aria-sort={activeKey === sortKey ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={
+        'px-4 py-2.5 font-medium text-gray-500 select-none cursor-pointer hover:text-gray-700 transition-colors ' +
+        className
+      }
     >
-      {children}
-      <span className="ml-1 text-xs">
-        {activeKey === sortKey ? (sortDir === 'asc' ? '^' : 'v') : ''}
-      </span>
+      <button type="button" onClick={() => onClick(sortKey)} className="workspace-sort-button">
+        {children}
+        <span aria-hidden="true" className="ml-1 text-xs">
+          {activeKey === sortKey ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+        </span>
+      </button>
     </th>
   )
 }

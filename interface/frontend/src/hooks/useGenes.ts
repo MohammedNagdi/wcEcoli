@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Gene, GeneDetail, GeneSearchResult, CategoryCount } from '../types'
-import { getGenes, getGene, getCategories, searchGenes } from '../api/client'
+import { ApiError, getGenes, getGene, getCategories, searchGenes } from '../api/client'
 
 export function useGeneList(params?: {
   q?: string
@@ -25,19 +25,40 @@ export function useGeneList(params?: {
 }
 
 export function useGeneDetail(symbol: string | null) {
-  const [gene, setGene] = useState<GeneDetail | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const [result, setResult] = useState<{
+    symbol: string | null
+    gene: GeneDetail | null
+    status: 'loading' | 'ready' | 'missing' | 'error'
+    error: string | null
+  }>({ symbol: null, gene: null, status: 'ready', error: null })
 
   useEffect(() => {
-    if (!symbol) { setGene(null); return }
-    setLoading(true)
-    getGene(symbol)
-      .then(setGene)
-      .catch(() => setGene(null))
-      .finally(() => setLoading(false))
-  }, [symbol])
+    if (!symbol) return
+    const controller = new AbortController()
+    setResult({ symbol, gene: null, status: 'loading', error: null })
+    getGene(symbol, controller.signal)
+      .then((gene) => {
+        if (controller.signal.aborted) return
+        const valid = gene && typeof gene.symbol === 'string' ? gene : null
+        setResult({ symbol, gene: valid, status: valid ? 'ready' : 'missing', error: null })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        const missing = error instanceof ApiError && error.status === 404
+        setResult({ symbol, gene: null, status: missing ? 'missing' : 'error', error: missing ? null : 'The gene details could not be loaded.' })
+      })
+    return () => controller.abort()
+  }, [symbol, attempt])
 
-  return { gene, loading }
+  const current = symbol !== null && result.symbol === symbol
+  return {
+    gene: current ? result.gene : null,
+    loading: symbol !== null && (!current || result.status === 'loading'),
+    error: current ? result.error : null,
+    notFound: current && result.status === 'missing',
+    retry: useCallback(() => setAttempt((value) => value + 1), []),
+  }
 }
 
 export function useCategories() {

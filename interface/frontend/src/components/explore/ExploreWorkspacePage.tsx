@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MouseEvent, ReactNode } from 'react'
+import type { CSSProperties, PointerEvent, ReactNode } from 'react'
 import { GeneCatalogPage } from '../genes/GeneCatalogPage'
 import { GenomeContextRail } from '../genes/GenomeContextRail'
 import { TFNetworkMini } from '../genes/TFNetworkMini'
@@ -15,6 +15,9 @@ import {
   summarizeAAPathway,
   summarizeGeneDetail,
 } from '../../utils/assistantContext'
+import { WorkspaceHelp, WORKSPACE_HELP } from '../workspace/WorkspaceHelp'
+import { WorkspaceDisclosure } from '../workspace/WorkspaceDisclosure'
+import { useMediaQuery } from '../workspace/useMediaQuery'
 import type { AAPathway, GeneDetail } from '../../types'
 
 export function ExploreWorkspacePage() {
@@ -27,17 +30,32 @@ export function ExploreWorkspacePage() {
     setSelectedCategory,
     setSelectedCondition,
   } = useUrlWorkspaceState()
-  const { gene: selectedGeneDetail, loading: detailLoading } = useGeneDetail(selectedGene)
+  const {
+    gene: selectedGeneDetail,
+    loading: detailLoading,
+    error: detailError,
+    notFound,
+    retry,
+  } = useGeneDetail(selectedGene)
   const [aaPathways, setAAPathways] = useState<AAPathway[]>([])
-  const [catalogAssistantSnapshot, setCatalogAssistantSnapshot] = useState<Record<string, unknown> | null>(null)
-  const [leftPct, setLeftPct] = useState(57)
+  const [catalogAssistantSnapshot, setCatalogAssistantSnapshot] = useState<Record<
+    string,
+    unknown
+  > | null>(null)
+  const [leftPct, setLeftPct] = useState(55)
   const [isDragging, setIsDragging] = useState(false)
+  const narrow = useMediaQuery('(max-width: 1099px)')
+  const [activePane, setActivePane] = useState<'browse' | 'detail'>('browse')
+  const [bounds, setBounds] = useState({ min: 30, max: 75 })
   const dragging = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const inspectorRef = useRef<HTMLElement>(null)
   const assistantCapturedAt = useRef(new Date().toISOString()).current
 
   const workspacePageState = useMemo(() => {
-    const pathwayMatches = selectedGeneDetail ? pathwayMatchesForGene(selectedGeneDetail, aaPathways) : []
+    const pathwayMatches = selectedGeneDetail
+      ? pathwayMatchesForGene(selectedGeneDetail, aaPathways)
+      : []
     return {
       kind: 'workspace_gene_explorer',
       surface: 'workspace',
@@ -59,12 +77,14 @@ export function ExploreWorkspacePage() {
       pathway_context: {
         loaded_pathways: aaPathways.length,
         selected_gene_match_count: pathwayMatches.length,
-        selected_gene_matches: pathwayMatches.slice(0, ASSISTANT_PATHWAY_SAMPLE_LIMIT).map((match) => ({
-          role: match.role,
-          evidence: match.evidence.slice(0, 8),
-          evidence_truncated: match.evidence.length > 8,
-          pathway: summarizeAAPathway(match.pathway),
-        })),
+        selected_gene_matches: pathwayMatches
+          .slice(0, ASSISTANT_PATHWAY_SAMPLE_LIMIT)
+          .map((match) => ({
+            role: match.role,
+            evidence: match.evidence.slice(0, 8),
+            evidence_truncated: match.evidence.length > 8,
+            pathway: summarizeAAPathway(match.pathway),
+          })),
         selected_gene_matches_truncated: pathwayMatches.length > ASSISTANT_PATHWAY_SAMPLE_LIMIT,
       },
       embedded_gene_catalog: catalogAssistantSnapshot,
@@ -104,7 +124,8 @@ export function ExploreWorkspacePage() {
       selected_condition: selectedCondition,
       page_state: workspacePageState,
     },
-    suggestedPrompt: 'Help me inspect this selected gene. Summarize its model state IDs, pathway context, regulation, and which experiment or result views would be useful next.',
+    suggestedPrompt:
+      'Help me inspect this selected gene. Summarize its model state IDs, pathway context, regulation, and which experiment or result views would be useful next.',
   })
 
   useEffect(() => {
@@ -121,48 +142,104 @@ export function ExploreWorkspacePage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (selectedGene) setActivePane('detail')
+  }, [selectedGene])
+
+  useEffect(() => {
+    if (narrow && activePane === 'detail' && selectedGene) {
+      inspectorRef.current?.focus({ preventScroll: true })
+    }
+  }, [narrow, activePane, selectedGene])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const update = () => {
+      if (narrow) return
+      const width = container.clientWidth
+      if (!width) return
+      const min = (440 / width) * 100
+      const max = ((width - 372) / width) * 100
+      setBounds({ min, max })
+      setLeftPct((value) => Math.max(min, Math.min(max, value)))
+    }
+    const observer = new ResizeObserver(update)
+    observer.observe(container)
+    update()
+    return () => observer.disconnect()
+  }, [narrow])
+
+  const resize = (value: number) => setLeftPct(Math.max(bounds.min, Math.min(bounds.max, value)))
   const stopDragging = () => {
     dragging.current = false
     setIsDragging(false)
   }
-
-  const handleDividerMove = (event: MouseEvent<HTMLDivElement>) => {
+  const handleDividerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!dragging.current || !containerRef.current) return
     const rect = containerRef.current.getBoundingClientRect()
-    const pct = ((event.clientX - rect.left) / rect.width) * 100
-    setLeftPct(Math.min(75, Math.max(30, pct)))
+    resize(((event.clientX - rect.left) / rect.width) * 100)
   }
 
   return (
-    <div className="flex h-[calc(100vh-32px)] min-h-[720px] flex-col gap-3 overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-2 text-lg font-semibold text-gray-900">Explore</h1>
-        <ContextChip label="Gene" value={selectedGene} onClear={() => setSelectedGene(null)} mono />
-        <ContextChip label="Category" value={selectedCategory} onClear={() => setSelectedCategory(null)} />
-        <ContextChip label="Condition" value={selectedCondition} onClear={() => setSelectedCondition(null)} />
-      </div>
-
-      <div
-        ref={containerRef}
-        className={'flex min-h-0 flex-1 gap-0 overflow-hidden ' + (isDragging ? 'select-none cursor-col-resize' : '')}
-        onMouseMove={handleDividerMove}
-        onMouseUp={stopDragging}
-        onMouseLeave={stopDragging}
-      >
+    <div className="gene-workspace" data-pane={activePane}>
+      <header className="workspace-page-header">
+        <div>
+          <h1>Gene workspace</h1>
+          <p>Find a gene, inspect its biological context, then design an experiment.</p>
+        </div>
+        <Link to="/guide" className="workspace-guide-link">
+          Guide <span aria-hidden="true">↗</span>
+        </Link>
+      </header>
+      {(selectedCategory || selectedCondition) && (
+        <div className="workspace-context" aria-label="Workspace context">
+          <ContextChip
+            label="Category"
+            value={selectedCategory}
+            onClear={() => setSelectedCategory(null)}
+          />
+          <ContextChip
+            label="Experiment context"
+            value={selectedCondition}
+            onClear={() => setSelectedCondition(null)}
+          />
+        </div>
+      )}
+      {narrow && (
+        <div className="workspace-pane-switch" role="group" aria-label="Workspace views">
+          <button
+            type="button"
+            aria-pressed={activePane === 'browse'}
+            onClick={() => setActivePane('browse')}
+          >
+            Browse genes
+          </button>
+          <button
+            type="button"
+            aria-pressed={activePane === 'detail'}
+            onClick={() => setActivePane('detail')}
+          >
+            Selected gene{selectedGene && <span className="font-mono"> · {selectedGene}</span>}
+          </button>
+        </div>
+      )}
+      <div ref={containerRef} className="workspace-panels" data-dragging={isDragging}>
         <section
-          className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white"
-          style={{ width: leftPct + '%', flexShrink: 0 }}
+          aria-label="Gene catalog"
+          className="workspace-catalog-panel"
+          style={{ '--catalog-share': `${leftPct}%` } as CSSProperties}
+          {...(narrow && activePane !== 'browse' ? { inert: '' } : {})}
         >
-          <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">Genes</h2>
-              <p className="text-xs text-gray-400">Catalog, category filters, and selected gene search.</p>
-            </div>
-            <span className="text-xs text-gray-400">table</span>
+          <div className="workspace-catalog-heading">
+            <h2>Gene catalog</h2>
+            <span>E. coli K-12 MG1655</span>
           </div>
-          <div className="min-h-0 flex-1 p-3">
+          <div className="workspace-catalog-body">
             <GeneCatalogPage
               embedded
+              workspaceLayout
+              visible={!narrow || activePane === 'browse'}
               hideDetailPanel
               heightClass="h-full min-h-0"
               showEssentiality={false}
@@ -170,27 +247,61 @@ export function ExploreWorkspacePage() {
             />
           </div>
         </section>
-
-        <div
-          className="group relative z-10 mx-0 flex w-3 flex-shrink-0 cursor-col-resize items-center justify-center"
-          onMouseDown={(event) => {
-            event.preventDefault()
-            dragging.current = true
-            setIsDragging(true)
-          }}
-        >
-          <div className="h-12 w-1 rounded-full bg-gray-300 transition group-hover:bg-brand-400 group-active:bg-brand-500" />
-        </div>
-
+        {!narrow && (
+          <div
+            className="workspace-divider"
+            role="separator"
+            tabIndex={0}
+            aria-label="Resize gene catalog"
+            aria-orientation="vertical"
+            aria-valuemin={Math.ceil(bounds.min)}
+            aria-valuemax={Math.floor(bounds.max)}
+            aria-valuenow={Math.round(leftPct)}
+            aria-valuetext={`Gene catalog ${Math.round(leftPct)} percent`}
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.currentTarget.focus()
+              event.currentTarget.setPointerCapture(event.pointerId)
+              dragging.current = true
+              setIsDragging(true)
+            }}
+            onPointerMove={handleDividerMove}
+            onPointerUp={stopDragging}
+            onPointerCancel={stopDragging}
+            onLostPointerCapture={stopDragging}
+            onDoubleClick={() => resize(55)}
+            onKeyDown={(event) => {
+              if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault()
+                resize(
+                  event.key === 'Home'
+                    ? bounds.min
+                    : event.key === 'End'
+                      ? bounds.max
+                      : leftPct + (event.key === 'ArrowRight' ? 2 : -2),
+                )
+              }
+            }}
+          >
+            <span aria-hidden="true" />
+          </div>
+        )}
         <section
-          className="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white"
-          style={{ flex: 1, minWidth: 0 }}
+          ref={inspectorRef}
+          tabIndex={-1}
+          aria-label="Selected gene inspector"
+          className="workspace-inspector-panel"
+          {...(narrow && activePane !== 'detail' ? { inert: '' } : {})}
         >
           <SelectedGeneSummary
             gene={selectedGeneDetail}
             aaPathways={aaPathways}
             loading={detailLoading}
+            error={detailError}
+            notFound={notFound}
+            onRetry={retry}
             selectedGene={selectedGene}
+            onClear={() => setSelectedGene(null)}
             onSelectGene={(symbol) => setSelectedGene(symbol, { replace: false })}
           />
         </section>
@@ -203,115 +314,226 @@ function SelectedGeneSummary({
   gene,
   aaPathways,
   loading,
+  error,
+  notFound,
+  onRetry,
   selectedGene,
   onSelectGene,
+  onClear,
 }: {
   gene: GeneDetail | null
   aaPathways: AAPathway[]
   loading: boolean
+  error: string | null
+  notFound: boolean
+  onRetry: () => void
   selectedGene: string | null
   onSelectGene: (symbol: string) => void
+  onClear: () => void
 }) {
-  if (loading && selectedGene) {
+  const [sections, setSections] = useState({
+    state: false,
+    pathways: false,
+    genome: true,
+    regulation: false,
+  })
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' })
+  }, [selectedGene])
+  const toggle = (key: keyof typeof sections) =>
+    setSections((current) => ({ ...current, [key]: !current[key] }))
+
+  if (loading && selectedGene)
     return (
-      <div className="flex h-full items-center justify-center text-sm text-gray-400">
-        Loading selected gene...
+      <div className="workspace-empty" role="status">
+        <span className="workspace-state-eyebrow">Selected gene</span>
+        <h2 className="font-mono">{selectedGene}</h2>
+        <p>Loading gene details…</p>
+        <div className="workspace-loading-placeholder" aria-hidden="true" />
       </div>
     )
-  }
-
-  if (!gene) {
+  if (error)
     return (
-      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
-        Select a gene from the table or genome map to inspect its products, regulation, and experiment actions.
+      <div className="workspace-empty" role="alert">
+        <span className="workspace-state-eyebrow">Request failed</span>
+        <h2>Unable to load {selectedGene}</h2>
+        <p>{error} Your catalog and filters are still available.</p>
+        <button type="button" className="workspace-primary-button" onClick={onRetry}>
+          Retry gene details
+        </button>
       </div>
     )
-  }
+  if (notFound)
+    return (
+      <div className="workspace-empty">
+        <span className="workspace-state-eyebrow">Gene unavailable</span>
+        <h2>No gene found for {selectedGene}</h2>
+        <p>Check the symbol or identifier, or return to the catalog to choose a gene.</p>
+        <button type="button" className="workspace-secondary-button" onClick={onClear}>
+          Clear gene selection
+        </button>
+      </div>
+    )
+  if (!gene)
+    return (
+      <div className="workspace-empty">
+        <span className="workspace-state-eyebrow">Start exploring</span>
+        <h2>Every gene has a context.</h2>
+        <p>
+          Select a gene to inspect its products, model identifiers, neighboring genes, and
+          regulation.
+        </p>
+        <button
+          type="button"
+          className="workspace-primary-button"
+          onClick={() => onSelectGene('dnaA')}
+        >
+          Inspect dnaA <span aria-hidden="true">→</span>
+        </button>
+        <Link to="/guide" className="workspace-guide-link">
+          Learn how the model works
+        </Link>
+      </div>
+    )
 
-  const length = gene.left_end_pos && gene.right_end_pos
-    ? Math.abs(gene.right_end_pos - gene.left_end_pos) + 1
-    : null
+  const length =
+    gene.left_end_pos != null && gene.right_end_pos != null
+      ? Math.abs(gene.right_end_pos - gene.left_end_pos) + 1
+      : null
+  const matches = pathwayMatchesForGene(gene, aaPathways)
+  const stateCount =
+    parseJsonList(gene.rna_ids).length +
+    Number(Boolean(gene.monomer_id)) +
+    parseJsonList(gene.complex_ids).length +
+    pathwayMetaboliteIds(gene, aaPathways).length
+  const regulationCount = gene.regulated_by.length + gene.regulates.length
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between border-b border-gray-100 px-4 py-3">
-        <div>
-          <h2 className="font-mono text-lg font-semibold text-gray-900">{gene.symbol}</h2>
-          <p className="text-xs text-gray-400">{gene.ecoli_id}</p>
+    <div className="workspace-inspector">
+      <header className="workspace-inspector-header">
+        <div className="workspace-gene-title">
+          <span className="workspace-state-eyebrow">Selected gene</span>
+          <h2 className="font-mono">{gene.symbol}</h2>
+          <span className="font-mono workspace-gene-id">{gene.ecoli_id}</span>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
+        {gene.monomer_name && <p className="workspace-product-description">{gene.monomer_name}</p>}
+        <div className="workspace-inspector-actions">
+          <Link
+            to={'/experiments/new?variant=gene_knockout&gene=' + encodeURIComponent(gene.symbol)}
+            className="workspace-primary-button"
+          >
+            Design knockout
+          </Link>
           <Link
             to={'/genome?gene=' + encodeURIComponent(gene.symbol)}
-            className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            className="workspace-secondary-button"
           >
             Genome Map
           </Link>
-          <Link
-            to={'/experiments/new?variant=gene_knockout&gene=' + encodeURIComponent(gene.symbol)}
-            className="rounded-md bg-bio-gene px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90"
+        </div>
+      </header>
+      <div ref={scrollRef} className="workspace-inspector-scroll">
+        <div className="workspace-inspector-content" key={gene.symbol}>
+          <section className="workspace-overview" aria-label="Gene overview">
+            <h3>Overview</h3>
+            <div className="workspace-facts">
+              <Fact label="Category">
+                <CategoryBadge label={gene.category} />
+              </Fact>
+              <Fact
+                label="Knockout index"
+                help={
+                  <WorkspaceHelp label="Knockout index">{WORKSPACE_HELP.knockout}</WorkspaceHelp>
+                }
+              >
+                <span className="font-mono">
+                  {gene.ko_index != null && gene.ko_index >= 0 ? gene.ko_index : '—'}
+                </span>
+              </Fact>
+              <Fact label="Strand">
+                <DirectionBadge direction={gene.direction} />
+                {!gene.direction && '—'}
+              </Fact>
+              <Fact label="Length">{length != null ? `${length.toLocaleString()} bp` : '—'}</Fact>
+              <Fact label="Position">
+                <span className="font-mono">
+                  {gene.left_end_pos != null && gene.right_end_pos != null
+                    ? `${gene.left_end_pos.toLocaleString()}–${gene.right_end_pos.toLocaleString()} bp`
+                    : '—'}
+                </span>
+              </Fact>
+            </div>
+          </section>
+          <WorkspaceDisclosure
+            title="Model state IDs"
+            summary={`${stateCount} identifier${stateCount === 1 ? '' : 's'}`}
+            open={sections.state}
+            onToggle={() => toggle('state')}
+            help={<WorkspaceHelp label="Model state IDs">{WORKSPACE_HELP.state}</WorkspaceHelp>}
           >
-            Design KO
-          </Link>
+            {stateCount ? (
+              <ModelStateSection gene={gene} pathways={aaPathways} />
+            ) : (
+              <p className="workspace-section-empty">
+                No model state identifiers are available for this gene.
+              </p>
+            )}
+          </WorkspaceDisclosure>
+          <WorkspaceDisclosure
+            title="Pathways"
+            summary={`${matches.length} match${matches.length === 1 ? '' : 'es'}`}
+            open={sections.pathways}
+            onToggle={() => toggle('pathways')}
+          >
+            {matches.length ? (
+              <PathwayContext gene={gene} pathways={aaPathways} />
+            ) : (
+              <p className="workspace-section-empty">
+                No matching amino acid pathways were found in the loaded annotations.
+              </p>
+            )}
+          </WorkspaceDisclosure>
+          <WorkspaceDisclosure
+            title="Genomic context"
+            summary="Nearby genes · ±5,000 bp"
+            open={sections.genome}
+            onToggle={() => toggle('genome')}
+          >
+            {gene.left_end_pos != null ? (
+              <GenomeContextRail symbol={gene.symbol} window={5000} onSelectGene={onSelectGene} />
+            ) : (
+              <p className="workspace-section-empty">
+                Genomic coordinates are unavailable for this gene.
+              </p>
+            )}
+          </WorkspaceDisclosure>
+          <WorkspaceDisclosure
+            title="Regulation"
+            summary={`${gene.regulated_by.length} regulator${gene.regulated_by.length === 1 ? '' : 's'} · ${gene.regulates.length} target${gene.regulates.length === 1 ? '' : 's'}`}
+            open={sections.regulation}
+            onToggle={() => toggle('regulation')}
+          >
+            {regulationCount ? (
+              <TFNetworkMini
+                symbol={gene.symbol}
+                focalCategory={gene.category}
+                regulatedBy={gene.regulated_by.flatMap((edge) =>
+                  edge.tf ? [{ symbol: edge.tf, log2fc: edge.log2fc, type: edge.type }] : [],
+                )}
+                regulates={gene.regulates.flatMap((edge) =>
+                  edge.target
+                    ? [{ symbol: edge.target, log2fc: edge.log2fc, type: edge.type }]
+                    : [],
+                )}
+                onSelectGene={onSelectGene}
+              />
+            ) : (
+              <p className="workspace-section-empty">
+                No regulatory relationships are recorded for this gene.
+              </p>
+            )}
+          </WorkspaceDisclosure>
         </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-          <Fact label="Category">
-            <CategoryBadge label={gene.category} />
-          </Fact>
-          <Fact label="KO index">
-            <span className="font-mono text-gray-700">
-              {gene.ko_index != null && gene.ko_index >= 0 ? gene.ko_index : '—'}
-            </span>
-          </Fact>
-          {gene.direction && (
-            <Fact label="Strand">
-              <DirectionBadge direction={gene.direction} />
-            </Fact>
-          )}
-          {length && (
-            <Fact label="Length">
-              <span>{length.toLocaleString()} bp</span>
-            </Fact>
-          )}
-          {gene.left_end_pos && gene.right_end_pos && (
-            <Fact label="Position">
-              <span className="font-mono text-[11px] text-gray-600">
-                {gene.left_end_pos.toLocaleString()}-{gene.right_end_pos.toLocaleString()}
-              </span>
-            </Fact>
-          )}
-        </div>
-
-        <ModelStateSection gene={gene} pathways={aaPathways} />
-
-        <PathwayContext gene={gene} pathways={aaPathways} />
-
-        {gene.left_end_pos != null && (
-          <div className="mt-2">
-            <GenomeContextRail
-              symbol={gene.symbol}
-              window={5000}
-              onSelectGene={onSelectGene}
-            />
-          </div>
-        )}
-
-        {(gene.regulated_by.length > 0 || gene.regulates.length > 0) && (
-          <div className="mt-3">
-            <TFNetworkMini
-              symbol={gene.symbol}
-              focalCategory={gene.category}
-              regulatedBy={gene.regulated_by.flatMap((edge) =>
-                edge.tf ? [{ symbol: edge.tf, log2fc: edge.log2fc, type: edge.type }] : []
-              )}
-              regulates={gene.regulates.flatMap((edge) =>
-                edge.target ? [{ symbol: edge.target, log2fc: edge.log2fc, type: edge.type }] : []
-              )}
-              onSelectGene={onSelectGene}
-            />
-          </div>
-        )}
       </div>
     </div>
   )
@@ -331,16 +553,23 @@ function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPath
   return (
     <section className="mt-3 rounded-lg border border-amber-100 bg-amber-50/50 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-900">Pathway context</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-900">
+          Pathway context
+        </h3>
         <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-amber-700">
           {matches.length} match{matches.length === 1 ? '' : 'es'}
         </span>
       </div>
       <div className="grid gap-2">
         {matches.slice(0, 4).map(({ pathway, role, evidence }) => (
-          <div key={pathway.amino_acid + role} className="rounded-md border border-amber-100 bg-white px-2.5 py-2">
+          <div
+            key={pathway.amino_acid + role}
+            className="rounded-md border border-amber-100 bg-white px-2.5 py-2"
+          >
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-sm font-semibold text-gray-900">{pathway.amino_acid}</span>
+              <span className="font-mono text-sm font-semibold text-gray-900">
+                {pathway.amino_acid}
+              </span>
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
                 {role}
               </span>
@@ -348,7 +577,10 @@ function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPath
             {evidence.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-1">
                 {evidence.slice(0, 3).map((item) => (
-                  <span key={item} className="rounded-full border border-amber-100 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                  <span
+                    key={item}
+                    className="rounded-full border border-amber-100 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                  >
                     {item}
                   </span>
                 ))}
@@ -356,14 +588,19 @@ function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPath
             )}
             <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-500">
               <span>
-                kcat <span className="font-mono text-gray-700">{formatKineticValue(pathway.kcat, 's^-1')}</span>
+                kcat{' '}
+                <span className="font-mono text-gray-700">
+                  {formatKineticValue(pathway.kcat, 's^-1')}
+                </span>
               </span>
               <span>
                 Ki <span className="font-mono text-gray-700">{formatKiRange(pathway)}</span>
               </span>
             </div>
             {pathway.notes && (
-              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{pathway.notes}</p>
+              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">
+                {pathway.notes}
+              </p>
             )}
           </div>
         ))}
@@ -372,24 +609,27 @@ function PathwayContext({ gene, pathways }: { gene: GeneDetail; pathways: AAPath
   )
 }
 
-function ModelStateSection({ gene, pathways }: { gene: GeneDetail; pathways: AAPathway[] }) {
-  const rnaIds = parseJsonList(gene.rna_ids)
-  const complexIds = parseJsonList(gene.complex_ids)
-  const pathwayMetabolites = useMemo(() => {
-    const values = pathwayMatchesForGene(gene, pathways).flatMap(({ pathway }) => [
+function pathwayMetaboliteIds(gene: GeneDetail, pathways: AAPathway[]) {
+  return uniqueList(
+    pathwayMatchesForGene(gene, pathways).flatMap(({ pathway }) => [
       pathway.amino_acid,
       ...parseObjectKeys(pathway.upstream_aas),
       ...parseObjectKeys(pathway.downstream_aas),
-    ])
-    return uniqueList(values).slice(0, 8)
-  }, [gene, pathways])
+    ]),
+  ).slice(0, 8)
+}
 
-  const hasAny = rnaIds.length > 0 || gene.monomer_id || complexIds.length > 0 || pathwayMetabolites.length > 0
+function ModelStateSection({ gene, pathways }: { gene: GeneDetail; pathways: AAPathway[] }) {
+  const rnaIds = parseJsonList(gene.rna_ids)
+  const complexIds = parseJsonList(gene.complex_ids)
+  const pathwayMetabolites = pathwayMetaboliteIds(gene, pathways)
+
+  const hasAny =
+    rnaIds.length > 0 || gene.monomer_id || complexIds.length > 0 || pathwayMetabolites.length > 0
   if (!hasAny) return null
 
   return (
     <section className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Model state IDs</h3>
       <div className="grid gap-2 text-xs">
         {rnaIds.length > 0 && <StateIdRow label="mRNA" ids={rnaIds} tone="blue" />}
         {gene.monomer_id && (
@@ -449,23 +689,38 @@ function pathwayMatchesForGene(gene: GeneDetail, pathways: AAPathway[]): Pathway
   if (identifiers.size === 0) return []
 
   return pathways.flatMap((pathway): PathwayMatch[] => {
-    const forwardHits = parseList(pathway.enzymes).filter((enzyme) => identifiers.has(normalizeId(enzyme)))
-    const reverseHits = parseList(pathway.reverse_enzymes).filter((enzyme) => identifiers.has(normalizeId(enzyme)))
-    const annotatedHits = parseAnnotatedGenes(pathway.notes).filter((symbol) => normalizeId(symbol) === normalizeId(gene.symbol))
+    const forwardHits = parseList(pathway.enzymes).filter((enzyme) =>
+      identifiers.has(normalizeId(enzyme)),
+    )
+    const reverseHits = parseList(pathway.reverse_enzymes).filter((enzyme) =>
+      identifiers.has(normalizeId(enzyme)),
+    )
+    const annotatedHits = parseAnnotatedGenes(pathway.notes).filter(
+      (symbol) => normalizeId(symbol) === normalizeId(gene.symbol),
+    )
     const forward = forwardHits.length > 0
     const reverse = reverseHits.length > 0
     const annotated = annotatedHits.length > 0
 
     if (!forward && !reverse && !annotated) return []
-    return [{
-      pathway,
-      role: forward && reverse ? 'Forward/reverse' : forward ? 'Forward' : reverse ? 'Reverse' : 'Annotated',
-      evidence: [
-        ...forwardHits.map((enzyme) => `enzyme: ${enzyme}`),
-        ...reverseHits.map((enzyme) => `reverse: ${enzyme}`),
-        ...annotatedHits.map((symbol) => `note: ${symbol}`),
-      ],
-    }]
+    return [
+      {
+        pathway,
+        role:
+          forward && reverse
+            ? 'Forward/reverse'
+            : forward
+              ? 'Forward'
+              : reverse
+                ? 'Reverse'
+                : 'Annotated',
+        evidence: [
+          ...forwardHits.map((enzyme) => `enzyme: ${enzyme}`),
+          ...reverseHits.map((enzyme) => `reverse: ${enzyme}`),
+          ...annotatedHits.map((symbol) => `note: ${symbol}`),
+        ],
+      },
+    ]
   })
 }
 
@@ -498,7 +753,9 @@ function parseList(value: string): string[] {
     .replace(/[\[\]"']/g, '')
     .split(/[,;]/)
     .map((item) => item.trim())
-    .filter((item) => item.length > 0 && !['none', 'nan', 'null', '{}'].includes(item.toLowerCase()))
+    .filter(
+      (item) => item.length > 0 && !['none', 'nan', 'null', '{}'].includes(item.toLowerCase()),
+    )
 }
 
 function parseObjectKeys(value: string): string[] {
@@ -515,7 +772,9 @@ function parseObjectKeys(value: string): string[] {
 }
 
 function uniqueList(values: string[]): string[] {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b),
+  )
 }
 
 function parseAnnotatedGenes(notes: string): string[] {
@@ -523,7 +782,7 @@ function parseAnnotatedGenes(notes: string): string[] {
     match[1]
       .split(/[,;]/)
       .map((item) => item.trim())
-      .filter(Boolean)
+      .filter(Boolean),
   )
 }
 
@@ -546,29 +805,21 @@ function ContextChip({
   label,
   value,
   onClear,
-  mono = false,
 }: {
   label: string
   value: string | null
   onClear: () => void
-  mono?: boolean
 }) {
-  if (!value) {
-    return (
-      <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-400">
-        {label}: none
-      </span>
-    )
-  }
+  if (!value) return null
 
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs text-brand-700">
-      <span className="text-brand-500">{label}:</span>
-      <span className={mono ? 'font-mono font-medium' : 'font-medium'}>{value}</span>
+      <span className="text-brand-700">{label}:</span>
+      <span className="font-medium">{value}</span>
       <button
         type="button"
         onClick={onClear}
-        className="ml-0.5 rounded-full px-1 text-brand-500 hover:bg-brand-100 hover:text-brand-800"
+        className="ml-0.5 rounded-full px-1 text-brand-700 hover:bg-brand-100 hover:text-brand-800"
         aria-label={'Clear ' + label.toLowerCase() + ' context'}
       >
         x
@@ -577,10 +828,13 @@ function ContextChip({
   )
 }
 
-function Fact({ label, children }: { label: string; children: ReactNode }) {
+function Fact({ label, children, help }: { label: string; children: ReactNode; help?: ReactNode }) {
   return (
     <div>
-      <p className="mb-0.5 text-xs uppercase tracking-wide text-gray-400">{label}</p>
+      <div className="workspace-fact-label">
+        {label}
+        {help}
+      </div>
       {children}
     </div>
   )

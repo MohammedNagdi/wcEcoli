@@ -272,7 +272,7 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
             <svg
               width={trackWidth}
               height={SVG_HEIGHT}
-              role="img"
+              role="group"
               aria-label={'Genomic context around ' + symbol}
               style={{ minWidth: '200px' }}
             >

@@ -50,7 +50,7 @@ test('introduction links lead to working tools and the existing shell', async ({
   )
   await main.getByRole('link', { name: 'Open workspace', exact: true }).first().click()
   await expect(page).toHaveURL(/\/explore$/)
-  await expect(page.getByRole('heading', { name: 'Explore', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Gene workspace', exact: true })).toBeVisible()
   await expect(page.locator('aside')).toBeVisible()
   await expect(page.getByTestId('assistant-dock-toggle')).toBeVisible()
   await page.locator('aside').getByRole('link', { name: 'Home', exact: true }).click()
@@ -67,7 +67,7 @@ for (const query of [
   test(`preserves the legacy workspace link ${query}`, async ({ page }) => {
     await page.goto(`/?${query}&source=bookmark#selected`)
     await expect(page).toHaveURL(`/explore?${query}&source=bookmark#selected`)
-    await expect(page.getByRole('heading', { name: 'Explore', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Gene workspace', exact: true })).toBeVisible()
   })
 }
 
@@ -137,6 +137,7 @@ for (const mode of ['light', 'dark'] as const) {
       'src',
       `/previews/workspace${mode === 'dark' ? '-dark' : ''}.webp`,
     )
+    await page.locator('.home-hero-copy').evaluate(async (element) => { await Promise.all(element.getAnimations().map((animation) => animation.finished)) })
     const results = await new AxeBuilder({ page }).analyze()
     expect(
       results.violations.filter(
@@ -192,11 +193,11 @@ test('header remains usable at 200% zoom', async ({ page }) => {
 
 test('command search keeps gene selection on the working workspace route', async ({ page }) => {
   await page.goto('/explore')
-  await expect(page.getByRole('heading', { name: 'Explore', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Gene workspace', exact: true })).toBeVisible()
   await page.keyboard.press('Control+k')
   await page.getByPlaceholder('Search genes, proteins, or IDs...').fill('dnaA')
   await page.getByRole('button', { name: /dnaA.*enter/ }).click()
   await expect(page).toHaveURL(/\/explore\?gene=dnaA$/)
-  await expect(page.getByRole('heading', { name: 'Explore', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Gene workspace', exact: true })).toBeVisible()
   await expect(page.getByPlaceholder('Search genes, proteins, or IDs...')).toHaveCount(0)
 })

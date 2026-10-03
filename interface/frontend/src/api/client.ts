@@ -28,10 +28,17 @@ import type {
 
 const BASE = '/api'
 
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${await res.text()}`)
+    throw new ApiError(res.status, `API error ${res.status}: ${await res.text()}`)
   }
   return res.json()
 }
@@ -73,8 +80,8 @@ export async function searchGenes(q: string, limit = 20): Promise<Gene[]> {
   return fetchJSON(`/genes/search?q=${encodeURIComponent(q)}&limit=${limit}`)
 }
 
-export async function getGene(symbol: string): Promise<GeneDetail> {
-  return fetchJSON(`/genes/${encodeURIComponent(symbol)}`)
+export async function getGene(symbol: string, signal?: AbortSignal): Promise<GeneDetail> {
+  return fetchJSON(`/genes/${encodeURIComponent(symbol)}`, { signal })
 }
 
 export async function getCategories(): Promise<CategoryCount[]> {
