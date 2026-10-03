@@ -670,7 +670,7 @@ test.describe('Assistant smoke', () => {
     await page.keyboard.press('Escape')
 
     await page.goto('/network?gene=crp&mode=regulon')
-    await expect(page.getByText('Static reconstruction network.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Help: Network', exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Regulon' }).click()
     await page.getByTestId('assistant-dock-toggle').click()
     requestPromise = page.waitForRequest('**/api/assistant/conversations/*/messages/stream')

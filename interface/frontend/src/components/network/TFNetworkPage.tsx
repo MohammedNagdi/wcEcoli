@@ -1,25 +1,16 @@
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
-import CytoscapeComponent from 'react-cytoscapejs'
-import type { Core, EventObject, ElementDefinition } from 'cytoscape'
-import { getTFNetwork } from '../../api/client'
+import { NetworkCanvas } from './NetworkCanvas'
+import { arrangeNetwork, loadNetwork, type NetworkPositions } from './networkLayout'
+import type { Core, ElementDefinition } from 'cytoscape'
 import type { TFNetwork } from '../../types'
 import { SearchInput } from '../common/SearchInput'
+import { WorkspaceHelp } from '../workspace/WorkspaceHelp'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { type RegulationEffect, regulationEffect } from '../../utils/regulation'
 import { ASSISTANT_EDGE_SAMPLE_LIMIT, makeAssistantContextKey, truncateText } from '../../utils/assistantContext'
 import { useTheme } from '../theme/ThemeProvider'
-
-const FULL_LAYOUT = {
-  name: 'cose',
-  animate: false,
-  nodeDimensionsIncludeLabels: true,
-  nodeRepulsion: () => 8000,
-  idealEdgeLength: () => 80,
-  gravity: 0.3,
-  numIter: 300,
-}
 
 const SELECTED_GENE_MIN_ZOOM = 1.1
 const SELECTED_GENE_MAX_ZOOM = 1.65
@@ -253,10 +244,19 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [positions, setPositions] = useState<NetworkPositions | null>(null)
+  const [layoutError, setLayoutError] = useState<string | null>(null)
+  const [retryRequest, setRetryRequest] = useState(0)
+  const [retryLayout, setRetryLayout] = useState(0)
+  const [resetRequest, setResetRequest] = useState(0)
+  const [cameraChanged, setCameraChanged] = useState(false)
+  const [canvasRevision, setCanvasRevision] = useState(0)
+  const focusFrames = useRef<number[]>([])
   const [edgeFilter, setEdgeFilter] = useState<'all' | 'activation' | 'repression'>('all')
   const [minTargets, setMinTargets] = useState(1)
   const [networkMode, setNetworkMode] = useState<NetworkViewMode>(initialMode)
   const cyRef = useRef<Core | null>(null)
+  const canvasContainer = useRef<HTMLDivElement>(null)
   const layoutReadyRef = useRef(false)
   const assistantCapturedAt = useRef(new Date().toISOString()).current
   const viewportHeightClass = embedded
@@ -265,10 +265,25 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
   const cytoscapeStylesheet = useMemo(() => networkStylesheet(resolvedTheme === 'dark'), [resolvedTheme])
 
   useEffect(() => {
-    getTFNetwork()
-      .then(setNetwork)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
+    let active = true
+    setLoading(true)
+    setError(null)
+    loadNetwork()
+      .then((data) => {
+        if (active) setNetwork(data)
+      })
+      .catch((e) => {
+        if (active) setError(e.message)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => { active = false }
+  }, [retryRequest])
+
+  useEffect(() => () => {
+    focusFrames.current.forEach(cancelAnimationFrame)
+    cyRef.current = null
   }, [])
 
   useEffect(() => {
@@ -308,14 +323,14 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
       )
     }
     if (node.length === 0) return
-    cy.stop(false, true)
+    cy.stop()
     cy.animate(
       {
         center: { eles: node },
         zoom: selectedGeneZoom(cy.zoom(), cy.maxZoom()),
       },
       {
-        duration: SELECTED_GENE_ANIMATION_MS,
+        duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : SELECTED_GENE_ANIMATION_MS,
         easing: 'ease-in-out-cubic',
       }
     )
@@ -325,29 +340,31 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
     const cy = cyRef.current
     if (!cy || !layoutReadyRef.current) return
 
-    cy.elements().removeClass('node-hidden edge-hidden')
+    cy.batch(() => {
+      cy.elements().removeClass('node-hidden edge-hidden')
 
-    cy.edges().forEach((edge) => {
-      const source = edge.source()
-      const sourceTargetCount = source.data('targetCount') as number
-      const sourceIsSmallHub = networkMode === 'full' && sourceTargetCount > 0 && sourceTargetCount < minTargets
-      const hiddenByType = edgeFilter !== 'all' && edge.data('edgeType') !== edgeFilter
-      if (sourceIsSmallHub || hiddenByType) edge.addClass('edge-hidden')
-    })
-
-    cy.nodes().forEach((node) => {
-      const targetCount = node.data('targetCount') as number
-      const isSelectedNode = selectedGene != null && (node.data('label') as string).toLowerCase() === selectedGene.toLowerCase()
-      if (networkMode === 'full' && targetCount > 0 && targetCount < minTargets) {
-        node.addClass('node-hidden')
-        return
-      }
-      let hasVisibleEdge = false
-      node.connectedEdges().forEach((edge) => {
-        if (!edge.hasClass('edge-hidden')) hasVisibleEdge = true
+      cy.edges().forEach((edge) => {
+        const source = edge.source()
+        const sourceTargetCount = source.data('targetCount') as number
+        const sourceIsSmallHub = networkMode === 'full' && sourceTargetCount > 0 && sourceTargetCount < minTargets
+        const hiddenByType = edgeFilter !== 'all' && edge.data('edgeType') !== edgeFilter
+        if (sourceIsSmallHub || hiddenByType) edge.addClass('edge-hidden')
       })
-      if (networkMode !== 'full' && isSelectedNode) return
-      if (!hasVisibleEdge) node.addClass('node-hidden')
+
+      cy.nodes().forEach((node) => {
+        const targetCount = node.data('targetCount') as number
+        const isSelectedNode = selectedGene != null && (node.data('label') as string).toLowerCase() === selectedGene.toLowerCase()
+        if (networkMode === 'full' && targetCount > 0 && targetCount < minTargets) {
+          node.addClass('node-hidden')
+          return
+        }
+        let hasVisibleEdge = false
+        node.connectedEdges().forEach((edge) => {
+          if (!edge.hasClass('edge-hidden')) hasVisibleEdge = true
+        })
+        if (networkMode !== 'full' && isSelectedNode) return
+        if (!hasVisibleEdge) node.addClass('node-hidden')
+      })
     })
   }, [edgeFilter, minTargets, networkMode, selectedGene])
 
@@ -527,22 +544,24 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
       })
   }, [elements, networkMode, selectedGene, selectedInspector])
 
-  const graphLayout = useMemo(() => {
-    if (networkMode === 'full') return FULL_LAYOUT
-    return {
-      name: 'concentric',
-      animate: true,
-      animationDuration: 450,
-      animationEasing: 'ease-in-out-cubic',
-      fit: true,
-      padding: 70,
-      minNodeSpacing: 34,
-      avoidOverlap: true,
-      nodeDimensionsIncludeLabels: true,
-      concentric: (node: { data: (key: string) => unknown }) => node.data('focusLayer') as number,
-      levelWidth: () => 1,
-    }
-  }, [networkMode])
+  useEffect(() => {
+    if (!network) return
+    let active = true
+    setPositions(null)
+    setLayoutError(null)
+    layoutReadyRef.current = false
+    arrangeNetwork(elements, {
+      width: canvasContainer.current?.clientWidth ?? 1,
+      height: canvasContainer.current?.clientHeight ?? 1,
+    })
+      .then((result) => {
+        if (active) setPositions(result)
+      })
+      .catch((error) => {
+        if (active) setLayoutError(error.message)
+      })
+    return () => { active = false }
+  }, [elements, network, retryLayout])
 
   const graphKey = networkMode === 'full'
     ? 'full'
@@ -619,8 +638,8 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
         min_targets: minTargets,
         search_query: searchQuery,
       },
-      loading,
-      error: truncateText(error),
+      loading: loading || (!positions && !layoutError && !error),
+      error: truncateText(error ?? layoutError),
       totals: {
         tfs: network?.tfs.length ?? 0,
         total_edges: network?.total_edges ?? 0,
@@ -647,6 +666,8 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
     error,
     graphStats,
     inspectorBySymbol,
+    positions,
+    layoutError,
     loading,
     location.pathname,
     location.search,
@@ -662,6 +683,8 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
     enabled: !embedded,
     contextKey: makeAssistantContextKey([
       'tf_network',
+      Boolean(positions),
+      layoutError,
       location.pathname,
       location.search,
       selectedGene,
@@ -690,15 +713,12 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
   useEffect(() => {
     if (!layoutReadyRef.current) return
     if (networkMode !== 'full') return
-    const firstFrame = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => centerSelectedGene(selectedGene))
-    })
-    return () => window.cancelAnimationFrame(firstFrame)
-  }, [centerSelectedGene, networkMode, selectedGene, graphElements.length])
-
-  useEffect(() => {
-    applyGraphVisibility()
-  }, [applyGraphVisibility])
+    if (!selectedGene) return
+    focusFrames.current = [window.requestAnimationFrame(() => {
+      focusFrames.current.push(window.requestAnimationFrame(() => centerSelectedGene(selectedGene)))
+    })]
+    return () => focusFrames.current.forEach(cancelAnimationFrame)
+  }, [centerSelectedGene, networkMode, selectedGene, graphElements.length, canvasRevision])
 
   // Handle search / highlight
   useEffect(() => {
@@ -716,60 +736,37 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
     matched.removeClass('dimmed').addClass('highlighted')
     matched.connectedEdges().removeClass('dimmed')
     matched.connectedEdges().connectedNodes().removeClass('dimmed')
-  }, [searchQuery, graphElements.length])
+  }, [searchQuery, graphElements.length, canvasRevision])
 
   useEffect(() => {
     applyGraphVisibility()
-  }, [applyGraphVisibility, graphElements.length])
+  }, [applyGraphVisibility, graphElements.length, canvasRevision])
 
-  // Handle node click — show TF details
-  const handleCyInit = (cy: Core) => {
+  const handleCyReady = (cy: Core) => {
     cyRef.current = cy
-    layoutReadyRef.current = false
-    let layoutReadyFallback = 0
-    const markLayoutReady = () => {
-      if (layoutReadyRef.current) return
-      layoutReadyRef.current = true
-      if (layoutReadyFallback) window.clearTimeout(layoutReadyFallback)
-      applyGraphVisibility()
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          if (networkMode === 'full') centerSelectedGene(selectedGene)
-        })
-      })
-    }
-    cy.on('tap', 'node', (evt: EventObject) => {
-      const symbol = evt.target.data('label') as string
-      setSelectedGene(symbol)
-    })
-    cy.on('tap', (evt: EventObject) => {
-      if (evt.target === cy) setSelectedGene(null)
-    })
-    cy.one('layoutstop', markLayoutReady)
-    layoutReadyFallback = window.setTimeout(markLayoutReady, 500)
+    layoutReadyRef.current = true
+    setCanvasRevision((revision) => revision + 1)
   }
 
-  if (loading) {
-    return (
-      <div className={`flex items-center justify-center ${viewportHeightClass}`}>
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-gray-400">Loading TF regulatory network...</p>
-        </div>
-      </div>
-    )
+  const resetNetwork = () => {
+    focusFrames.current.forEach(cancelAnimationFrame)
+    cyRef.current?.stop()
+    setSearchQuery('')
+    setSelectedGene(null, { syncUrl: false })
+    setNetworkMode('full')
+    setEdgeFilter('all')
+    setMinTargets(1)
+    const next = new URLSearchParams(searchParams)
+    next.delete('gene')
+    next.delete('mode')
+    setSearchParams(next, { replace: true })
+    setResetRequest((request) => request + 1)
   }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm m-6">
-        Failed to load network: {error}
-      </div>
-    )
-  }
+  const canReset = Boolean(searchQuery || selectedGene || networkMode !== 'full' ||
+    edgeFilter !== 'all' || minTargets !== 1 || cameraChanged)
 
   return (
-    <div className={`flex gap-6 ${viewportHeightClass}`}>
+    <div className={`network-page flex gap-6 ${viewportHeightClass}`}>
       {/* Network canvas */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -795,9 +792,21 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
           <SearchInput
             value={searchQuery}
             onChange={setSearchQuery}
+            label="Highlight TF or gene"
             placeholder="Highlight TF or gene..."
-            className="w-64 flex-shrink-0"
+            className="w-64 max-w-full flex-shrink-0"
           />
+          <button
+            type="button"
+            onClick={resetNetwork}
+            disabled={!canReset}
+            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Reset network
+          </button>
+          <WorkspaceHelp label="Network">
+            {'This is a static regulatory catalog. It shows known regulatory relationships and does not show changes over simulation time. Source: reconstruction fold-change table, reconstruction/ecoli/flat/fold_changes.tsv.'}
+          </WorkspaceHelp>
           {selectedGene && (
             <button
               type="button"
@@ -823,7 +832,7 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
                   type="button"
                 >
                   {opt === 'all' ? 'All' : opt.charAt(0).toUpperCase() + opt.slice(1)}
-                  <span className="ml-1 text-[10px] opacity-60">({count})</span>
+                  <span className="ml-1 text-[10px]">({count})</span>
                 </button>
               )
             })}
@@ -878,24 +887,26 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
           </span>
         </div>
 
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          <span className="font-medium">Static reconstruction network.</span>
-          <span>Edges come from <span className="font-mono">reconstruction/ecoli/flat/fold_changes.tsv</span>.</span>
-          <span className="text-amber-700">Simulation overlays are paused until the experiment recipe schema stabilizes.</span>
-        </div>
-
-        <div className="relative flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white">
-          {graphElements.length > 0 && (
-            <CytoscapeComponent
-              key={graphKey}
-              elements={graphElements}
-              layout={graphLayout as any}
-              stylesheet={cytoscapeStylesheet as any}
-              cy={handleCyInit}
-              style={{ width: '100%', height: '100%' }}
-              maxZoom={3}
-              minZoom={0.2}
-            />
+        <div ref={canvasContainer} className="relative flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <NetworkCanvas
+            elements={graphElements}
+            positions={positions}
+            viewKey={graphKey}
+            full={networkMode === 'full'}
+            stylesheet={cytoscapeStylesheet}
+            resetRequest={resetRequest}
+            onSelect={setSelectedGene}
+            onReady={handleCyReady}
+            onCameraChange={setCameraChanged}
+          />
+          {(loading || !positions || error || layoutError) && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/90" role="status">
+              <div className="max-w-md px-4 text-center text-sm text-gray-600">
+                <p>{error ? `Failed to load network: ${error}` : layoutError ? `Failed to arrange network: ${layoutError}` : loading ? 'Loading network data' : 'Arranging network'}</p>
+                {(error || layoutError) && <button type="button" className="mt-3 rounded-md border border-gray-200 bg-white px-3 py-2 font-medium hover:bg-gray-50"
+                  onClick={() => error ? setRetryRequest((request) => request + 1) : setRetryLayout((request) => request + 1)}>Retry</button>}
+              </div>
+            </div>
           )}
           {edgeFilter !== 'all' && edgeCounts[edgeFilter] === 0 && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -942,11 +953,6 @@ export function TFNetworkPage({ embedded = false, onAssistantSnapshot }: TFNetwo
                 <p className="text-[10px] uppercase tracking-wide text-gray-400">Self</p>
                 <p className="font-mono text-sm font-semibold text-gray-800">{selectedInspector.selfLoops.length}</p>
               </div>
-            </div>
-
-            <div className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-900">
-              Source: reconstruction fold-change table via <span className="font-mono">/api/tf-network</span>.
-              This is a static regulatory edge catalog, not a time-resolved simulation trace.
             </div>
 
             <InspectorEdgeSection
