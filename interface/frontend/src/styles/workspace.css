@@ -685,7 +685,7 @@
   .workspace-filter-row {
     flex-wrap: nowrap;
   }
-  .workspace-shell aside {
+  .workspace-shell > aside {
     width: 64px;
   }
 }
@@ -693,7 +693,7 @@
   .workspace-shell main {
     padding: 64px 12px 12px;
   }
-  .workspace-shell aside {
+  .workspace-shell > aside {
     position: fixed;
     left: 0;
     top: 0;
@@ -702,7 +702,7 @@
     visibility: hidden;
     transform: translateX(-100%);
   }
-  .workspace-shell aside[data-drawer-open='true'] {
+  .workspace-shell > aside[data-drawer-open='true'] {
     visibility: visible;
     transform: none;
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, PointerEvent } from 'react'
 import type { Gene } from '../../types'
 import {
@@ -10,7 +10,6 @@ import {
   polarToCartesian,
 } from '../../utils/genome'
 import { categoryLabel } from '../../utils/labels'
-import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 
 const VIEW_SIZE = 800
 const CENTER = 400
@@ -25,333 +24,529 @@ const MIN_ARC_RAD = (0.3 * Math.PI) / 180
 const ORIC_BP = 3_925_744
 const TER_BP = 1_590_000
 
+export interface GenomeFocusRequest {
+  symbol: string
+  sequence: number
+}
 interface Props {
   genes: Gene[]
   searchTerm: string
   highlightedCategories: Set<string>
-  focusGene?: string | null
+  selectedGene?: string | null
+  focusRequest?: GenomeFocusRequest | null
+  onSelectGene: (symbol: string) => void
   compact?: boolean
   darkMode?: boolean
 }
-
-interface TooltipState {
-  gene: Gene
+interface Camera {
+  zoom: number
   x: number
   y: number
 }
-
 interface DragState {
+  pointerId: number
   x: number
   y: number
-  panX: number
-  panY: number
+  camera: Camera
+  moved: boolean
+}
+
+export function matchesGenomeSearch(gene: Gene, search: string) {
+  const term = search.trim().toLowerCase()
+  return (
+    Boolean(term) &&
+    [gene.symbol, gene.ecoli_id, gene.synonyms].some((value) => value?.toLowerCase().includes(term))
+  )
 }
 
 export function CircularGenomeMap({
   genes,
   searchTerm,
   highlightedCategories,
-  focusGene = null,
+  selectedGene = null,
+  focusRequest = null,
+  onSelectGene,
   compact = false,
-  darkMode = true,
+  darkMode = false,
 }: Props) {
-  const { setWorkspaceUrlState } = useUrlWorkspaceState()
   const containerRef = useRef<HTMLDivElement>(null)
   const mapFrameRef = useRef<HTMLDivElement>(null)
-  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
-  const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null)
-  const [zoom, setZoom] = useState(1)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [drag, setDrag] = useState<DragState | null>(null)
-  const hasAppliedFocusRef = useRef<string | null>(null)
-  const warnedFocusRef = useRef<string | null>(null)
-  const palette = darkMode
-    ? {
-        bg: '#111827',
-        wrapperCls: 'bg-gray-900 border border-gray-800',
-        ring: '#374151',
-        tooltipCls: 'border border-gray-700 bg-gray-950/95 text-gray-200',
-        tooltipTitle: 'text-white',
-        tooltipMuted: 'text-gray-400',
-        tooltipLabel: 'text-gray-500',
-        posText: '#9ca3af',
-        centerTitle: '#e5e7eb',
-        centerSubtitle: '#9ca3af',
-      }
-    : {
-        bg: '#ffffff',
-        wrapperCls: 'bg-white border border-gray-200',
-        ring: '#e5e7eb',
-        tooltipCls: 'border border-gray-200 bg-white text-gray-900 shadow',
-        tooltipTitle: 'text-gray-900',
-        tooltipMuted: 'text-gray-500',
-        tooltipLabel: 'text-gray-400',
-        posText: '#6b7280',
-        centerTitle: '#111827',
-        centerSubtitle: '#6b7280',
-      }
-
-  const positionedGenes = useMemo(() => {
-    return genes.filter(hasGenomePosition).map((gene) => {
-      const left = Math.min(gene.left_end_pos, gene.right_end_pos)
-      const right = Math.max(gene.left_end_pos, gene.right_end_pos)
-      const startAngle = bpToAngle(left)
-      let endAngle = bpToAngle(right)
-      if (endAngle <= startAngle) endAngle += Math.PI * 2
-      if (endAngle - startAngle < MIN_ARC_RAD) endAngle = startAngle + MIN_ARC_RAD
-      return { gene, left, right, startAngle, endAngle }
-    })
-  }, [genes])
+  const dragRef = useRef<DragState | null>(null)
+  const cameraRef = useRef<Camera>({ zoom: 1, x: 0, y: 0 })
+  const suppressClick = useRef(false)
+  const appliedFocus = useRef<GenomeFocusRequest | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const [viewportSize, setViewportSize] = useState(0)
+  const [camera, setCamera] = useState<Camera>({ zoom: 1, x: 0, y: 0 })
+  const [tooltip, setTooltip] = useState<{ gene: Gene; x: number; y: number } | null>(null)
+  const palette = useMemo(
+    () =>
+      darkMode
+        ? { bg: '#19191f', ring: '#363640', text: '#f4f4f7', muted: '#a3a3b4', outline: '#c4b5fd' }
+        : { bg: '#ffffff', ring: '#e4e4ec', text: '#1c1c24', muted: '#686874', outline: '#6d28d9' },
+    [darkMode],
+  )
+  const positionedGenes = useMemo(
+    () =>
+      genes.filter(hasGenomePosition).map((gene) => {
+        const left = Math.min(gene.left_end_pos, gene.right_end_pos)
+        const right = Math.max(gene.left_end_pos, gene.right_end_pos)
+        const startAngle = bpToAngle(left)
+        const endAngle = Math.max(bpToAngle(right), startAngle + MIN_ARC_RAD)
+        const forward = gene.direction === '+'
+        const path = arcPath(
+          CENTER,
+          CENTER,
+          forward ? FORWARD_INNER_R : REVERSE_INNER_R,
+          forward ? FORWARD_OUTER_R : REVERSE_OUTER_R,
+          startAngle,
+          endAngle,
+        )
+        return { gene, left, right, startAngle, endAngle, path }
+      }),
+    [genes],
+  )
 
   useEffect(() => {
-    hasAppliedFocusRef.current = null
-    warnedFocusRef.current = null
-  }, [focusGene])
-
-  useEffect(() => {
-    if (!focusGene) return
-    if (hasAppliedFocusRef.current === focusGene) return
-
+    if (!focusRequest || appliedFocus.current === focusRequest) return
     const entry = positionedGenes.find(
-      (pg) => pg.gene.symbol.toLowerCase() === focusGene.toLowerCase()
+      (item) => item.gene.symbol.toLowerCase() === focusRequest.symbol.toLowerCase(),
     )
-    if (!entry) {
-      if (positionedGenes.length > 4000 && warnedFocusRef.current !== focusGene) {
-        console.warn(`[GenomeMap] focusGene "${focusGene}" not found in mapped genes`)
-        warnedFocusRef.current = focusGene
-      }
-      return
-    }
-
-    const midAngle = (entry.startAngle + entry.endAngle) / 2
-    const focusRadius = entry.gene.direction === '-'
-      ? (REVERSE_INNER_R + REVERSE_OUTER_R) / 2
-      : (FORWARD_INNER_R + FORWARD_OUTER_R) / 2
-    const arcX = CENTER + focusRadius * Math.cos(midAngle)
-    const arcY = CENTER + focusRadius * Math.sin(midAngle)
-    window.requestAnimationFrame(() => {
-      setZoom(FOCUS_ZOOM)
-      setPan({
-        x: (CENTER - arcX) * FOCUS_ZOOM,
-        y: (CENTER - arcY) * FOCUS_ZOOM,
-      })
+    if (!entry) return
+    const angle = (entry.startAngle + entry.endAngle) / 2
+    const radius =
+      entry.gene.direction === '-'
+        ? (REVERSE_INNER_R + REVERSE_OUTER_R) / 2
+        : (FORWARD_INNER_R + FORWARD_OUTER_R) / 2
+    setCamera({
+      zoom: FOCUS_ZOOM,
+      x: -radius * Math.cos(angle) * FOCUS_ZOOM,
+      y: -radius * Math.sin(angle) * FOCUS_ZOOM,
     })
-    hasAppliedFocusRef.current = focusGene
-  }, [focusGene, positionedGenes])
+    appliedFocus.current = focusRequest
+  }, [focusRequest, positionedGenes])
 
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    const handleNativeWheel = (event: globalThis.WheelEvent) => {
-      if (event.cancelable) event.preventDefault()
-      event.stopPropagation()
-      const rect = mapFrameRef.current?.getBoundingClientRect()
-      const point = rect
-        ? {
-            x: ((event.clientX - rect.left) / rect.width) * VIEW_SIZE,
-            y: ((event.clientY - rect.top) / rect.height) * VIEW_SIZE,
-          }
-        : { x: CENTER, y: CENTER }
-      const normalizedDelta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
-      const factor = Math.exp(-normalizedDelta * 0.0015)
-      setZoom((current) => {
-        const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current * factor))
-        const ratio = current === 0 ? 1 : next / current
-        setPan((currentPan) => {
-          if (next === MIN_ZOOM) return { x: 0, y: 0 }
-          return {
-            x: currentPan.x - (point.x - CENTER) * (ratio - 1),
-            y: currentPan.y - (point.y - CENTER) * (ratio - 1),
-          }
-        })
-        return next
-      })
-    }
-
-    container.addEventListener('wheel', handleNativeWheel, { passive: false })
-    return () => container.removeEventListener('wheel', handleNativeWheel)
+  const zoomBy = (factor: number) =>
+    setCamera((current) => {
+      const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, current.zoom * factor))
+      const ratio = zoom / current.zoom
+      return zoom === 1
+        ? { zoom, x: 0, y: 0 }
+        : { zoom, x: current.x * ratio, y: current.y * ratio }
+    })
+  useLayoutEffect(() => {
+    const frame = mapFrameRef.current
+    if (!frame) return
+    const measure = () => setViewportSize(frame.getBoundingClientRect().width)
+    const observer = new ResizeObserver(measure)
+    observer.observe(frame)
+    measure()
+    return () => observer.disconnect()
   }, [])
 
-  const normalizedSearch = searchTerm.trim().toLowerCase()
-  const hasSearch = normalizedSearch.length > 0
-  const hasHighlightedCategories = highlightedCategories.size > 0
-  const hasFocusGene = focusGene != null
-  const glowFilter = darkMode
-    ? 'drop-shadow(0 0 8px rgba(250, 204, 21, 0.95))'
-    : 'drop-shadow(0 0 8px rgba(15, 23, 42, 0.85)) drop-shadow(0 0 4px rgba(234, 88, 12, 0.7))'
+  useLayoutEffect(() => {
+    cameraRef.current = camera
+    const frame = mapFrameRef.current
+    if (!frame || !viewportSize) return
+    const scale = viewportSize / VIEW_SIZE
+    frame.scrollLeft = (CENTER * camera.zoom - camera.x) * scale - frame.clientWidth / 2
+    frame.scrollTop = (CENTER * camera.zoom - camera.y) * scale - frame.clientHeight / 2
+    if (camera.zoom > 1) {
+      const x = CENTER * camera.zoom - (frame.scrollLeft + frame.clientWidth / 2) / scale
+      const y = CENTER * camera.zoom - (frame.scrollTop + frame.clientHeight / 2) / scale
+      if (Math.abs(x - camera.x) > 0.01 || Math.abs(y - camera.y) > 0.01)
+        setCamera((current) => ({ ...current, x, y }))
+    }
+  }, [camera, viewportSize])
 
-  function updateTooltip(event: MouseEvent<SVGPathElement>, gene: Gene) {
+  useEffect(() => {
+    const frame = mapFrameRef.current
+    if (!frame || !viewportSize) return
+    type Gesture = Event & { scale: number; clientX: number; clientY: number }
+    type Pinch = { camera: Camera; x: number; y: number; distance: number }
+    let touchPinch: Pinch | null = null
+    let trackpadPinch: Pinch | null = null
+    let animationFrame = 0
+    let pending: ((current: Camera) => Camera) | null = null
+    const queue = (update: (current: Camera) => Camera) => {
+      const previous = pending
+      pending = previous ? (current) => update(previous(current)) : update
+      if (animationFrame) return
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = 0
+        const apply = pending
+        pending = null
+        if (apply) setCamera(apply)
+      })
+    }
+    const point = (clientX: number, clientY: number) => {
+      const rect = frame.getBoundingClientRect()
+      const scale = viewportSize / VIEW_SIZE
+      return {
+        x: (clientX - rect.left - frame.clientWidth / 2) / scale,
+        y: (clientY - rect.top - frame.clientHeight / 2) / scale,
+      }
+    }
+    const pinchCamera = (start: Pinch, factor: number, x: number, y: number): Camera => {
+      const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, start.camera.zoom * factor))
+      const ratio = zoom / start.camera.zoom
+      return zoom === MIN_ZOOM
+        ? { zoom, x: 0, y: 0 }
+        : {
+            zoom,
+            x: x - (start.x - start.camera.x) * ratio,
+            y: y - (start.y - start.camera.y) * ratio,
+          }
+    }
+    const beginPinch = () => {
+      dragRef.current = null
+      suppressClick.current = true
+      setDragging(false)
+      setTooltip(null)
+    }
+    // Chromium represents trackpad pinch as ctrl-wheel. Ordinary and Shift-wheel stay native.
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey || !event.cancelable) return
+      event.preventDefault()
+      if (trackpadPinch || touchPinch) return
+      const anchor = point(event.clientX, event.clientY)
+      const delta =
+        event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? frame.clientHeight : 1)
+      beginPinch()
+      queue((current) =>
+        pinchCamera(
+          { camera: current, ...anchor, distance: 1 },
+          Math.exp(-delta * 0.01),
+          anchor.x,
+          anchor.y,
+        ),
+      )
+    }
+    // Safari exposes its trackpad pinch through native gesture events.
+    const gestureStart = (event: Event) => {
+      event.preventDefault()
+      if (touchPinch) return
+      const gesture = event as Gesture
+      const rect = frame.getBoundingClientRect()
+      const anchor = point(
+        gesture.clientX || rect.left + frame.clientWidth / 2,
+        gesture.clientY || rect.top + frame.clientHeight / 2,
+      )
+      trackpadPinch = { camera: cameraRef.current, ...anchor, distance: gesture.scale || 1 }
+      beginPinch()
+    }
+    const gestureChange = (event: Event) => {
+      event.preventDefault()
+      if (!trackpadPinch || touchPinch) return
+      const start = trackpadPinch
+      const scale = (event as Gesture).scale / start.distance
+      if (Number.isFinite(scale) && scale > 0)
+        queue(() => pinchCamera(start, scale, start.x, start.y))
+    }
+    const gestureEnd = (event: Event) => {
+      event.preventDefault()
+      trackpadPinch = null
+    }
+    const touchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 2) return
+      event.preventDefault()
+      const [a, b] = Array.from(event.touches)
+      const anchor = point((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2)
+      touchPinch = {
+        camera: cameraRef.current,
+        ...anchor,
+        distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+      }
+      beginPinch()
+    }
+    const touchMove = (event: TouchEvent) => {
+      if (!touchPinch || event.touches.length !== 2) return
+      event.preventDefault()
+      const [a, b] = Array.from(event.touches)
+      const anchor = point((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2)
+      const start = touchPinch
+      const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+      if (start.distance > 0 && distance > 0)
+        queue(() => pinchCamera(start, distance / start.distance, anchor.x, anchor.y))
+    }
+    const touchEnd = (event: TouchEvent) => {
+      if (event.touches.length < 2) touchPinch = null
+    }
+    frame.addEventListener('wheel', wheel, { passive: false })
+    frame.addEventListener('gesturestart', gestureStart, { passive: false })
+    frame.addEventListener('gesturechange', gestureChange, { passive: false })
+    frame.addEventListener('gestureend', gestureEnd, { passive: false })
+    frame.addEventListener('touchstart', touchStart, { passive: false })
+    frame.addEventListener('touchmove', touchMove, { passive: false })
+    frame.addEventListener('touchend', touchEnd)
+    frame.addEventListener('touchcancel', touchEnd)
+    return () => {
+      cancelAnimationFrame(animationFrame)
+      frame.removeEventListener('wheel', wheel)
+      frame.removeEventListener('gesturestart', gestureStart)
+      frame.removeEventListener('gesturechange', gestureChange)
+      frame.removeEventListener('gestureend', gestureEnd)
+      frame.removeEventListener('touchstart', touchStart)
+      frame.removeEventListener('touchmove', touchMove)
+      frame.removeEventListener('touchend', touchEnd)
+      frame.removeEventListener('touchcancel', touchEnd)
+    }
+  }, [viewportSize])
+
+  function pointerDown(event: PointerEvent<SVGSVGElement>) {
+    if (event.button !== 0) return
+    event.preventDefault()
+    mapFrameRef.current?.focus({ preventScroll: true })
+    suppressClick.current = false
+    dragRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      camera,
+      moved: false,
+    }
+  }
+  function pointerMove(event: PointerEvent<SVGSVGElement>) {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const dx = event.clientX - drag.x
+    const dy = event.clientY - drag.y
+    if (Math.hypot(dx, dy) < 4 && !drag.moved) return
+    drag.moved = true
+    suppressClick.current = true
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDragging(true)
+    setTooltip(null)
+    if (camera.zoom <= 1) return
+    const rect = mapFrameRef.current!.getBoundingClientRect()
+    setCamera({
+      ...drag.camera,
+      x: drag.camera.x + (dx * VIEW_SIZE) / rect.width,
+      y: drag.camera.y + (dy * VIEW_SIZE) / rect.height,
+    })
+  }
+  function pointerUp(event: PointerEvent<SVGSVGElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    dragRef.current = null
+    setDragging(false)
+  }
+  const updateTooltip = useCallback((event: MouseEvent<SVGPathElement>, gene: Gene) => {
+    if (dragRef.current?.moved) return
     const rect = containerRef.current?.getBoundingClientRect()
     if (!rect) return
     setTooltip({
       gene,
-      x: event.clientX - rect.left + 14,
-      y: event.clientY - rect.top + 14,
+      x: Math.max(8, Math.min(event.clientX - rect.left + 14, rect.width - 248)),
+      y: Math.max(8, Math.min(event.clientY - rect.top + 14, rect.height - 180)),
     })
-  }
-
-  function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
-    if (zoom <= MIN_ZOOM || event.button !== 0) return
-    event.currentTarget.setPointerCapture(event.pointerId)
-    setDrag({
-      x: event.clientX,
-      y: event.clientY,
-      panX: pan.x,
-      panY: pan.y,
-    })
-  }
-
-  function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
-    if (!drag) return
-    setPan({
-      x: drag.panX + event.clientX - drag.x,
-      y: drag.panY + event.clientY - drag.y,
-    })
-  }
-
-  function handlePointerUp(event: PointerEvent<SVGSVGElement>) {
-    if (drag) event.currentTarget.releasePointerCapture(event.pointerId)
-    setDrag(null)
-  }
-
+  }, [])
+  const hasSearch = Boolean(searchTerm.trim())
+  const hasHighlights = highlightedCategories.size > 0
+  // Camera and tooltip changes must not rebuild thousands of scientific glyphs.
+  const chromosomeScene = useMemo(
+    () => (
+      <g>
+        <GenomeTicks posText={palette.muted} />
+        <circle cx={CENTER} cy={CENTER} r={250} fill={palette.bg} stroke={palette.ring} />
+        <circle cx={CENTER} cy={CENTER} r={298} fill="none" stroke={palette.ring} />
+        <circle cx={CENTER} cy={CENTER} r={342} fill="none" stroke={palette.ring} />
+        {positionedGenes.map(({ gene, left, right, path }) => {
+          const selected = gene.symbol.toLowerCase() === selectedGene?.toLowerCase()
+          const matched =
+            matchesGenomeSearch(gene, searchTerm) || highlightedCategories.has(gene.category)
+          const dimmed = (hasSearch || hasHighlights) && !matched && !selected
+          return (
+            <path
+              key={`${gene.id}-${left}-${right}`}
+              data-gene={gene.symbol}
+              role="button"
+              tabIndex={-1}
+              aria-label={`Select ${gene.symbol}`}
+              aria-pressed={selected}
+              d={path}
+              fill={CATEGORY_FILL[gene.category] ?? CATEGORY_FILL.other}
+              opacity={dimmed ? 0.25 : 0.9}
+              stroke={selected ? palette.outline : matched ? palette.text : 'none'}
+              strokeWidth={selected ? 3 : matched ? 1 : 0}
+              vectorEffect="non-scaling-stroke"
+              onMouseEnter={(event) => updateTooltip(event, gene)}
+              onMouseMove={(event) => updateTooltip(event, gene)}
+              onMouseLeave={() => setTooltip(null)}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (!suppressClick.current) onSelectGene(gene.symbol)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onSelectGene(gene.symbol)
+                }
+              }}
+            >
+              <title>
+                {gene.symbol}: {categoryLabel(gene.category)}, {left.toLocaleString()}–
+                {right.toLocaleString()} bp
+              </title>
+            </path>
+          )
+        })}
+        <GenomeMarker
+          bp={ORIC_BP}
+          label="oriC"
+          fill="#facc15"
+          stroke={palette.bg}
+          textFill={palette.text}
+        />
+        <GenomeMarker
+          bp={TER_BP}
+          label="ter"
+          fill="#60a5fa"
+          stroke={palette.bg}
+          textFill={palette.text}
+        />
+        <text
+          x={CENTER}
+          y={CENTER - 8}
+          textAnchor="middle"
+          fill={palette.text}
+          className="text-lg font-semibold"
+        >
+          E. coli K-12 MG1655
+        </text>
+        <text
+          x={CENTER}
+          y={CENTER + 20}
+          textAnchor="middle"
+          fill={palette.muted}
+          className="text-sm"
+        >
+          {(GENOME_LENGTH / 1_000_000).toFixed(2)} Mbp
+        </text>
+      </g>
+    ),
+    [
+      positionedGenes,
+      selectedGene,
+      searchTerm,
+      highlightedCategories,
+      hasSearch,
+      hasHighlights,
+      palette,
+      updateTooltip,
+      onSelectGene,
+    ],
+  )
   return (
-    <div
-      ref={containerRef}
-      className={`relative ${
-        compact
-          ? 'flex min-h-0 flex-1 items-center justify-center'
-          : 'flex h-full min-h-0 items-center justify-center'
-      }`}
-      style={{ overscrollBehavior: 'contain', touchAction: 'none' }}
-    >
+    <div className={`genome-map ${compact ? 'genome-map-compact' : ''}`} ref={containerRef}>
+      <div className="genome-map-controls" role="group" aria-label="Map controls">
+        <button
+          type="button"
+          onClick={() => zoomBy(1.4)}
+          disabled={camera.zoom >= MAX_ZOOM}
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomBy(1 / 1.4)}
+          disabled={camera.zoom <= MIN_ZOOM}
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <output aria-label="Map zoom" className="font-mono">
+          {camera.zoom.toFixed(1)}×
+        </output>
+        <button type="button" onClick={() => setCamera({ zoom: 1, x: 0, y: 0 })}>
+          Fit genome
+        </button>
+      </div>
       <div
+        className="genome-map-frame"
         ref={mapFrameRef}
-        className={`relative mx-auto aspect-square overflow-hidden rounded-xl ${compact ? 'h-full max-h-[420px] max-w-full' : 'h-full max-w-full'} ${palette.wrapperCls}`}
+        role="group"
+        aria-label="Interactive chromosome map"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (
+            event.target !== event.currentTarget ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey
+          )
+            return
+          if (event.key === '+' || event.key === '=') {
+            event.preventDefault()
+            zoomBy(1.4)
+          } else if (event.key === '-') {
+            event.preventDefault()
+            zoomBy(1 / 1.4)
+          } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+            event.preventDefault()
+            if (camera.zoom > 1)
+              setCamera((current) => ({
+                ...current,
+                x:
+                  current.x +
+                  (event.key === 'ArrowLeft' ? 40 : event.key === 'ArrowRight' ? -40 : 0),
+                y: current.y + (event.key === 'ArrowUp' ? 40 : event.key === 'ArrowDown' ? -40 : 0),
+              }))
+          }
+        }}
+        style={viewportSize ? { height: viewportSize } : undefined}
+        onScroll={() => {
+          const frame = mapFrameRef.current
+          if (!frame || !viewportSize || camera.zoom === 1) return
+          const scale = viewportSize / VIEW_SIZE
+          const x = CENTER * camera.zoom - (frame.scrollLeft + frame.clientWidth / 2) / scale
+          const y = CENTER * camera.zoom - (frame.scrollTop + frame.clientHeight / 2) / scale
+          if (Math.abs(x - camera.x) > 1 || Math.abs(y - camera.y) > 1)
+            setCamera((current) => ({ ...current, x, y }))
+          setTooltip(null)
+        }}
       >
         <svg
           viewBox={`0 0 ${VIEW_SIZE} ${VIEW_SIZE}`}
-          className={`h-full w-full select-none ${zoom > 1 ? 'cursor-grab' : ''} ${
-            drag ? 'cursor-grabbing' : ''
-          }`}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
+          role="group"
+          aria-label="Chromosome genes"
+          style={{
+            touchAction: camera.zoom > 1 ? 'none' : 'pan-y',
+            width: viewportSize ? viewportSize * camera.zoom : '100%',
+            height: viewportSize ? viewportSize * camera.zoom : '100%',
+          }}
+          className={dragging ? 'genome-dragging' : ''}
+          onPointerDown={pointerDown}
+          onPointerMove={pointerMove}
+          onPointerUp={pointerUp}
+          onPointerCancel={pointerUp}
+          onLostPointerCapture={() => {
+            dragRef.current = null
+            setDragging(false)
+          }}
         >
           <rect width={VIEW_SIZE} height={VIEW_SIZE} fill={palette.bg} />
           <g
-            style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              transformOrigin: `${CENTER}px ${CENTER}px`,
-              transition: drag ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
+            data-testid="genome-camera"
+            data-zoom={camera.zoom}
+            data-pan-x={camera.x}
+            data-pan-y={camera.y}
           >
-            <GenomeTicks posText={palette.posText} />
-            <circle cx={CENTER} cy={CENTER} r={250} fill={palette.bg} stroke={palette.ring} strokeWidth="1" />
-            <circle cx={CENTER} cy={CENTER} r={298} fill="none" stroke={palette.ring} strokeWidth="1" />
-            <circle cx={CENTER} cy={CENTER} r={342} fill="none" stroke={palette.ring} strokeWidth="1" />
-
-            {positionedGenes.map(({ gene, left, right, startAngle, endAngle }) => {
-              const isForward = gene.direction === '+'
-              const isHovered = hoveredSymbol === gene.symbol
-              const isFocusGene = hasFocusGene && gene.symbol.toLowerCase() === focusGene?.toLowerCase()
-              const isSearchMatch = hasSearch && gene.symbol.toLowerCase().includes(normalizedSearch)
-              const isCategoryHighlight = hasHighlightedCategories && highlightedCategories.has(gene.category)
-              const isGlowing = isHovered || isSearchMatch || isFocusGene || isCategoryHighlight
-              const hasAnyFilter = hasSearch || hasHighlightedCategories || hasFocusGene
-              const isDimmedOut = hasAnyFilter && !isGlowing
-              const fill = CATEGORY_FILL[gene.category] ?? CATEGORY_FILL.other
-              const d = arcPath(
-                CENTER,
-                CENTER,
-                isForward ? FORWARD_INNER_R : REVERSE_INNER_R,
-                isForward ? FORWARD_OUTER_R : REVERSE_OUTER_R,
-                startAngle,
-                endAngle
-              )
-
-              return (
-                <path
-                  key={`${gene.id}-${left}-${right}`}
-                  d={d}
-                  fill={fill}
-                  opacity={isDimmedOut ? 0.08 : isGlowing ? 1 : 0.85}
-                  stroke={isGlowing ? (darkMode ? '#f9fafb' : '#0f172a') : 'none'}
-                  strokeWidth={isFocusGene ? 5 : isGlowing ? 1.25 : 0}
-                  className={isSearchMatch || isCategoryHighlight || isFocusGene ? 'animate-pulse' : undefined}
-                  style={{
-                    cursor: 'pointer',
-                    filter: isGlowing ? glowFilter : undefined,
-                    transition: 'opacity 120ms ease, stroke-width 120ms ease',
-                  }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onMouseEnter={(event) => {
-                    setHoveredSymbol(gene.symbol)
-                    updateTooltip(event, gene)
-                  }}
-                  onMouseMove={(event) => updateTooltip(event, gene)}
-                  onMouseLeave={() => {
-                    setHoveredSymbol(null)
-                    setTooltip(null)
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setWorkspaceUrlState(
-                      { selectedGene: gene.symbol, exploreView: 'genes' },
-                      { pathname: '/explore', replace: false }
-                    )
-                  }}
-                />
-              )
-            })}
-
-            <GenomeMarker bp={ORIC_BP} label="oriC" fill="#facc15" stroke={palette.bg} textFill={palette.centerTitle} />
-            <GenomeMarker bp={TER_BP} label="ter" fill="#60a5fa" stroke={palette.bg} textFill={palette.centerTitle} />
-
-            <text x={CENTER} y={CENTER - 8} textAnchor="middle" fill={palette.centerTitle} className="text-lg font-semibold">
-              E. coli K-12
-            </text>
-            <text x={CENTER} y={CENTER + 20} textAnchor="middle" fill={palette.centerSubtitle} className="text-sm">
-              4.64 Mbp
-            </text>
+            {chromosomeScene}
           </g>
         </svg>
       </div>
-
-      <div className="absolute left-4 top-4 flex items-center gap-2 rounded-md bg-gray-950/70 px-2.5 py-1.5 text-xs text-gray-300">
-        <span>{zoom.toFixed(1)}x</span>
-        {zoom > MIN_ZOOM && (
-          <button
-            onClick={() => {
-              setZoom(1)
-              setPan({ x: 0, y: 0 })
-            }}
-            className="text-gray-400 hover:text-white"
-          >
-            Reset
-          </button>
-        )}
-      </div>
-
       {tooltip && (
-        <div
-          className={`pointer-events-none absolute z-20 w-60 rounded-lg p-3 text-xs shadow-xl ${palette.tooltipCls}`}
-          style={{ left: tooltip.x, top: tooltip.y }}
-        >
-          <div className={`font-mono text-sm font-semibold ${palette.tooltipTitle}`}>{tooltip.gene.symbol}</div>
-          <div className={`mt-1 ${palette.tooltipMuted}`}>{categoryLabel(tooltip.gene.category)}</div>
-          <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <span className={palette.tooltipLabel}>Position</span>
-            <span className="font-mono">
-              {tooltip.gene.left_end_pos?.toLocaleString()}-{tooltip.gene.right_end_pos?.toLocaleString()}
-            </span>
-            <span className={palette.tooltipLabel}>Strand</span>
-            <span>{tooltip.gene.direction === '+' ? 'Forward' : tooltip.gene.direction === '-' ? 'Reverse' : 'Unknown'}</span>
-          </div>
-          <div className={`mt-2 border-t ${darkMode ? 'border-gray-700' : 'border-gray-200'} pt-1.5 text-[10px] opacity-60`}>
-            Click to open in Explore
-          </div>
+        <div className="genome-map-tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
+          <strong className="font-mono">{tooltip.gene.symbol}</strong>
+          <p>{categoryLabel(tooltip.gene.category)}</p>
+          <p className="font-mono">
+            {tooltip.gene.left_end_pos?.toLocaleString()}–
+            {tooltip.gene.right_end_pos?.toLocaleString()} bp
+          </p>
+          <p>{tooltip.gene.direction === '+' ? 'Forward strand' : 'Reverse strand'}</p>
+          <p>Click to inspect on this map</p>
         </div>
       )}
     </div>
@@ -360,7 +555,7 @@ export function CircularGenomeMap({
 
 function GenomeTicks({ posText }: { posText: string }) {
   const ticks = Array.from({ length: 9 }, (_, index) => (index + 1) * 500_000).filter(
-    (bp) => bp < GENOME_LENGTH
+    (bp) => bp < GENOME_LENGTH,
   )
 
   return (
@@ -398,7 +593,19 @@ function GenomeTicks({ posText }: { posText: string }) {
   )
 }
 
-function GenomeMarker({ bp, label, fill, stroke, textFill }: { bp: number; label: string; fill: string; stroke: string; textFill: string }) {
+function GenomeMarker({
+  bp,
+  label,
+  fill,
+  stroke,
+  textFill,
+}: {
+  bp: number
+  label: string
+  fill: string
+  stroke: string
+  textFill: string
+}) {
   const angle = bpToAngle(bp)
   const tip = polarToCartesian(CENTER, CENTER, 356, angle)
   const left = polarToCartesian(CENTER, CENTER, 338, angle - 0.025)

@@ -92,7 +92,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
-  const workspaceRoute = location.pathname === '/explore'
+  const workspaceRoute = location.pathname === '/explore' || location.pathname === '/genome'
   const compactViewport = useMediaQuery('(max-width: 1099px)')
   const mobileViewport = useMediaQuery('(max-width: 639px)')
   const mobileWorkspace = workspaceRoute && mobileViewport
@@ -192,7 +192,11 @@ export function Shell({ children }: { children: ReactNode }) {
           ref={navigationButton}
           type="button"
           className="workspace-navigation-toggle"
-          aria-label="Open workspace navigation"
+          aria-label={
+            location.pathname === '/genome'
+              ? 'Open genome map navigation'
+              : 'Open workspace navigation'
+          }
           aria-controls="workspace-navigation"
           aria-expanded={drawerOpen}
           onClick={() => setDrawerOpen(true)}
@@ -221,7 +225,13 @@ export function Shell({ children }: { children: ReactNode }) {
         id={workspaceRoute ? 'workspace-navigation' : undefined}
         role={mobileWorkspace && drawerOpen ? 'dialog' : undefined}
         aria-modal={mobileWorkspace && drawerOpen ? true : undefined}
-        aria-label={mobileWorkspace && drawerOpen ? 'Workspace navigation' : undefined}
+        aria-label={
+          mobileWorkspace && drawerOpen
+            ? location.pathname === '/genome'
+              ? 'Genome Map navigation'
+              : 'Workspace navigation'
+            : undefined
+        }
         aria-hidden={mobileWorkspace && !drawerOpen ? true : undefined}
         {...(mobileWorkspace && !drawerOpen ? { inert: '' } : {})}
         data-drawer-open={drawerOpen}

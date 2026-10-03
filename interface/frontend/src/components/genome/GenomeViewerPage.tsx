@@ -3,112 +3,147 @@ import { Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getAllGenes } from '../../api/client'
 import type { Gene } from '../../types'
-import { CATEGORY_FILL, hasGenomePosition } from '../../utils/genome'
+import { CATEGORY_FILL, GENOME_LENGTH, hasGenomePosition } from '../../utils/genome'
 import { categoryLabel } from '../../utils/labels'
 import { SearchInput } from '../common/SearchInput'
-import { SkeletonLine } from '../common/Skeleton'
+import { CategoryBadge, DirectionBadge } from '../common/Badge'
+import { GenomeContextRail } from '../genes/GenomeContextRail'
+import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
-import { CircularGenomeMap } from './CircularGenomeMap'
-import { ASSISTANT_GENE_SAMPLE_LIMIT, makeAssistantContextKey, summarizeGene, truncateText } from '../../utils/assistantContext'
+import {
+  CircularGenomeMap,
+  matchesGenomeSearch,
+  type GenomeFocusRequest,
+} from './CircularGenomeMap'
+import {
+  ASSISTANT_GENE_SAMPLE_LIMIT,
+  makeAssistantContextKey,
+  summarizeGene,
+  truncateText,
+} from '../../utils/assistantContext'
 import { useTheme } from '../theme/ThemeProvider'
+import { WorkspaceHelp, WORKSPACE_HELP } from '../workspace/WorkspaceHelp'
+import { WorkspaceDisclosure } from '../workspace/WorkspaceDisclosure'
+import '../../styles/genome.css'
 
 interface CategorySummary {
   category: string
   count: number
 }
-
 interface GenomeViewerPageProps {
   embedded?: boolean
   compact?: boolean
   onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }
 
-export function GenomeViewerPage({ embedded = false, compact = false, onAssistantSnapshot }: GenomeViewerPageProps) {
+export function GenomeViewerPage({
+  embedded = false,
+  compact = false,
+  onAssistantSnapshot,
+}: GenomeViewerPageProps) {
   const location = useLocation()
   const { resolvedTheme } = useTheme()
   const {
     selectedGene,
+    setSelectedGene,
     genomeSearch,
     setGenomeSearch,
     genomeHighlight,
     setGenomeHighlight,
   } = useUrlWorkspaceState()
+  const {
+    gene: detail,
+    loading: detailLoading,
+    error: detailError,
+    notFound,
+    retry: retryDetail,
+  } = useGeneDetail(selectedGene)
   const [genes, setGenes] = useState<Gene[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [darkMode, setDarkMode] = useState(() => resolvedTheme === 'dark')
-  const [showStats, setShowStats] = useState(true)
+  const [attempt, setAttempt] = useState(0)
+  const [tab, setTab] = useState<'details' | 'legend'>('details')
+  const [categoriesOpen, setCategoriesOpen] = useState(false)
+  const initialGene = useRef(
+    new URLSearchParams(location.search).get('gene') ??
+      new URLSearchParams(location.search).get('q'),
+  ).current
+  const [focusRequest, setFocusRequest] = useState<GenomeFocusRequest | null>(() =>
+    initialGene ? { symbol: initialGene, sequence: 0 } : null,
+  )
+  const darkMode = resolvedTheme === 'dark'
+  const showStats = tab === 'legend'
   const assistantCapturedAt = useRef(new Date().toISOString()).current
   const highlightedCategories = useMemo(() => new Set(genomeHighlight ?? []), [genomeHighlight])
-  const mapSearchTerm = genomeSearch ?? selectedGene ?? ''
-
-  useEffect(() => {
-    setDarkMode(resolvedTheme === 'dark')
-  }, [resolvedTheme])
-
+  const mapSearchTerm = genomeSearch ?? ''
+  const mappedGenes = useMemo(() => genes.filter(hasGenomePosition), [genes])
+  const forwardCount = useMemo(
+    () => mappedGenes.filter((gene) => gene.direction === '+').length,
+    [mappedGenes],
+  )
+  const reverseCount = useMemo(
+    () => mappedGenes.filter((gene) => gene.direction === '-').length,
+    [mappedGenes],
+  )
+  const matches = useMemo(
+    () =>
+      genes
+        .filter((gene) => matchesGenomeSearch(gene, mapSearchTerm))
+        .sort((a, b) => a.symbol.localeCompare(b.symbol)),
+    [genes, mapSearchTerm],
+  )
+  const categorySummary = useMemo<CategorySummary[]>(() => {
+    const counts = new Map<string, number>()
+    for (const gene of mappedGenes) counts.set(gene.category, (counts.get(gene.category) ?? 0) + 1)
+    return Array.from(counts, ([category, count]) => ({ category, count })).sort(
+      (a, b) => b.count - a.count,
+    )
+  }, [mappedGenes])
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
     setError(null)
     setGenes([])
-    getAllGenes(
-      (batch) => {
-        setGenes((prev) => [...prev, ...batch])
-        setLoading(false)
-      },
-      controller.signal
-    )
-      .catch((e) => {
-        if (e.name !== 'AbortError') setError(e.message)
+    getAllGenes((batch) => {
+      if (!controller.signal.aborted) setGenes((current) => [...current, ...batch])
+    }, controller.signal)
+      .catch((error) => {
+        if (!controller.signal.aborted) setError(error.message)
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
     return () => controller.abort()
-  }, [])
-
-  const mappedGenes = useMemo(() => genes.filter(hasGenomePosition), [genes])
-
-  const forwardCount = useMemo(
-    () => mappedGenes.filter((gene) => gene.direction === '+').length,
-    [mappedGenes]
-  )
-  const reverseCount = useMemo(
-    () => mappedGenes.filter((gene) => gene.direction === '-').length,
-    [mappedGenes]
-  )
-
-  const categorySummary = useMemo<CategorySummary[]>(() => {
-    const counts = new Map<string, number>()
-    for (const gene of mappedGenes) {
-      counts.set(gene.category, (counts.get(gene.category) ?? 0) + 1)
-    }
-    return Array.from(counts, ([category, count]) => ({ category, count })).sort((a, b) => {
-      const knownA = CATEGORY_FILL[a.category] ? 0 : 1
-      const knownB = CATEGORY_FILL[b.category] ? 0 : 1
-      if (knownA !== knownB) return knownA - knownB
-      return b.count - a.count
-    })
-  }, [mappedGenes])
-
+  }, [attempt])
+  useEffect(() => {
+    if (selectedGene) setTab('details')
+  }, [selectedGene])
   const assistantPageState = useMemo(() => {
     const normalizedSearch = mapSearchTerm.trim().toLowerCase()
     const selectedGeneSummary = selectedGene
-      ? genes.find((gene) => gene.symbol.toLowerCase() === selectedGene.toLowerCase()) ?? null
+      ? (genes.find((gene) => gene.symbol.toLowerCase() === selectedGene.toLowerCase()) ?? null)
       : null
-    const sortedMappedGenes = [...mappedGenes].sort((a, b) => (a.left_end_pos ?? 0) - (b.left_end_pos ?? 0))
+    const sortedMappedGenes = [...mappedGenes].sort(
+      (a, b) => (a.left_end_pos ?? 0) - (b.left_end_pos ?? 0),
+    )
     const selectedIndex = selectedGeneSummary
-      ? sortedMappedGenes.findIndex((gene) => gene.symbol.toLowerCase() === selectedGeneSummary.symbol.toLowerCase())
+      ? sortedMappedGenes.findIndex(
+          (gene) => gene.symbol.toLowerCase() === selectedGeneSummary.symbol.toLowerCase(),
+        )
       : -1
-    const nearbySample = selectedIndex >= 0
-      ? sortedMappedGenes
-          .slice(Math.max(0, selectedIndex - 12), selectedIndex + 13)
-          .map(summarizeGene)
-      : []
+    const nearbySample =
+      selectedIndex >= 0
+        ? sortedMappedGenes
+            .slice(Math.max(0, selectedIndex - 12), selectedIndex + 13)
+            .map(summarizeGene)
+        : []
     const searchMatches = normalizedSearch
       ? genes
-          .filter((gene) =>
-            gene.symbol.toLowerCase().includes(normalizedSearch)
-            || gene.ecoli_id.toLowerCase().includes(normalizedSearch)
-            || gene.synonyms.toLowerCase().includes(normalizedSearch)
+          .filter(
+            (gene) =>
+              gene.symbol.toLowerCase().includes(normalizedSearch) ||
+              gene.ecoli_id.toLowerCase().includes(normalizedSearch) ||
+              gene.synonyms.toLowerCase().includes(normalizedSearch),
           )
           .slice(0, ASSISTANT_GENE_SAMPLE_LIMIT)
           .map(summarizeGene)
@@ -141,20 +176,24 @@ export function GenomeViewerPage({ embedded = false, compact = false, onAssistan
       },
       selected_gene_summary: summarizeGene(selectedGeneSummary),
       nearby_gene_sample: nearbySample,
-      nearby_gene_sample_truncated: selectedIndex >= 0 && sortedMappedGenes.length > nearbySample.length,
+      nearby_gene_sample_truncated:
+        selectedIndex >= 0 && sortedMappedGenes.length > nearbySample.length,
       search_match_sample: searchMatches,
       search_match_sample_truncated: normalizedSearch
-        ? genes.filter((gene) =>
-            gene.symbol.toLowerCase().includes(normalizedSearch)
-            || gene.ecoli_id.toLowerCase().includes(normalizedSearch)
-            || gene.synonyms.toLowerCase().includes(normalizedSearch)
+        ? genes.filter(
+            (gene) =>
+              gene.symbol.toLowerCase().includes(normalizedSearch) ||
+              gene.ecoli_id.toLowerCase().includes(normalizedSearch) ||
+              gene.synonyms.toLowerCase().includes(normalizedSearch),
           ).length > searchMatches.length
         : false,
-      category_summary_sample: categorySummary.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map((item) => ({
-        category: item.category,
-        label: categoryLabel(item.category),
-        count: item.count,
-      })),
+      category_summary_sample: categorySummary
+        .slice(0, ASSISTANT_GENE_SAMPLE_LIMIT)
+        .map((item) => ({
+          category: item.category,
+          label: categoryLabel(item.category),
+          count: item.count,
+        })),
       category_summary_truncated: categorySummary.length > ASSISTANT_GENE_SAMPLE_LIMIT,
     }
   }, [
@@ -202,278 +241,456 @@ export function GenomeViewerPage({ embedded = false, compact = false, onAssistan
       selected_gene: selectedGene || mapSearchTerm || null,
       page_state: assistantPageState,
     },
-    suggestedPrompt: 'Help me interpret the genome map. Focus on the selected gene or search term, visible functional-category highlights, genomic position, and what linked Workspace or Network views would clarify next.',
+    suggestedPrompt:
+      'Help me interpret the genome map. Focus on the selected gene or search term, visible functional-category highlights, genomic position, and what linked Workspace or Network views would clarify next.',
   })
 
-  function toggleCategory(category: string) {
-    const next = new Set(highlightedCategories)
-    if (next.has(category)) {
-      next.delete(category)
-    } else {
-      next.add(category)
-    }
-    setGenomeHighlight(Array.from(next))
+  const selectGene = (symbol: string) => {
+    setTab('details')
+    setSelectedGene(symbol)
   }
-
-  if (loading) {
-    return (
-      <div className={compact ? 'space-y-3' : 'space-y-5'}>
-        <div>
-          <SkeletonLine className="h-8 w-64" />
-          <SkeletonLine className="mt-2 h-4 w-96" />
-        </div>
-        <SkeletonLine className="h-[680px] rounded-xl" />
-      </div>
-    )
+  const focusSelected = () => {
+    if (selectedGene)
+      setFocusRequest((current) => ({
+        symbol: detail?.symbol ?? selectedGene,
+        sequence: (current?.sequence ?? 0) + 1,
+      }))
   }
-
-  if (error) {
-    return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        Failed to load genome data: {error}
-      </div>
-    )
-  }
-
+  const selectedMapped = detail
+    ? hasGenomePosition(detail)
+    : mappedGenes.some((gene) => gene.symbol.toLowerCase() === selectedGene?.toLowerCase())
+  const coordinate = (value: number | null) => (value == null ? '—' : value.toLocaleString())
   return (
     <div
-      className={
-        compact
-          ? 'mx-auto flex h-full max-w-7xl min-h-0 flex-col gap-3 overflow-hidden pr-1'
-          : 'mx-auto flex h-[calc(100vh-32px)] max-w-7xl min-h-0 flex-col gap-3 overflow-hidden'
-      }
+      className={`genome-page ${embedded ? 'genome-embedded' : ''} ${compact ? 'genome-compact' : ''}`}
     >
       {!embedded && (
-        <div className="flex flex-shrink-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <header className="workspace-page-header">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Genome Map</h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Interactive E. coli K-12 chromosome - 4,727 mapped genes grouped by functional category.
-            </p>
+            <h1>Genome Map</h1>
+            <p>Explore chromosome positions, functional categories, and neighboring genes.</p>
           </div>
-          <div className="flex w-full items-center gap-2 lg:w-auto">
-            <SearchInput
-              value={genomeSearch ?? ''}
-              onChange={setGenomeSearch}
-              placeholder="Search genes..."
-              className="flex-1 lg:w-72"
-            />
-            <CategoryDropdown
-              categories={categorySummary}
-              highlightedCategories={highlightedCategories}
-              onToggle={toggleCategory}
-              onShowAll={() => setGenomeHighlight([])}
-            />
-          </div>
+          <Link to="/guide" className="workspace-guide-link">
+            Guide <span aria-hidden="true">↗</span>
+          </Link>
+        </header>
+      )}
+      <div className="genome-toolbar">
+        <div className="genome-search">
+          <label htmlFor="genome-search">
+            Search genes{' '}
+            <span className="workspace-search-shortcut">
+              Press <kbd>/</kbd> to search
+            </span>
+          </label>
+          <SearchInput
+            id="genome-search"
+            label="Search genome genes"
+            value={mapSearchTerm}
+            onChange={setGenomeSearch}
+            placeholder="Symbol, synonym, or identifier"
+          />
+        </div>
+        <div className="genome-category-actions">
+          <button
+            type="button"
+            className="workspace-secondary-button"
+            aria-expanded={categoriesOpen}
+            aria-controls="genome-category-options"
+            onClick={() => setCategoriesOpen((current) => !current)}
+          >
+            Highlight categories
+            {highlightedCategories.size > 0 && ` (${highlightedCategories.size})`}
+          </button>
+          {highlightedCategories.size > 0 && (
+            <button
+              type="button"
+              className="genome-quiet-button"
+              onClick={() => setGenomeHighlight([])}
+            >
+              Clear highlights
+            </button>
+          )}
+        </div>
+        <p>Highlights emphasize genes; all genes remain on the map.</p>
+      </div>
+      {categoriesOpen && (
+        <div
+          id="genome-category-options"
+          className="genome-category-options"
+          role="group"
+          aria-label="Category highlights"
+        >
+          {categorySummary.map(({ category, count }) => (
+            <button
+              type="button"
+              key={category}
+              aria-pressed={highlightedCategories.has(category)}
+              onClick={() => {
+                const next = new Set(highlightedCategories)
+                if (next.has(category)) next.delete(category)
+                else next.add(category)
+                setGenomeHighlight([...next])
+              }}
+            >
+              <span
+                style={{ background: CATEGORY_FILL[category] ?? CATEGORY_FILL.other }}
+                aria-hidden="true"
+              />
+              {categoryLabel(category)} <span className="font-mono">{count}</span>
+            </button>
+          ))}
+          {!categorySummary.length && <p>Categories will appear as genome data loads.</p>}
         </div>
       )}
-
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 text-xs">
-        {!embedded && (
-          <button
-            onClick={() => setShowStats((value) => !value)}
-            className="flex-shrink-0 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
-            type="button"
-          >
-            {showStats ? 'Hide stats' : 'Stats'}
-          </button>
+      {mapSearchTerm && (
+        <section className="genome-search-results" aria-label="Gene search results">
+          <div className="genome-results-heading">
+            <p role="status">
+              {matches.length} {loading || error ? 'provisional ' : ''}match
+              {matches.length === 1 ? '' : 'es'}
+              {loading && ' · Loading remaining genes…'}
+            </p>
+            <button
+              type="button"
+              className="genome-quiet-button"
+              onClick={() => setGenomeSearch(null)}
+            >
+              Clear search
+            </button>
+          </div>
+          <div className="genome-results-list">
+            {matches.map((gene) => (
+              <button
+                type="button"
+                key={gene.id}
+                aria-label={`Inspect ${gene.symbol} on map`}
+                aria-pressed={gene.symbol === selectedGene}
+                onClick={() => selectGene(gene.symbol)}
+              >
+                <strong className="font-mono">{gene.symbol}</strong>
+                <span className="font-mono">{gene.ecoli_id}</span>
+                <span>
+                  {hasGenomePosition(gene)
+                    ? `${coordinate(gene.left_end_pos)}–${coordinate(gene.right_end_pos)} bp`
+                    : 'No mapped coordinates'}
+                </span>
+              </button>
+            ))}
+            {!matches.length && (
+              <p>
+                {loading
+                  ? 'Searching loaded genes while the genome loads…'
+                  : error
+                    ? 'No matches in the loaded data. Retry to complete the search.'
+                    : 'No matching genes. Try a symbol, synonym, or identifier.'}
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+      <div className="genome-load-status">
+        {loading && (
+          <p role="status">
+            {genes.length
+              ? `Loading genome… ${genes.length.toLocaleString()} genes loaded; counts are provisional.`
+              : 'Loading genome data…'}
+          </p>
         )}
-        <button
-          onClick={() => setDarkMode((current) => !current)}
-          className="ml-auto flex-shrink-0 rounded-md border border-gray-200 bg-white p-1.5 text-gray-500 hover:bg-gray-50"
-          title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          type="button"
-        >
-          {darkMode ? (
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m8.66-9h-1M4.34 12h-1m15.07-6.36-.71.71M6.34 17.66l-.71.71m12.02 0-.71-.71M6.34 6.34l-.71-.71M12 7a5 5 0 100 10A5 5 0 0012 7z" />
-            </svg>
-          ) : (
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-            </svg>
-          )}
-        </button>
+        {!loading && !error && (
+          <p>
+            {mappedGenes.length.toLocaleString()} mapped genes ·{' '}
+            {(GENOME_LENGTH / 1_000_000).toFixed(2)} Mbp · E. coli K-12 MG1655
+          </p>
+        )}
+        {error && (
+          <div role="alert">
+            <p>
+              {genes.length ? 'Only part of the genome loaded.' : 'Unable to load genome data.'}{' '}
+              Counts and search results may be incomplete.
+            </p>
+            <button
+              type="button"
+              className="workspace-secondary-button"
+              onClick={() => setAttempt((current) => current + 1)}
+            >
+              Retry genome data
+            </button>
+          </div>
+        )}
+        {!loading && !error && !genes.length && <p>No genome genes are available.</p>}
       </div>
-
-      <div className="flex min-h-0 flex-1 gap-4 overflow-hidden">
-        {showStats && !embedded && (
-          <aside className="w-72 flex-shrink-0 overflow-y-auto">
-            <GenomeSummaryTable
+      <div className="genome-layout">
+        <section className="genome-canvas-panel" aria-label="Chromosome visualization">
+          <CircularGenomeMap
+            genes={mappedGenes}
+            searchTerm={mapSearchTerm}
+            highlightedCategories={highlightedCategories}
+            selectedGene={detail?.symbol ?? selectedGene}
+            focusRequest={focusRequest}
+            onSelectGene={selectGene}
+            compact={compact}
+            darkMode={darkMode}
+          />
+        </section>
+        <aside className="genome-inspector" aria-label="Genome inspector">
+          <div className="genome-inspector-tabs" role="tablist" aria-label="Genome information">
+            {(['details', 'legend'] as const).map((value, index) => (
+              <button
+                type="button"
+                key={value}
+                id={`genome-tab-${value}`}
+                role="tab"
+                aria-selected={tab === value}
+                aria-controls={`genome-panel-${value}`}
+                tabIndex={tab === value ? 0 : -1}
+                onClick={() => setTab(value)}
+                onKeyDown={(event) => {
+                  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+                    event.preventDefault()
+                    const next =
+                      event.key === 'Home'
+                        ? 'details'
+                        : event.key === 'End'
+                          ? 'legend'
+                          : index === 0
+                            ? 'legend'
+                            : 'details'
+                    setTab(next)
+                    document.getElementById(`genome-tab-${next}`)?.focus()
+                  }
+                }}
+              >
+                {value === 'details' ? 'Gene details' : 'Legend & statistics'}
+              </button>
+            ))}
+          </div>
+          <div
+            id="genome-panel-details"
+            role="tabpanel"
+            aria-labelledby="genome-tab-details"
+            hidden={tab !== 'details'}
+            className="genome-inspector-body"
+          >
+            {!selectedGene ? (
+              <div className="genome-inspector-empty">
+                <h2>Select a gene</h2>
+                <p>
+                  Click a gene on the chromosome or choose a search result to inspect its biological
+                  context here.
+                </p>
+                <p>The map stays at your current position.</p>
+              </div>
+            ) : detailLoading ? (
+              <div role="status">
+                <h2 className="font-mono">{selectedGene}</h2>
+                <p>Loading gene details…</p>
+              </div>
+            ) : detailError ? (
+              <div role="alert">
+                <h2>Unable to load {selectedGene}</h2>
+                <p>Your map position is preserved.</p>
+                <button type="button" className="workspace-secondary-button" onClick={retryDetail}>
+                  Retry gene details
+                </button>
+              </div>
+            ) : notFound || !detail ? (
+              <div>
+                <h2>Gene unavailable</h2>
+                <p>No details found for {selectedGene}.</p>
+                <button
+                  type="button"
+                  className="genome-quiet-button"
+                  onClick={() => setSelectedGene(null)}
+                >
+                  Clear selection
+                </button>
+              </div>
+            ) : (
+              <div className="genome-gene-details" key={detail.symbol}>
+                <header>
+                  <span className="workspace-state-eyebrow">Selected gene</span>
+                  <h2 className="font-mono">{detail.symbol}</h2>
+                  <p className="font-mono">{detail.ecoli_id}</p>
+                  {detail.monomer_name && <p>{detail.monomer_name}</p>}
+                </header>
+                <div className="genome-gene-actions">
+                  <button
+                    type="button"
+                    className="workspace-secondary-button"
+                    disabled={!selectedMapped}
+                    onClick={focusSelected}
+                  >
+                    Focus gene
+                  </button>
+                  <Link
+                    className="workspace-secondary-button"
+                    to={`/explore?gene=${encodeURIComponent(detail.symbol)}`}
+                  >
+                    Open in workspace
+                  </Link>
+                  <Link
+                    className="workspace-primary-button"
+                    to={`/experiments/new?variant=gene_knockout&gene=${encodeURIComponent(detail.symbol)}`}
+                  >
+                    Design knockout
+                  </Link>
+                </div>
+                {!selectedMapped && (
+                  <p>This gene has no mapped coordinates. Its details are still available.</p>
+                )}
+                <dl className="genome-facts">
+                  <div>
+                    <dt>Category</dt>
+                    <dd>
+                      <CategoryBadge label={detail.category} />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Strand</dt>
+                    <dd>
+                      {detail.direction ? <DirectionBadge direction={detail.direction} /> : '—'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Length</dt>
+                    <dd>
+                      {hasGenomePosition(detail)
+                        ? `${(Math.abs(detail.right_end_pos - detail.left_end_pos) + 1).toLocaleString()} bp`
+                        : '—'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>
+                      Knockout index{' '}
+                      <WorkspaceHelp label="Knockout index">
+                        {WORKSPACE_HELP.knockout}
+                      </WorkspaceHelp>
+                    </dt>
+                    <dd className="font-mono">{detail.ko_index >= 0 ? detail.ko_index : '—'}</dd>
+                  </div>
+                  <div className="genome-position">
+                    <dt>Position</dt>
+                    <dd className="font-mono">
+                      {hasGenomePosition(detail)
+                        ? `${coordinate(detail.left_end_pos)}–${coordinate(detail.right_end_pos)} bp`
+                        : '—'}
+                    </dd>
+                  </div>
+                </dl>
+                {selectedMapped && (
+                  <GenomeContextRail
+                    key={detail.symbol}
+                    symbol={detail.symbol}
+                    onSelectGene={selectGene}
+                  />
+                )}
+                <button
+                  type="button"
+                  className="genome-quiet-button"
+                  onClick={() => setSelectedGene(null)}
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+          </div>
+          <div
+            id="genome-panel-legend"
+            role="tabpanel"
+            aria-labelledby="genome-tab-legend"
+            hidden={tab !== 'legend'}
+            className="genome-inspector-body"
+          >
+            <GenomeLegend
               mappedCount={mappedGenes.length}
               forwardCount={forwardCount}
               reverseCount={reverseCount}
               unmappedCount={genes.length - mappedGenes.length}
               categorySummary={categorySummary}
-              onClose={() => setShowStats(false)}
+              provisional={loading || Boolean(error)}
             />
-          </aside>
-        )}
-
-        <div className="min-h-0 flex-1">
-          <CircularGenomeMap
-            genes={mappedGenes}
-            searchTerm={mapSearchTerm}
-            highlightedCategories={highlightedCategories}
-            focusGene={selectedGene}
-            compact={compact}
-            darkMode={darkMode}
-          />
-        </div>
+          </div>
+        </aside>
       </div>
     </div>
   )
 }
 
-function CategoryDropdown({
-  categories,
-  highlightedCategories,
-  onToggle,
-  onShowAll,
-}: {
-  categories: CategorySummary[]
-  highlightedCategories: Set<string>
-  onToggle: (category: string) => void
-  onShowAll: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const hasHighlightedCategories = highlightedCategories.size > 0
-
-  return (
-    <div className="relative flex-shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300"
-      >
-        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
-        </svg>
-        Categories
-        {highlightedCategories.size > 0 && (
-          <span className="ml-0.5 rounded-full bg-yellow-400 px-1.5 py-0.5 text-[10px] font-medium text-gray-900">
-            {highlightedCategories.size}
-          </span>
-        )}
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
-            <div className="mb-1.5 flex items-center justify-between px-1">
-              <span className="text-[10px] uppercase tracking-wide text-gray-400">
-                {highlightedCategories.size} highlighted
-              </span>
-              <button
-                type="button"
-                onClick={onShowAll}
-                className="text-[10px] text-brand-600 hover:underline"
-              >
-                Show all
-              </button>
-            </div>
-            {categories.map(({ category, count }) => {
-              const fill = CATEGORY_FILL[category] ?? CATEGORY_FILL.other
-              const isActive = highlightedCategories.has(category)
-              return (
-                <button
-                  key={category}
-                  type="button"
-                  onClick={() => onToggle(category)}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition hover:bg-gray-50 ${
-                    isActive
-                      ? 'bg-yellow-50 ring-1 ring-yellow-300'
-                      : hasHighlightedCategories
-                        ? 'opacity-30'
-                        : ''
-                  }`}
-                >
-                  <span
-                    className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                    style={{ backgroundColor: fill }}
-                  />
-                  <span className="flex-1 truncate text-gray-700">{categoryLabel(category)}</span>
-                  <span className="font-mono text-gray-400">{count}</span>
-                </button>
-              )
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-function GenomeSummaryTable({
+function GenomeLegend({
   mappedCount,
   forwardCount,
   reverseCount,
   unmappedCount,
   categorySummary,
-  onClose,
+  provisional,
 }: {
   mappedCount: number
   forwardCount: number
   reverseCount: number
   unmappedCount: number
   categorySummary: CategorySummary[]
-  onClose: () => void
+  provisional: boolean
 }) {
-  const geneDensity = (mappedCount / 4.64).toFixed(0)
-  const strandTotal = forwardCount + reverseCount
-  const strandBias = strandTotal > 0 ? ((forwardCount / strandTotal) * 100).toFixed(1) : '0.0'
-
+  const [statisticsOpen, setStatisticsOpen] = useState(true)
   return (
-    <div className="flex-shrink-0 rounded-lg border border-gray-200 bg-white p-3 text-xs">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wide text-gray-400">
-          Genome statistics
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-          title="Hide stats"
-          aria-label="Hide statistics panel"
-        >
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M20 12H4" />
-          </svg>
-        </button>
-      </div>
-      <div className="grid grid-cols-2 gap-3 border-b border-gray-100 pb-3">
-        <Stat label="Mapped" value={mappedCount.toLocaleString()} />
-        <Stat label="Forward" value={forwardCount.toLocaleString()} />
-        <Stat label="Reverse" value={reverseCount.toLocaleString()} />
-        <Stat label="Unmapped" value={unmappedCount.toLocaleString()} />
-        <Stat label="Density" value={geneDensity + ' / Mbp'} />
-        <Stat label="Fwd strand bias" value={strandBias + '%'} />
-        <Stat label="Genome" value="4.64 Mbp" />
-        <Stat label="GC content" value="50.8%" />
-      </div>
-      <div className="mt-2 grid grid-cols-1 gap-y-1">
-        {categorySummary.map(({ category, count }) => {
-          const fill = CATEGORY_FILL[category] ?? CATEGORY_FILL.other
-          const pct = mappedCount > 0 ? ((count / mappedCount) * 100).toFixed(1) : '0.0'
-          return (
-            <div key={category} className="flex items-center gap-1.5">
-              <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: fill }} />
-              <span className="flex-1 truncate text-gray-600">{categoryLabel(category)}</span>
-              <span className="font-mono text-gray-400">{count}</span>
-              <span className="font-mono text-gray-300">{pct}%</span>
+    <>
+      <h2>Reading the chromosome</h2>
+      <p>
+        Outer track: forward (+) strand. Inner track: reverse (−) strand. Coordinate ticks are in
+        Mbp; gene details use bp.
+      </p>
+      <p>
+        Small gene glyphs are widened for readability. Use the inspector for exact positions and
+        lengths.
+      </p>
+      <p>oriC marks the reference replication origin. ter is an approximate terminus marker.</p>
+      <WorkspaceDisclosure
+        title="Genome statistics"
+        summary={
+          provisional
+            ? 'Provisional loaded-data counts'
+            : `${mappedCount.toLocaleString()} mapped genes`
+        }
+        open={statisticsOpen}
+        onToggle={() => setStatisticsOpen((current) => !current)}
+      >
+        <dl className="genome-facts">
+          {[
+            ['Mapped', mappedCount.toLocaleString()],
+            ['Unmapped', unmappedCount.toLocaleString()],
+            ['Forward', forwardCount.toLocaleString()],
+            ['Reverse', reverseCount.toLocaleString()],
+            ['Density', `${(mappedCount / (GENOME_LENGTH / 1_000_000)).toFixed(0)} / Mbp`],
+            [
+              'Forward strand share',
+              `${forwardCount + reverseCount ? ((forwardCount / (forwardCount + reverseCount)) * 100).toFixed(1) : '0.0'}%`,
+            ],
+            ['Reference length', `${GENOME_LENGTH.toLocaleString()} bp`],
+            ['Reference GC content', '50.8%'],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd className="font-mono">{value}</dd>
             </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="font-semibold text-gray-900">{value}</p>
-    </div>
+          ))}
+        </dl>
+      </WorkspaceDisclosure>
+      <h3>Functional categories</h3>
+      <p>Colours show biological categories; violet controls show selection.</p>
+      <ul className="genome-category-legend">
+        {categorySummary.map(({ category, count }) => (
+          <li key={category}>
+            <span
+              className="genome-category-dot"
+              style={{ background: CATEGORY_FILL[category] ?? CATEGORY_FILL.other }}
+              aria-hidden="true"
+            />
+            <span>{categoryLabel(category)}</span>
+            <span className="font-mono">{count}</span>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }

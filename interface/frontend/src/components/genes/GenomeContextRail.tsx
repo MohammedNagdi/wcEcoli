@@ -166,6 +166,8 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
   const [trackWidth, setTrackWidth] = useState(400)
   const [neighbors, setNeighbors] = useState<Gene[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const element = containerRef.current
@@ -181,12 +183,14 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
   useEffect(() => {
     let active = true
     setLoading(true)
+    setError(false)
+    setNeighbors([])
     getGeneNeighbors(symbol, window)
       .then((genes) => {
         if (active) setNeighbors(genes)
       })
       .catch(() => {
-        if (active) setNeighbors([])
+        if (active) setError(true)
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -195,7 +199,7 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
     return () => {
       active = false
     }
-  }, [symbol, window])
+  }, [symbol, window, attempt])
 
   const positionedGenes = useMemo<PositionedGene[]>(
     () =>
@@ -267,7 +271,14 @@ export function GenomeContextRail({ symbol, window = 5000, onSelectGene }: Props
       </div>
 
       <div ref={containerRef}>
-        {bounds && renderedGenes.length > 0 ? (
+        {loading ? (
+          <p className="text-xs text-gray-500" role="status">Loading neighboring genes…</p>
+        ) : error ? (
+          <div className="text-xs text-gray-500" role="alert">
+            <p>Unable to load neighboring genes.</p>
+            <button type="button" className="mt-2 text-brand-600 underline" onClick={() => setAttempt(value => value + 1)}>Retry neighboring genes</button>
+          </div>
+        ) : bounds && renderedGenes.length > 0 ? (
           <div className="overflow-x-auto rounded-md border border-gray-200 bg-white px-2 py-2">
             <svg
               width={trackWidth}
