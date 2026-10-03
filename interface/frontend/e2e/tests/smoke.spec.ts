@@ -469,7 +469,7 @@ test.describe('Assistant smoke', () => {
     })
     await page.keyboard.press('Escape')
 
-    await page.getByRole('button', { name: 'Batches' }).click()
+    await page.getByRole('tab', { name: 'Batches' }).click()
     await expect(page.getByText('dnaA batch')).toBeVisible()
     const batchDetailResponse = page.waitForResponse('**/api/experiments/batches/batch-1')
     await page.getByText('dnaA batch').click()
@@ -495,7 +495,7 @@ test.describe('Assistant smoke', () => {
     })
     await page.keyboard.press('Escape')
 
-    await page.getByRole('button', { name: 'Failed jobs' }).click()
+    await page.getByRole('tab', { name: 'Failed jobs' }).click()
     await expect(page.getByText('#91')).toBeVisible()
     await page.getByText('#91').click()
     await page.getByTestId('assistant-dock-toggle').click()

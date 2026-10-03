@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams, Link, useLocation } from 'react-router-do
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import {
   getVariants, getVariantDetail, getConditions, getMediaRecipes,
-  createExperiment, searchGenes, getGene,
+  createExperiment, searchGenes, getGene, getExperiment,
 } from '../../api/client'
 import type {
   Variant, VariantDetail, Condition, MediaRecipe, Gene, GeneDetail, ExperimentCreate,
@@ -1115,9 +1115,10 @@ export function ExperimentDesigner() {
   } = useUrlWorkspaceState()
 
   // Pre-fill from URL params or the shared workspace selection.
-  const prefillVariant = searchParams.get('variant') || ''
-  const prefillGene = searchParams.get('gene') || selectedGene || ''
-  const prefillCondition = searchParams.get('condition') || selectedCondition || 'basal'
+  const duplicateId = searchParams.get('duplicate')
+  const prefillVariant = duplicateId ? '' : searchParams.get('variant') || ''
+  const prefillGene = duplicateId ? '' : searchParams.get('gene') || selectedGene || ''
+  const prefillCondition = duplicateId ? 'basal' : searchParams.get('condition') || selectedCondition || 'basal'
   const inferredVariant = prefillVariant || (prefillGene ? 'gene_knockout' : '')
 
   // Reference data
@@ -1152,6 +1153,48 @@ export function ExperimentDesigner() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showAdvancedVariants, setShowAdvancedVariants] = useState(false)
+
+  const [duplicateReady, setDuplicateReady] = useState(false)
+  const [duplicateError, setDuplicateError] = useState<string | null>(null)
+  const [duplicateAttempt, setDuplicateAttempt] = useState(0)
+  const duplicateParams = useRef<Record<string, unknown>>({})
+  const duplicateControls = useRef({ seeds: 1, generations: 1, lengthSec: 10800 })
+  useEffect(() => {
+    if (!duplicateId) return
+    let cancelled = false
+    setDuplicateReady(false); setDuplicateError(null)
+    const load = async () => {
+      const id = Number(duplicateId)
+      if (!Number.isSafeInteger(id) || id < 1) throw new Error('The source experiment identifier is invalid.')
+      const source = await getExperiment(id)
+      const params: unknown = JSON.parse(source.sim_params || '{}')
+      if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('Source simulation parameters must be a JSON object.')
+      const values = params as Record<string, unknown>
+      const seedSpec = values.seed_values ?? values.seeds ?? (values.seed != null ? [values.seed] : 1)
+      const seedCount = Array.isArray(seedSpec) ? seedSpec.length : seedSpec
+      if (Array.isArray(seedSpec) && seedSpec.some((seed) => !Number.isInteger(seed) || Number(seed) < 0)) throw new Error('Source seed values are invalid.')
+      const gen = values.generations ?? 1, length = values.length_sec ?? 10800
+      if (typeof seedCount !== 'number' || !Number.isInteger(seedCount) || seedCount < 1 || typeof gen !== 'number' || !Number.isInteger(gen) || gen < 1 || typeof length !== 'number' || !Number.isFinite(length) || length <= 0) throw new Error('Source simulation settings are invalid.')
+      let targets: Gene[] = []
+      if (source.variant_type === 'multi_gene_knockout') {
+        const metadata = values.multi_gene_knockout as { gene_symbols?: unknown } | undefined
+        if (!metadata || !Array.isArray(metadata.gene_symbols) || metadata.gene_symbols.length < 2 || metadata.gene_symbols.some((gene) => typeof gene !== 'string')) throw new Error('Source multi-gene targets are missing or invalid.')
+        targets = await Promise.all(metadata.gene_symbols.map((symbol) => getGene(String(symbol))))
+      }
+      if (cancelled) return
+      duplicateParams.current = { ...values }
+      duplicateControls.current = { seeds: seedCount, generations: gen, lengthSec: length }
+      setName(`${source.name} (copy)`); setDescription(source.description)
+      setVariantType(source.variant_type); setVariantIndex(source.variant_index)
+      setCondition(source.condition); setTimeline(source.timeline)
+      setGeneSymbol(source.variant_type === 'gene_knockout' ? source.gene_symbol : '')
+      setGeneQuery(source.variant_type === 'gene_knockout' ? source.gene_symbol : '')
+      setSelectedGenes(targets); setSeeds(seedCount); setGenerations(gen); setLengthSec(length)
+      setDuplicateReady(true)
+    }
+    void load().catch((reason: unknown) => { if (!cancelled) setDuplicateError(reason instanceof Error ? reason.message : 'Could not load source experiment.') })
+    return () => { cancelled = true }
+  }, [duplicateId, duplicateAttempt])
 
   const timelineBehavior = getTimelineBehavior(variantDetail)
   const hideVariantIndex = Boolean(variantDetail?.parameter_hints.hide_index)
@@ -1217,6 +1260,7 @@ export function ExperimentDesigner() {
     [selectedGeneList],
   )
   const saveBlocked = saving
+    || Boolean(duplicateId && !duplicateReady)
     || !variantType
     || !name.trim()
     || (variantType === 'gene_knockout' && !geneSymbol)
@@ -1366,18 +1410,19 @@ export function ExperimentDesigner() {
   }, [variantType])
 
   useEffect(() => {
-    if (!selectedGene || geneSymbol) return
+    if (duplicateId || !selectedGene || geneSymbol) return
     setVariantType((current) => current || 'gene_knockout')
     setGeneSymbol(selectedGene)
     setGeneQuery(selectedGene)
-  }, [geneSymbol, selectedGene])
+  }, [geneSymbol, selectedGene, duplicateId])
 
   useEffect(() => {
+    if (duplicateId) return
     const nextCondition = searchParams.get('condition') || selectedCondition
     if (nextCondition && nextCondition !== condition) {
       setCondition(nextCondition)
     }
-  }, [condition, searchParams, selectedCondition])
+  }, [condition, searchParams, selectedCondition, duplicateId])
 
   // Load variant detail when type changes
   useEffect(() => {
@@ -1399,8 +1444,9 @@ export function ExperimentDesigner() {
     return () => clearTimeout(timer)
   }, [error])
 
-  // Auto-generate name
+  // Auto-generate only ordinary drafts; duplication retains the source name.
   useEffect(() => {
+    if (duplicateId) return
     if (variantType === 'gene_knockout' && geneSymbol) {
       setName(`${geneSymbol} knockout`)
     } else if (variantType === 'multi_gene_knockout' && selectedGenes.length > 0) {
@@ -1408,7 +1454,7 @@ export function ExperimentDesigner() {
     } else if (variantType) {
       setName(`${variantType} experiment`)
     }
-  }, [geneSymbol, selectedGenes.length, variantType])
+  }, [geneSymbol, selectedGenes.length, variantType, duplicateId])
 
   // Auto-resolve prefilled gene -> ko_index on mount
   useEffect(() => {
@@ -1457,6 +1503,7 @@ export function ExperimentDesigner() {
   }
 
   const handleSave = async () => {
+    if (duplicateId && !duplicateReady) return
     if (!name.trim()) { setError('Name is required'); return }
     if (!variantType) { setError('Select an experiment type'); return }
     if (variantType === 'gene_knockout' && !geneSymbol) { setError('Select a gene to knock out'); return }
@@ -1468,18 +1515,24 @@ export function ExperimentDesigner() {
     setSaving(true)
     setError(null)
     try {
+      const copiedParams: Record<string, unknown> = duplicateId ? { ...duplicateParams.current } : { seeds, generations, length_sec: lengthSec }
+      if (duplicateId) {
+        if (seeds !== duplicateControls.current.seeds) { delete copiedParams.seed; delete copiedParams.seed_values; copiedParams.seeds = seeds }
+        if (generations !== duplicateControls.current.generations) copiedParams.generations = generations
+        if (lengthSec !== duplicateControls.current.lengthSec) copiedParams.length_sec = lengthSec
+      }
       const data: ExperimentCreate = {
         name: name.trim(),
         description: description.trim(),
         variant_type: variantType,
         variant_index: variantIndex,
-        condition: effectiveExperimentEnvironment.condition,
-        timeline: effectiveExperimentEnvironment.timeline,
+        condition: duplicateId ? condition : effectiveExperimentEnvironment.condition,
+        timeline: duplicateId ? timeline : effectiveExperimentEnvironment.timeline,
         gene_symbol: variantType === 'gene_knockout' ? geneSymbol : '',
         gene_symbols: variantType === 'multi_gene_knockout'
           ? selectedGenes.map((gene) => gene.symbol)
           : undefined,
-        sim_params: JSON.stringify({ seeds, generations, length_sec: lengthSec }),
+        sim_params: JSON.stringify(copiedParams),
       }
       const experiment = await createExperiment(data)
       const nextParams = new URLSearchParams({
@@ -1496,6 +1549,7 @@ export function ExperimentDesigner() {
     }
   }
 
+  if (duplicateId && !duplicateReady) return <div className="mx-auto max-w-2xl bg-white rounded-lg border border-gray-200 p-6"><Link className="text-brand-600" to="/experiments">← Back to experiments</Link>{duplicateError ? <div role="alert" className="mt-4"><h1 className="text-lg font-semibold">Could not duplicate experiment</h1><p className="mt-2 text-red-700">{duplicateError}</p><button className="mt-4 rounded border border-gray-200 px-3 py-2" onClick={() => setDuplicateAttempt((value) => value + 1)}>Retry</button></div> : <p role="status" className="mt-4">Loading source configuration…</p>}</div>
   return (
     <div className="mx-auto max-w-[1260px] px-1">
       <Link

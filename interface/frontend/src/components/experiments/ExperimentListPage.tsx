@@ -1,13 +1,16 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams, useBlocker } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
-import { getExperiments, deleteExperiment } from '../../api/client'
+import { getExperiments, deleteExperiment, getExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
 import { BatchDashboard } from './BatchDashboard'
 import { FailedJobsPanel } from './FailedJobsPanel'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { makeAssistantContextKey } from '../../utils/assistantContext'
+import '../../styles/experiments.css'
+import { ExperimentControls, ExperimentStatus, DeleteMenu, EMPTY_FILTERS, isExperimentActive, statusGroup, RequestNotice } from './ExperimentControls'
+import { useExperimentResource } from './useExperimentResource'
 import type { Experiment } from '../../types'
 
 type AssistantExperimentSummary = {
@@ -42,25 +45,52 @@ function summarizeExperiment(exp: Experiment): AssistantExperimentSummary {
   }
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  draft:        'bg-gray-100 text-gray-600',
-  queued:       'bg-yellow-50 text-yellow-700',
-  running:      'bg-blue-50 text-blue-700',
-  running_parca: 'bg-blue-50 text-blue-700',
-  running_sim:  'bg-blue-50 text-blue-700',
-  ingesting:    'bg-blue-50 text-blue-700',
-  done:         'bg-green-50 text-green-700',
-  failed:       'bg-red-50 text-red-700',
-}
+const EMPTY_EXPERIMENTS: Experiment[] = []
 
 export function ExperimentListPage() {
   const location = useLocation()
   const assistantCapturedAt = useRef(new Date().toISOString()).current
-  const [searchParams] = useSearchParams()
-  const [experiments, setExperiments] = useState<Experiment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [view, setView] = useState<'all' | 'batches' | 'failed'>('all')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const resource = useExperimentResource('experiments', getExperiments, (data) => data.some((exp) => isExperimentActive(exp.status)))
+  const experiments = resource.data ?? EMPTY_EXPERIMENTS
+  const loading = resource.loading
+  const setExperiments = (update: (previous: Experiment[]) => Experiment[]) => resource.setData((previous) => update(previous ?? []))
+  const requestedView = searchParams.get('view')
+  const view: 'all' | 'batches' | 'failed' = requestedView === 'failed' ? 'failed' : requestedView === 'batches' || (!requestedView && searchParams.has('batch')) ? 'batches' : 'all'
+  const rawSelectedId = Number(searchParams.get('experiment'))
+  const selectedId = Number.isSafeInteger(rawSelectedId) && rawSelectedId > 0 ? rawSelectedId : null
+  const [selectedDetail, setSelectedDetail] = useState<Experiment | null>(null)
+  const [selectionError, setSelectionError] = useState<string | null>(null)
+  const [selectionRetry, setSelectionRetry] = useState(0)
+  const [dirty, setDirty] = useState(false)
+  const deletionNavigation = useRef(false)
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    if (deletionNavigation.current) { deletionNavigation.current = false; return false }
+    if (!dirty) return false
+    const current = new URLSearchParams(currentLocation.search), next = new URLSearchParams(nextLocation.search)
+    return currentLocation.pathname !== nextLocation.pathname || current.get('experiment') !== next.get('experiment') || current.get('view') !== next.get('view')
+  })
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS })
+  const [ascending, setAscending] = useState(false)
+  const requestNavigation = (action: () => void) => {
+    action()
+  }
+  const selectExperiment = (id: number | null) => {
+    if (id === selectedId) return
+    requestNavigation(() => setSearchParams((previous) => { const next = new URLSearchParams(previous); if (id) next.set('experiment', String(id)); else next.delete('experiment'); return next }, { replace: true }))
+  }
+  const setView = (nextView: 'all' | 'batches' | 'failed') => requestNavigation(() => setSearchParams((previous) => {
+    const next = new URLSearchParams(previous)
+    next.set('view', nextView)
+    next.delete('experiment')
+    return next
+  }))
+  useEffect(() => {
+    let cancelled = false
+    setSelectedDetail(null); setSelectionError(null); setDetailAssistantSnapshot(null)
+    if (selectedId) getExperiment(selectedId).then((data) => { if (!cancelled) setSelectedDetail(data) }).catch((error: unknown) => { if (!cancelled) setSelectionError(error instanceof Error ? error.message : 'Experiment unavailable') })
+    return () => { cancelled = true }
+  }, [selectedId, selectionRetry])
   const [deleteTarget, setDeleteTarget] = useState<Experiment | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -78,26 +108,6 @@ export function ExperimentListPage() {
   const createdBatchName = searchParams.get('createdBatchName')
   const createdBatchCount = searchParams.get('createdBatchCount')
   const createdBatchId = searchParams.get('batch')
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const fetchAll = async () => {
-    try {
-      const data = await getExperiments()
-      setExperiments(data)
-    } catch { /* ignore */ }
-  }
-
-  useEffect(() => {
-    setLoading(true)
-    fetchAll().finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    const requestedView = searchParams.get('view')
-    if (requestedView === 'batches' || searchParams.get('batch')) setView('batches')
-    else if (requestedView === 'failed') setView('failed')
-  }, [searchParams])
-
   useEffect(() => {
     if (justCreated) {
       setShowCreatedMessage(true)
@@ -114,31 +124,6 @@ export function ExperimentListPage() {
     }
   }, [createdBatchCount, createdBatchName])
 
-  useEffect(() => {
-    if (!deleteError) return
-    const timer = setTimeout(() => setDeleteError(null), 5000)
-    return () => clearTimeout(timer)
-  }, [deleteError])
-
-  // Poll while any experiment is active
-  useEffect(() => {
-    const hasActive = experiments.some((e) =>
-      ['queued', 'running', 'running_parca', 'running_sim', 'ingesting'].includes(e.status)
-    )
-    if (hasActive && !pollRef.current) {
-      pollRef.current = setInterval(fetchAll, 5000)
-    } else if (!hasActive && pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-    }
-  }, [experiments])
-
   const handleDelete = (experiment: Experiment) => {
     setDeleteTarget(experiment)
     setDeleteError(null)
@@ -152,7 +137,7 @@ export function ExperimentListPage() {
     try {
       await deleteExperiment(id)
       setExperiments((prev) => prev.filter((e) => e.id !== id))
-      if (selectedId === id) setSelectedId(null)
+      if (selectedId === id) { deletionNavigation.current = true; selectExperiment(null) }
       setDeleteTarget(null)
     } catch (e: unknown) {
       setDeleteError('Failed to delete: ' + (e instanceof Error ? e.message : 'unknown error'))
@@ -163,6 +148,7 @@ export function ExperimentListPage() {
 
   const handleUpdated = (updated: Experiment) => {
     setExperiments((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))
+    setSelectedDetail((current) => current?.id === updated.id ? updated : current)
   }
 
   // Hide batch-created experiments from the "All experiments" tab
@@ -173,20 +159,20 @@ export function ExperimentListPage() {
     return acc
   }, {}), [experiments])
   const activeExperimentCount = useMemo(() => experiments.filter((experiment) =>
-    ['queued', 'running', 'running_parca', 'running_sim', 'ingesting'].includes(experiment.status)
+    isExperimentActive(experiment.status)
   ).length, [experiments])
 
   // Derive selected experiment from list — auto-updates when polling refreshes
   const selectedExperiment = selectedId != null
-    ? experiments.find((e) => e.id === selectedId) ?? null
+    ? (experiments.find((e) => e.id === selectedId) ?? (selectedDetail?.id === selectedId ? selectedDetail : null)) ?? null
     : null
-  const selectedAssistantExperiment = useMemo(() => (
-    view === 'all'
-      ? (selectedExperiment ? summarizeExperiment(selectedExperiment) : null)
-      : view === 'batches'
-        ? batchAssistantSnapshot?.selected_experiment ?? null
-        : null
-  ), [batchAssistantSnapshot, selectedExperiment, view])
+  const selectedAssistantExperiment = useMemo(() => selectedExperiment ? summarizeExperiment(selectedExperiment) : null, [selectedExperiment])
+  const visibleExperiments = useMemo(() => standaloneExperiments.filter((exp) =>
+    [exp.name, exp.description, exp.gene_symbol, exp.condition, exp.variant_type, variantLabel(exp.variant_type), exp.timeline].join(' ').toLowerCase().includes(filters.query.trim().toLowerCase())
+    && (!filters.status || statusGroup(exp.status) === filters.status)
+    && (!filters.type || exp.variant_type === filters.type)
+    && (!filters.condition || exp.condition === filters.condition)
+  ).sort((a, b) => (ascending ? 1 : -1) * (a.created_at.localeCompare(b.created_at) || a.id - b.id)), [standaloneExperiments, filters, ascending])
   const experimentsPageState = useMemo(() => {
     const standaloneSample = standaloneExperiments.slice(0, 25).map(summarizeExperiment)
     return {
@@ -216,6 +202,10 @@ export function ExperimentListPage() {
         by_status: statusCounts,
       },
       selected_experiment: selectedAssistantExperiment,
+      filters,
+      matching_experiments: visibleExperiments.length,
+      loading,
+      request_error: resource.error,
       standalone: view === 'all'
         ? {
           selected_id: selectedId,
@@ -227,7 +217,7 @@ export function ExperimentListPage() {
         : null,
       batch_dashboard: view === 'batches' ? batchAssistantSnapshot : null,
       failed_jobs: view === 'failed' ? failedAssistantSnapshot : null,
-      experiment_detail: view === 'all' && selectedExperiment ? detailAssistantSnapshot : null,
+      experiment_detail: selectedExperiment ? detailAssistantSnapshot : null,
     }
   }, [
     activeExperimentCount,
@@ -254,6 +244,10 @@ export function ExperimentListPage() {
     standaloneExperiments,
     statusCounts,
     view,
+    filters,
+    visibleExperiments.length,
+    loading,
+    resource.error,
   ])
   const batchSnapshotForKey = batchAssistantSnapshot as {
     total_batches?: number
@@ -311,202 +305,40 @@ export function ExperimentListPage() {
     })
   }
 
-  return (
-    <div className="flex gap-6 h-[calc(100vh-65px)]">
-    <div className="flex-1 min-w-0 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Experiments</h1>
-          <p className="text-sm text-gray-400">
-            Saved simulation configurations
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/experiments/batch"
-            className="px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100
-                       border border-brand-200 rounded-lg transition-colors"
-          >
-            Batch
-          </Link>
-          <Link
-            to="/experiments/new"
-            className="px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700
-                       rounded-lg transition-colors"
-          >
-            New Experiment
-          </Link>
-        </div>
-      </div>
-
-      {showCreatedMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm mb-4">
-          Experiment saved successfully.
-        </div>
-      )}
-
-      {createdBatchMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm mb-4">
-          {createdBatchMessage}
-        </div>
-      )}
-
-      {deleteError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
-          {deleteError}
-        </div>
-      )}
-
-      {/* View toggle */}
-      <div className="flex items-center gap-1 mb-4">
-        <button
-          onClick={() => setView('all')}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            view === 'all'
-              ? 'bg-brand-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          All experiments
-        </button>
-        <button
-          onClick={() => setView('batches')}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            view === 'batches'
-              ? 'bg-brand-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          Batches
-        </button>
-        <button
-          onClick={() => setView('failed')}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            view === 'failed'
-              ? 'bg-red-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          Failed jobs
-        </button>
-      </div>
-
-      {view === 'failed' ? (
-        <FailedJobsPanel onAssistantSnapshot={setFailedAssistantSnapshot} />
-      ) : view === 'batches' ? (
-        <BatchDashboard
-          initialExpandedId={createdBatchId || undefined}
-          onAssistantSnapshot={setBatchAssistantSnapshot}
-        />
-      ) : loading ? (
-        <div className="text-center py-12 text-gray-400">
-          <div className="inline-block w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mr-2" />
-          Loading experiments...
-        </div>
-      ) : standaloneExperiments.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
-          <svg className="w-10 h-10 mx-auto mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-          </svg>
-          <p className="text-gray-500 font-medium mb-1">No experiments yet</p>
-          <p className="text-sm text-gray-400 mb-4">
-            Configure a simulation variant, pick a growth condition, and save.
-          </p>
-          <Link
-            to="/experiments/new"
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors"
-          >
-            + Design your first experiment
-          </Link>
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-2.5 font-medium text-gray-500">Name</th>
-                <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-36">Type</th>
-                <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-28">Condition</th>
-                <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-20">Status</th>
-                <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-36">Created</th>
-                <th className="w-16"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {standaloneExperiments.map((exp) => (
-                <tr
-                  key={exp.id}
-                  onClick={() => setSelectedId(exp.id === selectedId ? null : exp.id)}
-                  className={`cursor-pointer transition-colors ${
-                    exp.id === selectedId ? 'bg-brand-50' : 'hover:bg-gray-50'
-                  }`}
-                >
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900">{exp.name}</p>
-                    {exp.gene_symbol && (
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        Gene: <span className="font-mono text-bio-gene">{exp.gene_symbol}</span>
-                        {' '}(KO #{exp.variant_index})
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-600">
-                    {variantLabel(exp.variant_type)}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{exp.condition}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${
-                      STATUS_COLORS[exp.status] ?? 'bg-gray-100 text-gray-600'
-                    }`}>
-                      {['queued', 'running', 'running_parca', 'running_sim', 'ingesting'].includes(exp.status) && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                      )}
-                      {statusLabel(exp.status)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-400">
-                    {formatDate(exp.created_at)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDelete(exp) }}
-                      className="text-gray-300 hover:text-red-500 transition-colors"
-                      title="Delete"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+  return <div className="experiments-page">
+    <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
+      <div><h1 className="text-xl font-semibold text-gray-900">Experiments</h1><p className="mt-1 text-sm text-gray-500">Find saved configurations, monitor simulations, and review results.</p></div>
+      <div className="flex flex-wrap items-center gap-2"><Link className="experiment-button" to="/guide">Guide</Link><Link className="experiment-button" to="/experiments/batch">New batch</Link><Link className="experiment-button experiment-button-primary" to="/experiments/new">New experiment</Link></div>
+    </header>
+    {showCreatedMessage && <p role="status" className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm mb-4">Experiment saved successfully.</p>}
+    {createdBatchMessage && <p role="status" className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm mb-4">{createdBatchMessage}</p>}
+    {deleteError && <p role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">{deleteError}</p>}
+    <div role="tablist" aria-label="Experiment views" className="experiment-tabs">
+      {(['all', 'batches', 'failed'] as const).map((value, index) => <button key={value} role="tab" id={`experiments-${value}`} aria-selected={view === value} aria-controls={`catalog-${value}`} tabIndex={view === value ? 0 : -1} onClick={() => setView(value)} onKeyDown={(event) => {
+        if (['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 'all' : event.key === 'End' ? 'failed' : (['all', 'batches', 'failed'] as const)[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; setView(next); document.getElementById(`experiments-${next}`)?.focus() }
+      }}>{value === 'all' ? 'Single experiments' : value === 'batches' ? 'Batches' : 'Failed jobs'}</button>)}
     </div>
-
-    {/* Detail panel */}
-    {selectedExperiment && (
-      <ExperimentDetailPanel
-        experiment={selectedExperiment}
-        onClose={() => setSelectedId(null)}
-        onUpdated={handleUpdated}
-        onAssistantSnapshot={setDetailAssistantSnapshot}
-      />
-    )}
-    <ConfirmDialog
-      open={Boolean(deleteTarget)}
-      title="Delete experiment"
-      message={`Delete "${deleteTarget?.name || 'this experiment'}"? Jobs and results will be removed.`}
-      confirmLabel="Delete experiment"
-      destructive
-      busy={deletingId === deleteTarget?.id}
-      onConfirm={confirmDelete}
-      onCancel={() => {
-        if (deletingId == null) setDeleteTarget(null)
-      }}
-    />
+    <div className="experiment-layout" data-inspecting={selectedId != null}>
+      <div className="experiment-catalog min-w-0">
+        <section className="experiment-view" id="catalog-all" role="tabpanel" aria-labelledby="experiments-all" hidden={view !== 'all'}>
+          <ExperimentControls label="Find an experiment" filters={filters} onChange={setFilters} types={standaloneExperiments.map((exp) => exp.variant_type)} conditions={standaloneExperiments.map((exp) => exp.condition)} count={visibleExperiments.length} total={standaloneExperiments.length} />
+          <RequestNotice error={resource.error} retry={() => void resource.refresh()} />
+          {loading ? <p role="status" className="p-8 text-gray-500">Loading experiments…</p> : !resource.error && standaloneExperiments.length === 0 ? <div className="bg-white border border-gray-200 rounded-lg p-8 text-center"><p>No experiments yet</p><p className="text-sm text-gray-500 my-3">Save a configuration before running a simulation.</p><Link className="experiment-button experiment-button-primary" to="/experiments/new">Design your first experiment</Link></div> : visibleExperiments.length === 0 && standaloneExperiments.length > 0 ? <p className="p-8 text-gray-500">No matching experiments. Adjust search or clear filters.</p> : standaloneExperiments.length > 0 ? <div className="experiment-table-wrap">
+            <table className="experiment-table"><thead><tr><th>Name</th><th>Type</th><th>Condition</th><th>Status</th><th aria-sort={ascending ? 'ascending' : 'descending'}><button onClick={() => setAscending((value) => !value)}>Created {ascending ? '↑' : '↓'}</button></th><th><span className="sr-only">Actions</span></th></tr></thead>
+              <tbody>{visibleExperiments.map((exp) => <tr key={exp.id} data-selected={exp.id === selectedId} onClick={() => selectExperiment(exp.id)}>
+                <td><button className="text-left font-medium text-gray-900" aria-label={`Inspect ${exp.name}`} onClick={(event) => { event.stopPropagation(); selectExperiment(exp.id) }}>{exp.name}</button>{exp.gene_symbol && <p className="mt-1 text-xs text-gray-500">Gene: <span className="font-mono text-bio-gene">{exp.gene_symbol}</span>{exp.variant_type === 'gene_knockout' ? ` · Knockout index ${exp.variant_index}` : ''}</p>}</td>
+                <td className="text-gray-600">{variantLabel(exp.variant_type)}</td><td className="text-gray-600">{exp.condition}</td><td><ExperimentStatus status={exp.status} /></td><td className="text-gray-500 whitespace-nowrap">{formatDate(exp.created_at)}</td><td><DeleteMenu label={exp.name} onDelete={() => handleDelete(exp)} /></td>
+              </tr>)}</tbody></table>
+          </div> : null}
+        </section>
+        <section className="experiment-view" id="catalog-batches" role="tabpanel" aria-labelledby="experiments-batches" hidden={view !== 'batches'}><BatchDashboard onExpandedChange={(id) => setSearchParams((previous) => { const next = new URLSearchParams(previous); if (id) next.set('batch', id); else next.delete('batch'); return next }, { replace: true })} active={view === 'batches'} initialExpandedId={createdBatchId || undefined} selectedExperiment={view === 'batches' ? selectedExperiment : null} selectedExperimentDetailSnapshot={detailAssistantSnapshot} onOpenExperiment={(exp) => { setExperiments((previous) => previous.some((row) => row.id === exp.id) ? previous : [...previous, exp]); selectExperiment(exp.id) }} onDeletedExperiment={(id) => { setExperiments((previous) => previous.filter((exp) => exp.id !== id)); if (selectedId === id) { deletionNavigation.current = true; selectExperiment(null) } }} onAssistantSnapshot={setBatchAssistantSnapshot} /></section>
+        <section className="experiment-view" id="catalog-failed" role="tabpanel" aria-labelledby="experiments-failed" hidden={view !== 'failed'}><FailedJobsPanel experiments={experiments} active={view === 'failed'} onOpenExperiment={selectExperiment} onAssistantSnapshot={setFailedAssistantSnapshot} /></section>
+      </div>
+      {selectedId != null && <div className="min-w-0"><button className="experiment-button experiment-narrow-back" onClick={() => selectExperiment(null)}>← Back to experiments</button>
+        {selectedExperiment ? <ExperimentDetailPanel key={selectedExperiment.id} experiment={selectedExperiment} onClose={() => selectExperiment(null)} onUpdated={handleUpdated} onDirtyChange={setDirty} onAssistantSnapshot={setDetailAssistantSnapshot} /> : <div className="experiment-inspector p-5"><button className="experiment-button mb-4" onClick={() => selectExperiment(null)}>Close experiment details</button>{selectionError ? <RequestNotice error={`Experiment unavailable: ${selectionError}`} retry={() => setSelectionRetry((value) => value + 1)} /> : <p role="status">Loading experiment details…</p>}</div>}
+      </div>}
     </div>
-  )
+    <ConfirmDialog open={Boolean(deleteTarget)} title="Delete experiment" message={`Delete "${deleteTarget?.name || 'this experiment'}"? Jobs and results will be removed.`} confirmLabel="Delete experiment" destructive busy={deletingId === deleteTarget?.id} onConfirm={confirmDelete} onCancel={() => { if (deletingId == null) setDeleteTarget(null) }} />
+    <ConfirmDialog open={blocker.state === 'blocked'} title="Discard unsaved edits?" message="Your changes to the experiment name and description have not been saved." confirmLabel="Discard edits" cancelLabel="Keep editing" onConfirm={() => { setDirty(false); if (blocker.state === 'blocked') blocker.proceed() }} onCancel={() => { if (blocker.state === 'blocked') blocker.reset() }} />
+  </div>
 }

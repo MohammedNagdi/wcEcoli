@@ -1,0 +1,53 @@
+/* Locally adapted Origin UI MIT table/tabs/dialog patterns (21st.dev/@originui).
+   Motion timings inspired by transitions.dev; no external component runtime. */
+/* Experiments use page scrolling; the gene workspace clips its own panels. */
+.experiments-shell main { overflow-y:auto; }
+.experiments-page { min-width:0; padding-bottom:80px; }
+.experiment-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; align-items:start; }
+.experiment-toolbar { padding:16px; border:1px solid rgb(var(--color-border-subtle)); border-radius:12px; background:rgb(var(--color-surface)); display:grid; gap:12px; margin-bottom:16px; }
+.experiment-input { display:block; width:100%; border:1px solid rgb(var(--color-border-subtle)); border-radius:8px; background:rgb(var(--color-surface)); color:inherit; padding:9px 12px; font-size:14px; }
+.experiment-filter { font-size:13px; color:rgb(var(--color-text-secondary)); min-width:150px; max-width:100%; }
+.experiment-filter select { margin-top:6px; }
+.experiment-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid rgb(var(--color-border-subtle)); border-radius:8px; padding:8px 12px; font-size:14px; font-weight:500; background:rgb(var(--color-surface)); color:inherit; transition:background-color 120ms,color 120ms,border-color 120ms; }
+.experiment-button:hover { background:rgb(var(--color-subtle)); }
+.experiment-button:disabled { opacity:.5; cursor:wait; }
+.experiment-button-primary { background:#6d28d9; color:white; border-color:#6d28d9; }
+.experiment-button-primary:hover { background:#5b21b6; }
+.experiment-tabs { display:flex; gap:20px; border-bottom:1px solid rgb(var(--color-border-subtle)); margin-bottom:16px; overflow-x:auto; }
+.experiment-tabs button { flex-shrink:0; padding:12px 0; font-size:14px; color:rgb(var(--color-text-secondary)); border-bottom:2px solid transparent; transition:color 120ms,border-color 120ms; }
+.experiment-tabs button[aria-selected=true] { color:rgb(var(--color-focus)); border-color:currentColor; }
+.experiment-table-wrap { overflow:auto; max-height:65vh; border:1px solid rgb(var(--color-border-subtle)); border-radius:12px; background:rgb(var(--color-surface)); }
+.experiment-table { width:100%; font-size:14px; border-collapse:separate; border-spacing:0; }
+.experiment-table th { position:sticky; top:0; z-index:1; background:rgb(var(--color-surface)); text-align:left; font-weight:500; white-space:nowrap; }
+.experiment-table td,.experiment-table th { padding:12px 16px; border-bottom:1px solid rgb(var(--color-border-subtle)); }
+.experiment-table td { overflow-wrap:normal; }
+.experiment-table tbody tr { transition:background-color 120ms; }
+.experiment-table tbody tr:hover { background:rgb(var(--color-subtle)); }
+.experiment-table tbody tr[data-selected=true] { background:rgb(var(--color-focus) / .1); }
+.experiment-table tr[data-selected=true] td:first-child { box-shadow:inset 3px 0 #8b5cf6; }
+.experiment-inspector { border:1px solid rgb(var(--color-border-subtle)); border-radius:12px; background:rgb(var(--color-surface)); min-width:0; overflow:auto; }
+.experiment-inspector-header { position:sticky; top:0; z-index:2; padding:20px; background:rgb(var(--color-surface)); border-bottom:1px solid rgb(var(--color-border-subtle)); }
+.experiment-inspector-body { padding:20px 20px 80px; overflow-wrap:anywhere; }
+.experiment-facts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; font-size:14px; }
+.experiment-facts dt { color:rgb(var(--color-text-secondary)); margin-bottom:4px; font-size:12px; }
+.experiment-disclosure { border:1px solid rgb(var(--color-border-subtle)); border-radius:8px; padding:12px; }
+.experiment-disclosure summary { cursor:pointer; font-size:14px; font-weight:500; }
+.experiment-disclosure[open]>div { animation:experiment-reveal 200ms ease-out; }
+.experiment-menu { position:relative; }
+.experiment-menu>div { position:absolute; right:0; z-index:4; min-width:140px; border:1px solid rgb(var(--color-border-subtle)); background:rgb(var(--color-surface)); border-radius:8px; box-shadow:0 4px 16px #0001; animation:experiment-reveal 180ms ease-out; }
+.experiments-page input:focus-visible,.experiments-page button:focus-visible,.experiments-page select:focus-visible,.experiments-page summary:focus-visible,.experiments-page a:focus-visible,.experiments-page textarea:focus-visible { outline:2px solid #8b5cf6; outline-offset:3px; }
+.experiment-view[hidden] { display:none; }
+.experiment-narrow-back { display:block; margin-bottom:12px; }
+@media(min-width:1100px) { .experiment-layout[data-inspecting=true] { grid-template-columns:minmax(0,1fr) 420px; } .experiment-inspector { max-height:calc(100dvh - 110px); position:sticky; top:0; } .experiment-narrow-back { display:none; } }
+@media(max-width:1099px) { .experiment-layout[data-inspecting=true]>.experiment-catalog { display:none; } }
+@media(max-width:639px) { .experiment-toolbar { padding:12px; } .experiment-filter { flex:1; min-width:130px; } .experiment-facts { grid-template-columns:1fr; } }
+@keyframes experiment-reveal { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+@media(prefers-reduced-motion:reduce) { .experiments-page *, .experiments-page *::before { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
+
+.experiment-table .text-bio-gene, .experiment-inspector .text-bio-gene { color:#08785b; }
+.dark .experiment-table .text-bio-gene, .dark .experiment-inspector .text-bio-gene { color:#6ee7b7; }
+
+.experiment-table th:first-child { min-width:160px; }
+.experiment-table td:nth-child(3) { white-space:nowrap; }
+
+.experiment-table th:nth-child(2) { min-width:120px; }

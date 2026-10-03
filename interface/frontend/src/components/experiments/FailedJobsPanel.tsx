@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
+import { ExperimentControls, EMPTY_FILTERS, DeleteMenu, RequestNotice } from './ExperimentControls'
+import { useExperimentResource } from './useExperimentResource'
 import { getFailedJobs, retryJob, deleteJobPermanent } from '../../api/client'
 import { ConfirmDialog } from '../common/ConfirmDialog'
-import type { FailedJobSummary } from '../../types'
+import { variantLabel } from '../../utils/labels'
+import type { Experiment, FailedJobSummary } from '../../types'
 
 function formatDate(iso: string): string {
   if (!iso) return '—'
@@ -32,34 +35,31 @@ function truncate(value: string, max = 500): string {
 
 export function FailedJobsPanel({
   onAssistantSnapshot,
+  active = true,
+  experiments = [],
+  onOpenExperiment,
 }: {
+  experiments?: Experiment[]
+  active?: boolean
+  onOpenExperiment: (id: number) => void
   onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }) {
-  const [jobs, setJobs] = useState<FailedJobSummary[]>([])
-  const [loading, setLoading] = useState(true)
+  const resource = useExperimentResource('failed-jobs', getFailedJobs, () => true, active)
+  const jobs = useMemo(() => resource.data ?? [], [resource.data])
+  const loading = resource.loading
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS })
+  const [ascending, setAscending] = useState(false)
+  const visibleJobs = useMemo(() => jobs.filter((job) =>
+    [job.id, job.experiment_id, job.experiment_name, job.gene_symbol, job.variant_type, variantLabel(job.variant_type), job.condition, job.phase, experiments.find((exp) => exp.id === job.experiment_id)?.timeline].join(' ').toLowerCase().includes(filters.query.trim().toLowerCase())
+    && (!filters.type || job.variant_type === filters.type)
+    && (!filters.condition || job.condition === filters.condition)
+  ).sort((a, b) => (ascending ? 1 : -1) * (a.finished_at.localeCompare(b.finished_at) || a.id - b.id)), [jobs, filters, ascending, experiments])
   const [actionInProgress, setActionInProgress] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<FailedJobSummary | null>(null)
 
-  const fetchJobs = async () => {
-    try {
-      const data = await getFailedJobs()
-      setJobs(data)
-    } catch (e: any) {
-      setError(e.message || 'Failed to load failed jobs')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchJobs() }, [])
-
-  useEffect(() => {
-    if (!error) return
-    const timer = setTimeout(() => setError(null), 5000)
-    return () => clearTimeout(timer)
-  }, [error])
+  const fetchJobs = () => resource.refresh(true)
 
   const handleRetry = async (jobId: number) => {
     setActionInProgress(jobId)
@@ -110,6 +110,9 @@ export function FailedJobsPanel({
       }
       : null,
     action_in_progress_job_id: actionInProgress,
+    filters,
+    matching_jobs: visibleJobs.length,
+    request_error: resource.error,
     error,
     jobs_sample: jobs.slice(0, 25).map((job) => ({
       id: job.id,
@@ -126,7 +129,7 @@ export function FailedJobsPanel({
       error_truncated: Boolean(job.error_message && job.error_message.length > 500),
     })),
     sample_truncated: jobs.length > 25,
-  }), [actionInProgress, deleteTarget, error, expandedId, jobs])
+  }), [actionInProgress, deleteTarget, error, expandedId, jobs, filters, visibleJobs.length, resource.error])
 
   useEffect(() => {
     onAssistantSnapshot?.(assistantSnapshot)
@@ -141,6 +144,8 @@ export function FailedJobsPanel({
     )
   }
 
+  if (resource.error && jobs.length === 0) return <RequestNotice error={resource.error} retry={() => void fetchJobs()} />
+
   if (jobs.length === 0) {
     return (
       <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
@@ -148,7 +153,7 @@ export function FailedJobsPanel({
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <p className="text-gray-500 font-medium mb-1">No failed jobs</p>
-        <p className="text-sm text-gray-400">All simulation jobs are healthy.</p>
+        <p className="text-sm text-gray-400">There are no failed jobs in this catalog.</p>
       </div>
     )
   }
@@ -161,30 +166,30 @@ export function FailedJobsPanel({
         </div>
       )}
 
-      <div className="text-xs text-gray-400 mb-2">
-        {jobs.length} failed job{jobs.length !== 1 ? 's' : ''} — retry or delete to clean up
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+      <RequestNotice error={resource.error} retry={() => void fetchJobs()} />
+      <ExperimentControls label="Find a failed job" filters={filters} onChange={setFilters} failed types={visibleJobs.map((job) => job.variant_type)} conditions={visibleJobs.map((job) => job.condition)} count={visibleJobs.length} total={jobs.length} />
+      {visibleJobs.length === 0 && <p className="text-sm text-gray-500 p-5">No matching failed jobs. Adjust search or clear filters.</p>}
+      <div className="experiment-table-wrap">
+        <table className="experiment-table">
           <thead className="bg-red-50/50 border-b border-gray-200">
             <tr>
               <th className="text-left px-4 py-2.5 font-medium text-gray-500">Job</th>
               <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-28">Gene</th>
               <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-24">Condition</th>
               <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-24">Phase</th>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-32">Failed at</th>
+              <th aria-sort={ascending ? 'ascending' : 'descending'} className="text-left px-4 py-2.5 font-medium text-gray-500 w-32"><button onClick={() => setAscending((value) => !value)}>Failed at {ascending ? '↑' : '↓'}</button></th>
               <th className="text-right px-4 py-2.5 font-medium text-gray-500 w-32">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {jobs.map((job) => {
+            {visibleJobs.map((job) => {
               const isExpanded = expandedId === job.id
-              const isActing = actionInProgress === job.id
+              const isActing = actionInProgress != null
               return (
                 <tr key={job.id} className="group">
                   <td className="px-4 py-3">
                     <button
+                      aria-expanded={isExpanded}
                       onClick={() => setExpandedId(isExpanded ? null : job.id)}
                       className="text-left"
                     >
@@ -225,17 +230,10 @@ export function FailedJobsPanel({
                                    hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title="Reset to pending and re-run"
                       >
-                        {isActing ? '...' : 'Retry'}
+                        {actionInProgress === job.id ? 'Working…' : 'Retry'}
                       </button>
-                      <button
-                        onClick={() => handleDelete(job.id)}
-                        disabled={isActing}
-                        className="text-xs px-2.5 py-1 rounded border border-red-200 bg-red-50 text-red-700
-                                   hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        title="Permanently delete job and results"
-                      >
-                        {isActing ? '...' : 'Delete'}
-                      </button>
+                      <button className="experiment-button" onClick={() => onOpenExperiment(job.experiment_id)}>Open experiment</button>
+                      <DeleteMenu label={`job ${job.id}`} onDelete={() => { if (!isActing) void handleDelete(job.id) }} />
                     </div>
                   </td>
                 </tr>

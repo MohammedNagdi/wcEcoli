@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom'
 import { cancelBatch, deleteBatch, deleteExperiment, getBatches, getBatchDetail, resumeBatch, runBatch } from '../../api/client'
 import { statusLabel, variantLabel } from '../../utils/labels'
 import { ConfirmDialog } from '../common/ConfirmDialog'
-import { SearchInput } from '../common/SearchInput'
+import '../../styles/experiments.css'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
+import { ExperimentControls, EMPTY_FILTERS, RequestNotice } from './ExperimentControls'
+import { useExperimentResource } from './useExperimentResource'
 import type { BatchSummary, BatchDetail, Experiment } from '../../types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -24,6 +26,7 @@ function batchSearchText(batch: BatchSummary): string {
     batch.name,
     ...batch.targets,
     ...batch.variant_types,
+    ...batch.variant_types.map(variantLabel),
     ...batch.conditions,
     ...batch.timelines,
   ].filter(Boolean).join(' ').toLowerCase()
@@ -44,82 +47,41 @@ function summarizeExperiment(exp: Experiment) {
   }
 }
 
-export function BatchDashboard({
-  initialExpandedId,
-  onAssistantSnapshot,
-}: {
+export function BatchDashboard({ initialExpandedId, active = true, selectedExperiment: externalSelection = null, selectedExperimentDetailSnapshot: externalSnapshot = null, onOpenExperiment: externalOpen, onDeletedExperiment: externalDelete, onExpandedChange, onAssistantSnapshot }: {
   initialExpandedId?: string
+  active?: boolean
+  selectedExperiment?: Experiment | null
+  selectedExperimentDetailSnapshot?: Record<string, unknown> | null
+  onOpenExperiment?: (experiment: Experiment) => void
+  onDeletedExperiment?: (id: number) => void
+  onExpandedChange?: (id: string | null) => void
   onAssistantSnapshot?: (snapshot: Record<string, unknown>) => void
 }) {
-  const [batches, setBatches] = useState<BatchSummary[]>([])
-  const [loading, setLoading] = useState(true)
+  const [internalSelection, setInternalSelection] = useState<Experiment | null>(null)
+  const [internalSnapshot, setInternalSnapshot] = useState<Record<string, unknown> | null>(null)
+  const selectedExperiment = externalOpen ? externalSelection : internalSelection
+  const selectedExperimentDetailSnapshot = externalOpen ? externalSnapshot : internalSnapshot
+  const onOpenExperiment = externalOpen ?? setInternalSelection
+  const onDeletedExperiment = externalDelete ?? ((id: number) => { if (internalSelection?.id === id) setInternalSelection(null) })
+  const resource = useExperimentResource('batches', getBatches, (data) => data.some((batch) => batch.queued > 0 || batch.running > 0), active)
+  const batches = useMemo(() => resource.data ?? [], [resource.data])
+  const loading = resource.loading
   const [runningBatchId, setRunningBatchId] = useState<string | null>(null)
   const [cancellingBatchId, setCancellingBatchId] = useState<string | null>(null)
   const [resumingBatchId, setResumingBatchId] = useState<string | null>(null)
   const [runResult, setRunResult] = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [expandedDetail, setExpandedDetail] = useState<BatchDetail | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null)
+  const detailResource = useExperimentResource(`batch:${expandedId}`, () => expandedId ? getBatchDetail(expandedId) : Promise.resolve(null), (data) => !!data && (data.queued > 0 || data.running > 0), active)
+  const expandedDetail = detailResource.data
+  const setExpandedDetail = detailResource.setData
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BatchSummary | null>(null)
-  const [selectedExperiment, setSelectedExperiment] = useState<Experiment | null>(null)
-  const [selectedExperimentDetailSnapshot, setSelectedExperimentDetailSnapshot] = useState<Record<string, unknown> | null>(null)
   const [deleteExperimentTarget, setDeleteExperimentTarget] = useState<Experiment | null>(null)
   const [deletingExperimentId, setDeletingExperimentId] = useState<number | null>(null)
-  const [query, setQuery] = useState('')
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const fetchBatches = async () => {
-    try {
-      const data = await getBatches()
-      setBatches(data)
-      // Also refresh expanded detail if open
-      if (expandedId) {
-        try {
-          const detail = await getBatchDetail(expandedId)
-          setExpandedDetail(detail)
-        } catch { /* ignore */ }
-      }
-    } catch { /* ignore */ }
-  }
-
-  useEffect(() => {
-    setLoading(true)
-    fetchBatches().finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    if (!initialExpandedId) return
-    setExpandedId(initialExpandedId)
-    getBatchDetail(initialExpandedId).then(setExpandedDetail).catch(() => setExpandedDetail(null))
-  }, [initialExpandedId])
-
-  useEffect(() => {
-    if (!runResult) return
-    const timer = setTimeout(() => setRunResult(null), 5000)
-    return () => clearTimeout(timer)
-  }, [runResult])
-
-  useEffect(() => {
-    if (!selectedExperiment) setSelectedExperimentDetailSnapshot(null)
-  }, [selectedExperiment])
-
-  // Poll while any batch has active experiments
-  useEffect(() => {
-    const hasActive = batches.some((b) => b.queued > 0 || b.running > 0)
-    if (hasActive && !pollRef.current) {
-      pollRef.current = setInterval(fetchBatches, 5000)
-    } else if (!hasActive && pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-    }
-  }, [batches])
-
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS })
+  const query = filters.query
+  const fetchBatches = async () => { await resource.refresh(true); if (expandedId) await detailResource.refresh(true) }
+  useEffect(() => { setExpandedId(initialExpandedId ?? null) }, [initialExpandedId])
   const handleRun = async (batchId: string) => {
     setRunningBatchId(batchId)
     setRunResult(null)
@@ -162,19 +124,10 @@ export function BatchDashboard({
     }
   }
 
-  const handleToggleExpand = async (batchId: string) => {
-    if (expandedId === batchId) {
-      setExpandedId(null)
-      setExpandedDetail(null)
-      return
-    }
-    setExpandedId(batchId)
-    try {
-      const detail = await getBatchDetail(batchId)
-      setExpandedDetail(detail)
-    } catch {
-      setExpandedDetail(null)
-    }
+  const handleToggleExpand = (batchId: string) => {
+    const next = expandedId === batchId ? null : batchId
+    setExpandedId(next)
+    onExpandedChange?.(next)
   }
 
   const handleDelete = async (batch: BatchSummary) => {
@@ -192,6 +145,8 @@ export function BatchDashboard({
         setExpandedId(null)
         setExpandedDetail(null)
       }
+      if (selectedExperiment?.batch_id === batch.batch_id) onDeletedExperiment(selectedExperiment.id)
+      onExpandedChange?.(null)
       setRunResult(`Deleted batch "${batch.name}".`)
       setDeleteTarget(null)
       await fetchBatches()
@@ -203,16 +158,6 @@ export function BatchDashboard({
     } finally {
       setDeletingBatchId(null)
     }
-  }
-
-  const handleExperimentUpdated = (updated: Experiment) => {
-    setSelectedExperiment(updated)
-    setExpandedDetail((current) => current
-      ? {
-        ...current,
-        experiments: current.experiments.map((exp) => (exp.id === updated.id ? updated : exp)),
-      }
-      : current)
   }
 
   const handleDeleteExperiment = (experiment: Experiment) => {
@@ -227,8 +172,8 @@ export function BatchDashboard({
     setRunResult(null)
     try {
       await deleteExperiment(experiment.id)
-      if (selectedExperiment?.id === experiment.id) setSelectedExperiment(null)
-      setExpandedDetail((current) => current
+      onDeletedExperiment(experiment.id)
+      setExpandedDetail((current) => current?.batch_id === experiment.batch_id
         ? {
           ...current,
           total: Math.max(0, current.total - 1),
@@ -246,18 +191,20 @@ export function BatchDashboard({
     }
   }
 
-  const normalizedQuery = query.trim().toLowerCase()
-  const visibleBatches = useMemo(() => (
-    normalizedQuery
-      ? batches.filter((batch) => batchSearchText(batch).includes(normalizedQuery))
-      : batches
-  ), [batches, normalizedQuery])
+  const visibleBatches = useMemo(() => batches.filter((batch) =>
+    batchSearchText(batch).includes(query.trim().toLowerCase())
+    && (!filters.type || batch.variant_types.includes(filters.type))
+    && (!filters.condition || batch.conditions.includes(filters.condition))
+    && (!filters.status || batch[filters.status as 'draft' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled'] > 0)
+  ).sort((a, b) => b.created_at.localeCompare(a.created_at) || a.batch_id.localeCompare(b.batch_id)), [batches, query, filters])
 
   const assistantSnapshot = useMemo(() => {
     const expandedBatch = expandedDetail ?? visibleBatches.find((batch) => batch.batch_id === expandedId) ?? null
     return {
       kind: 'batch_dashboard',
       query,
+      filters,
+      request_error: resource.error,
       total_batches: batches.length,
       visible_batches: visibleBatches.length,
       expanded_batch_id: expandedId,
@@ -324,7 +271,9 @@ export function BatchDashboard({
       sample_truncated: visibleBatches.length > 20,
     }
   }, [
-    batches.length,
+    batches,
+    filters,
+    resource.error,
     cancellingBatchId,
     deleteExperimentTarget,
     deleteTarget,
@@ -353,6 +302,8 @@ export function BatchDashboard({
       </div>
     )
   }
+
+  if (resource.error && batches.length === 0) return <RequestNotice error={resource.error} retry={() => void resource.refresh()} />
 
   if (batches.length === 0) {
     return (
@@ -383,30 +334,9 @@ export function BatchDashboard({
         </div>
       )}
 
-      <section className="rounded-lg border border-gray-200 bg-white px-4 py-4">
-        <div className="grid gap-3 sm:grid-cols-[minmax(220px,1fr),auto] sm:items-center">
-          <SearchInput
-            value={query}
-            onChange={setQuery}
-            placeholder="Search batch, gene, condition, protocol..."
-          />
-          <div className="flex items-center justify-between gap-3 text-xs text-gray-400 sm:justify-end">
-            <span>
-              Showing {visibleBatches.length} of {batches.length} batch{batches.length === 1 ? '' : 'es'}
-            </span>
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery('')}
-                className="font-medium text-brand-600 hover:text-brand-700"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-      </section>
-
+      <RequestNotice error={resource.error} retry={() => void resource.refresh()} />
+      <ExperimentControls label="Find a batch" filters={filters} onChange={setFilters} statusLabel="Contains status" types={batches.flatMap((batch) => batch.variant_types)} conditions={batches.flatMap((batch) => batch.conditions)} count={visibleBatches.length} total={batches.length} />
+      {expandedId && <RequestNotice error={detailResource.error} retry={() => void detailResource.refresh()} />}
       {visibleBatches.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-500 font-medium mb-1">No matching batches</p>
@@ -420,7 +350,7 @@ export function BatchDashboard({
           onCancel={handleCancel}
           onResume={handleResume}
           onDelete={handleDelete}
-          onOpenExperiment={setSelectedExperiment}
+          onOpenExperiment={onOpenExperiment}
           onDeleteExperiment={handleDeleteExperiment}
           onToggleExpand={handleToggleExpand}
           isRunning={runningBatchId === batch.batch_id}
@@ -429,6 +359,8 @@ export function BatchDashboard({
           isDeleting={deletingBatchId === batch.batch_id}
           isExpanded={expandedId === batch.batch_id}
           detail={expandedId === batch.batch_id ? expandedDetail : null}
+          detailError={expandedId === batch.batch_id ? detailResource.error : null}
+          selectedId={selectedExperiment?.id ?? null}
         />
       ))}
       <ConfirmDialog
@@ -455,14 +387,7 @@ export function BatchDashboard({
           if (deletingExperimentId == null) setDeleteExperimentTarget(null)
         }}
       />
-      {selectedExperiment && (
-        <ExperimentDetailPanel
-          experiment={selectedExperiment}
-          onClose={() => setSelectedExperiment(null)}
-          onUpdated={handleExperimentUpdated}
-          onAssistantSnapshot={setSelectedExperimentDetailSnapshot}
-        />
-      )}
+      {!externalOpen && internalSelection && <ExperimentDetailPanel key={internalSelection.id} experiment={internalSelection} onClose={() => setInternalSelection(null)} onUpdated={(updated) => { setInternalSelection(updated); void fetchBatches() }} onAssistantSnapshot={setInternalSnapshot} />}
     </div>
   )
 }
@@ -483,6 +408,8 @@ function BatchCard({
   isDeleting,
   isExpanded,
   detail,
+  detailError,
+  selectedId,
 }: {
   batch: BatchSummary
   onRun: (id: string) => void
@@ -497,16 +424,19 @@ function BatchCard({
   isResuming: boolean
   isDeleting: boolean
   isExpanded: boolean
+  detailError: string | null
+  selectedId: number | null
   detail: BatchDetail | null
 }) {
   const { total, done, failed, running, queued, draft, cancelled } = batch
-  const completedPct = total > 0 ? Math.round(((done + failed + cancelled) / total) * 100) : 0
+
 
   const isActive = running > 0 || queued > 0
   const allDone = draft === 0 && queued === 0 && running === 0
   const hasDraft = draft > 0
   const hasStopped = cancelled > 0
   const actionBusy = isRunning || isCancelling || isResuming || isDeleting
+  const [ascending, setAscending] = useState(false)
   const [batchMenuOpen, setBatchMenuOpen] = useState(false)
   const [openExperimentMenuId, setOpenExperimentMenuId] = useState<number | null>(null)
   const targetSummary = batch.targets.length > 0 ? batch.targets.slice(0, 4).join(', ') : 'No target gene'
@@ -539,20 +469,20 @@ function BatchCard({
         className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
         onClick={() => onToggleExpand(batch.batch_id)}
       >
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className={`text-gray-400 text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
                 ▶
               </span>
-              <h3 className="font-medium text-gray-900 truncate">{batch.name}</h3>
+              <h3 className="font-medium text-gray-900"><button aria-expanded={isExpanded} className="text-left" onClick={(event) => { event.stopPropagation(); onToggleExpand(batch.batch_id) }}>{batch.name}</button></h3>
               {isActive && (
                 <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 " />
                   Running
                 </span>
               )}
-              {allDone && done > 0 && (
+              {allDone && done === total && total > 0 && (
                 <span className="text-xs text-green-600 font-medium">Complete</span>
               )}
               {hasStopped && !isActive && (
@@ -662,35 +592,35 @@ function BatchCard({
           <div className="flex h-2 rounded-full bg-gray-100 overflow-hidden">
             {done > 0 && (
               <div
-                className="bg-green-500 transition-all duration-500"
+                className="bg-green-500 "
                 style={{ width: `${(done / total) * 100}%` }}
                 title={`${done} done`}
               />
             )}
             {failed > 0 && (
               <div
-                className="bg-red-400 transition-all duration-500"
+                className="bg-red-400 "
                 style={{ width: `${(failed / total) * 100}%` }}
                 title={`${failed} failed`}
               />
             )}
             {cancelled > 0 && (
               <div
-                className="bg-gray-300 transition-all duration-500"
+                className="bg-gray-300 "
                 style={{ width: `${(cancelled / total) * 100}%` }}
-                title={`${cancelled} stopped`}
+                title={`${cancelled} cancelled`}
               />
             )}
             {running > 0 && (
               <div
-                className="bg-blue-400 animate-pulse transition-all duration-500"
+                className="bg-blue-400  "
                 style={{ width: `${(running / total) * 100}%` }}
                 title={`${running} running`}
               />
             )}
             {queued > 0 && (
               <div
-                className="bg-yellow-300 transition-all duration-500"
+                className="bg-yellow-300 "
                 style={{ width: `${(queued / total) * 100}%` }}
                 title={`${queued} queued`}
               />
@@ -711,7 +641,7 @@ function BatchCard({
             )}
             {cancelled > 0 && (
               <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-gray-300" /> {cancelled} stopped
+                <span className="w-2 h-2 rounded-full bg-gray-300" /> {cancelled} cancelled
               </span>
             )}
             {running > 0 && (
@@ -729,7 +659,7 @@ function BatchCard({
                 <span className="w-2 h-2 rounded-full bg-gray-300" /> {draft} draft
               </span>
             )}
-            <span className="ml-auto tabular-nums">{completedPct}% complete</span>
+            <span className="ml-auto tabular-nums">Finished {done + failed + cancelled} of {total}</span>
           </div>
         </div>
       </div>
@@ -737,32 +667,33 @@ function BatchCard({
       {/* Expanded: experiment list */}
       {isExpanded && (
         <div className="border-t border-gray-200">
-          {!detail ? (
+          {detailError && !detail ? <p role="alert" className="p-4 text-sm text-red-700">Batch details unavailable. Use Retry above.</p> : !detail ? (
             <div className="text-center py-4 text-gray-400 text-sm">
               <div className="inline-block w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mr-1.5" />
               Loading experiments...
             </div>
           ) : (
             <div className="max-h-[400px] overflow-y-auto">
-              <table className="w-full text-sm">
+              <table className="experiment-table">
                 <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
                   <tr>
                     <th className="text-left px-4 py-2 font-medium text-gray-500">Gene</th>
                     <th className="text-left px-4 py-2 font-medium text-gray-500 w-28">Condition</th>
                     <th className="text-left px-4 py-2 font-medium text-gray-500 w-24">Status</th>
-                    <th className="text-left px-4 py-2 font-medium text-gray-500 w-36">Created</th>
+                    <th aria-sort={ascending ? 'ascending' : 'descending'} className="text-left px-4 py-2 font-medium text-gray-500 w-36"><button onClick={() => setAscending((value) => !value)}>Created {ascending ? '↑' : '↓'}</button></th>
                     <th className="w-28"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {detail.experiments.map((exp) => (
+                  {[...detail.experiments].sort((a, b) => (ascending ? 1 : -1) * (a.created_at.localeCompare(b.created_at) || a.id - b.id)).map((exp) => (
                     <tr
                       key={exp.id}
                       onClick={() => onOpenExperiment(exp)}
+                      data-selected={exp.id === selectedId}
                       className="cursor-pointer hover:bg-gray-50"
                     >
                       <td className="px-4 py-2">
-                        <span className="font-mono text-brand-700 text-xs">{exp.gene_symbol || exp.name}</span>
+                        <button className="text-left font-medium text-gray-900" onClick={(event) => { event.stopPropagation(); onOpenExperiment(exp) }}>{exp.name}</button>{exp.gene_symbol && <p className="font-mono text-bio-gene text-xs mt-1">{exp.gene_symbol}</p>}
                       </td>
                       <td className="px-4 py-2 text-gray-600">{exp.condition}</td>
                       <td className="px-4 py-2">
@@ -770,7 +701,7 @@ function BatchCard({
                           STATUS_COLORS[exp.status] ?? 'bg-gray-100 text-gray-600'
                         }`}>
                           {['queued', 'running', 'running_parca', 'running_sim', 'ingesting'].includes(exp.status) && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-current " />
                           )}
                           {statusLabel(exp.status)}
                         </span>
