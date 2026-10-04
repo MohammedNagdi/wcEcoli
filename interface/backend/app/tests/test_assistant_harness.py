@@ -2096,10 +2096,10 @@ def test_invalid_side_effect_is_not_surfaced_as_a_card():
         engine.dispose()
 
 
-def test_stream_fence_filter_suppresses_code_blocks():
+def test_stream_fence_filter_suppresses_recognized_tool_envelopes():
     from app.services.assistant_stream import _FenceFilter
 
-    f = _FenceFilter()
+    f = _FenceFilter({"x"})
     # Feed in awkward chunks that split the fence markers and the JSON.
     shown = ""
     for chunk in ["Here is the plan. ", "```js", "on\n{\"name\": \"x\"}", "\n``", "` Done."]:

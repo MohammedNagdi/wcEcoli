@@ -18,6 +18,7 @@ import { DesignPage } from './components/design/DesignPage'
 import { GenomeViewerPage } from './components/genome/GenomeViewerPage'
 import { PathwaysPage } from './components/pathways/PathwaysPage'
 import { WorkspaceUrlSync } from './hooks/useUrlWorkspaceState'
+import { NavigationGuardProvider } from './components/common/NavigationGuard'
 import { AssistantProvider } from './components/assistant/AssistantProvider'
 
 function HomeEntry() {
@@ -35,7 +36,7 @@ function HomeEntry() {
 
 export default function App() {
   return (
-    <AssistantProvider>
+    <NavigationGuardProvider><AssistantProvider>
       <WorkspaceUrlSync />
       <Routes>
         <Route path="/" element={<HomeEntry />} />
@@ -65,6 +66,6 @@ export default function App() {
           <Route path="/design" element={<DesignPage />} />
         </Route>
       </Routes>
-    </AssistantProvider>
+    </AssistantProvider></NavigationGuardProvider>
   )
 }

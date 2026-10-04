@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Link, useLocation, useSearchParams, useBlocker } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getExperiments, deleteExperiment, getExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
 import { BatchDashboard } from './BatchDashboard'
 import { FailedJobsPanel } from './FailedJobsPanel'
+import { useNavigationGuard } from '../common/NavigationGuard'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { makeAssistantContextKey } from '../../utils/assistantContext'
 import '../../styles/experiments.css'
@@ -64,7 +65,7 @@ export function ExperimentListPage() {
   const [selectionRetry, setSelectionRetry] = useState(0)
   const [dirty, setDirty] = useState(false)
   const deletionNavigation = useRef(false)
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+  const blocker = useNavigationGuard(({ currentLocation, nextLocation }) => {
     if (deletionNavigation.current) { deletionNavigation.current = false; return false }
     if (!dirty) return false
     const current = new URLSearchParams(currentLocation.search), next = new URLSearchParams(nextLocation.search)

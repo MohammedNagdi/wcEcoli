@@ -1,6 +1,8 @@
 import { ReactNode, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { CommandSearch } from '../common/CommandSearch'
+import { useAssistant } from '../assistant/AssistantProvider'
+import { WorkspaceWidthContext } from '../workspace/useMediaQuery'
 import { AssistantDock } from '../assistant/AssistantDock'
 import { ThemeToggle } from '../theme/ThemeToggle'
 import { useMediaQuery } from '../workspace/useMediaQuery'
@@ -89,10 +91,15 @@ function NavIcon({ d, className = 'w-4 h-4' }: { d: string; className?: string }
 }
 
 export function Shell({ children }: { children: ReactNode }) {
+  const a = useAssistant()
+  const shellRef = useRef<HTMLDivElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
+  const [shellWidth, setShellWidth] = useState(window.innerWidth)
+  const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth)
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
-  const workspaceRoute = location.pathname === '/explore' || location.pathname === '/genome' || location.pathname === '/experiments'
+  const workspaceRoute = location.pathname === '/explore' || location.pathname === '/genome' || location.pathname === '/experiments' || location.pathname === '/assistant'
   const compactViewport = useMediaQuery('(max-width: 1099px)')
   const mobileViewport = useMediaQuery('(max-width: 639px)')
   const mobileWorkspace = workspaceRoute && mobileViewport
@@ -101,6 +108,14 @@ export function Shell({ children }: { children: ReactNode }) {
   const navigationButton = useRef<HTMLButtonElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
   const labelsHidden = !mobileWorkspace && (compactWorkspace || collapsed)
+  const besideWorkspace = shellWidth - (mobileWorkspace ? 0 : labelsHidden ? 64 : 240) >= 1160
+  const modalAssistant = a.isOpen && location.pathname !== '/assistant' && !besideWorkspace
+  useEffect(() => {
+    const observer = new ResizeObserver(() => { setShellWidth(shellRef.current?.clientWidth ?? window.innerWidth); setWorkspaceWidth(mainRef.current?.clientWidth ?? window.innerWidth) })
+    if (shellRef.current) observer.observe(shellRef.current)
+    if (mainRef.current) observer.observe(mainRef.current)
+    return () => observer.disconnect()
+  }, [])
   const [commandSearchOpen, setCommandSearchOpen] = useState(false)
 
   useEffect(() => {
@@ -185,7 +200,8 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className={`app-shell flex h-screen min-h-screen overflow-hidden bg-gray-50 ${workspaceRoute ? 'workspace-shell' : ''} ${location.pathname === '/experiments' ? 'experiments-shell' : ''}`}
+      ref={shellRef}
+      className={`app-shell flex h-screen min-h-screen overflow-hidden bg-gray-50 ${workspaceRoute ? 'workspace-shell' : ''} ${a.isOpen && besideWorkspace && location.pathname !== '/assistant' ? 'assistant-beside' : ''} ${location.pathname === '/assistant' ? 'assistant-page-shell' : ''} ${location.pathname === '/experiments' ? 'experiments-shell' : ''}`}
     >
       {mobileWorkspace && (
         <button
@@ -233,7 +249,7 @@ export function Shell({ children }: { children: ReactNode }) {
             : undefined
         }
         aria-hidden={mobileWorkspace && !drawerOpen ? true : undefined}
-        {...(mobileWorkspace && !drawerOpen ? { inert: '' } : {})}
+        {...(modalAssistant || (mobileWorkspace && !drawerOpen) ? { inert: '' } : {})}
         data-drawer-open={drawerOpen}
         className={`flex h-screen flex-shrink-0 flex-col border-r border-gray-200 bg-white transition-[width] duration-200 ${
           labelsHidden ? 'w-16' : 'w-60'
@@ -331,13 +347,14 @@ export function Shell({ children }: { children: ReactNode }) {
       </aside>
 
       <main
+        ref={mainRef}
         className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4"
-        {...(mobileWorkspace && drawerOpen ? { inert: '' } : {})}
+        {...(modalAssistant || (mobileWorkspace && drawerOpen) ? { inert: '' } : {})}
       >
-        {children}
+        <WorkspaceWidthContext.Provider value={workspaceWidth}>{children}</WorkspaceWidthContext.Provider>
       </main>
       <CommandSearch open={commandSearchOpen} onClose={() => setCommandSearchOpen(false)} />
-      <AssistantDock />
+      <AssistantDock besideWorkspace={besideWorkspace} />
     </div>
   )
 }

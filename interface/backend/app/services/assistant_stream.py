@@ -14,12 +14,14 @@ Event types yielded:
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any, Generator, Iterator
 
 from sqlmodel import Session
 
+from app.services.assistant_output import iter_json_objects, lenient_json_loads, tool_envelope, remove_tool_envelopes
 from app.config import settings
 from app.services.assistant_runtime import (
     RUNTIME_PROVIDER_SPECS,
@@ -54,100 +56,132 @@ from app.services.assistant_agent import (
 
 
 class _FenceFilter:
-    """Suppress raw tool-call JSON from the *live* delta stream.
+    """Hide recovered tool envelopes, preserving ordinary Markdown and code as it arrives.
 
-    Weak models paste tool calls either as ```json {...}``` fences *or* as a bare top-level
-    `{"name": ...}` object (llama3.1 does the latter). The final persisted message already strips
-    both, but mid-stream the user would see raw JSON scroll by. This buffers across chunk
-    boundaries and hides:
-      * anything inside triple-backtick fences, and
-      * a bare top-level brace object whose first key looks like a tool call
-        (``name``/``tool``/``tool_name``/``parameters``/``arguments``) — held until it balances,
-        then dropped if tool-like, otherwise released verbatim.
+    Only JSON/tool-code/unlabelled fences that could contain a tool envelope are held for
+    classification. Ordinary code and non-JSON braces pass through immediately. Classification
+    uses the same policy as final response recovery; this filter never executes a tool.
     """
 
-    _TOOLISH = ('"name"', '"tool"', '"tool_name"', '"parameters"', '"arguments"')
-
-    def __init__(self) -> None:
+    def __init__(self, tool_names: set[str] | None = None) -> None:
+        self.tool_names = tool_names or set()
         self.buffer = ""
-        self.in_fence = False
+        self.line_prefix = ""
+        self.mode = "text"
+        self.marker = ""
+        self.opening = ""
 
-    def feed(self, text: str) -> str:
+    def _consume(self, count: int) -> str:
+        value, self.buffer = self.buffer[:count], self.buffer[count:]
+        tail = (self.line_prefix + value).rsplit("\n", 1)[-1]
+        self.line_prefix = tail if len(tail) <= 4 else "x"
+        return value
+
+    def _fence(self, closing: bool = False, final: bool = False):
+        context = self.line_prefix + self.buffer
+        marker = re.escape(self.marker[0]) + "{" + str(len(self.marker)) + ",}" if closing else "(`{3,}|~{3,})"
+        pattern = r"(?m)^[ \t]{0,3}" + marker + (r"[ \t]*(?:\n|$)" if closing else r"([^\n]*)(?:\n|$)")
+        match = re.search(pattern, context)
+        if match and match.end() > len(self.line_prefix):
+            start = max(0, match.start() - len(self.line_prefix))
+            end = match.end() - len(self.line_prefix)
+            complete = context[match.end() - 1:match.end()] == "\n" or final
+            return start, end, match, complete
+        return None
+
+    def feed(self, text: str, *, final: bool = False) -> str:
         self.buffer += text
         out: list[str] = []
         while self.buffer:
-            if self.in_fence:
-                marker = self.buffer.find("```")
-                if marker == -1:
-                    return "".join(out)
-                self.in_fence = False
-                self.buffer = self.buffer[marker + 3 :]
-                continue
+            if self.mode != "text":
+                closing = self._fence(closing=True, final=final)
+                if self.mode == "candidate":
+                    body = self.buffer[:closing[0]] if closing else self.buffer
+                    stripped = body.lstrip()
+                    objects = list(iter_json_objects(stripped))
+                    # A non-JSON body, or a complete ordinary JSON object, can stream normally.
+                    ordinary = bool(stripped) and not stripped.startswith("{")
+                    if objects and objects[0][0] == 0:
+                        ordinary = tool_envelope(lenient_json_loads(objects[0][2]), self.tool_names) is None
+                    if ordinary and not closing:
+                        out.append(self.opening)
+                        self.opening = ""
+                        self.mode = "code"
+                        continue
+                    if closing and closing[3]:
+                        raw = self._consume(closing[1])
+                        cleaned = remove_tool_envelopes(raw[:closing[0]], self.tool_names)
+                        if cleaned.strip() or cleaned == raw[:closing[0]]:
+                            out.append(self.opening + cleaned + raw[closing[0]:])
+                        self.opening = ""
+                        self.mode = "text"
+                        continue
+                    if final:
+                        raw = self._consume(len(self.buffer))
+                        cleaned = remove_tool_envelopes(raw, self.tool_names)
+                        if cleaned.strip() or cleaned == raw:
+                            out.append(self.opening + cleaned)
+                        self.opening = ""
+                    break
+                if closing:
+                    if closing[3]:
+                        out.append(self._consume(closing[1]))
+                        self.mode = "text"
+                        continue
+                    out.append(self._consume(closing[0]))
+                    break
+                # Hold only a possible closing marker at the beginning of the last line.
+                last = self.buffer.rsplit("\n", 1)[-1]
+                context_last = self.line_prefix + last if "\n" not in self.buffer else last
+                hold = len(last) if re.fullmatch(r"[ \t]{0,3}[`~]*", context_last) and not final else 0
+                out.append(self._consume(len(self.buffer) - hold))
+                break
 
-            fence = self.buffer.find("```")
+            fence = self._fence(final=final)
             brace = self.buffer.find("{")
-            # No structural marker: emit, holding back a 2-char tail for a split ``` fence.
-            if fence == -1 and brace == -1:
-                if len(self.buffer) > 2:
-                    out.append(self.buffer[:-2])
-                    self.buffer = self.buffer[-2:]
-                return "".join(out)
-            # Whichever marker comes first decides the next mode.
-            if fence != -1 and (brace == -1 or fence <= brace):
-                out.append(self.buffer[:fence])
-                self.in_fence = True
-                self.buffer = self.buffer[fence + 3 :]
+            if fence and (brace < 0 or fence[0] <= brace):
+                out.append(self._consume(fence[0]))
+                # Recompute after consuming preceding prose (line prefix/offset changed).
+                fence = self._fence(final=final)
+                if not fence or not fence[3]:
+                    break
+                self.marker = fence[2].group(1)
+                language = fence[2].group(2).strip().lower()
+                self.opening = self._consume(fence[1])
+                self.mode = "candidate" if language in {"", "json", "tool_code"} else "code"
+                if self.mode == "code":
+                    out.append(self.opening)
+                    self.opening = ""
                 continue
-            # A bare '{' comes first. Decide whether it opens a tool-call object.
-            out.append(self.buffer[:brace])
-            rest = self.buffer[brace:]
-            decision = self._decide_brace_object(rest)
-            if decision == "incomplete":
-                self.buffer = rest  # hold the whole object until it balances
-                return "".join(out)
-            consumed, drop = decision
-            if not drop:
-                out.append(rest[:consumed])
-            self.buffer = rest[consumed:]
+            if brace >= 0:
+                out.append(self._consume(brace))
+                rest = self.buffer[1:].lstrip()
+                if not rest and not final:
+                    break
+                if not rest.startswith('"'):
+                    out.append(self._consume(1))
+                    continue
+                objects = list(iter_json_objects(self.buffer))
+                if objects and objects[0][0] == 0:
+                    chunk = self._consume(objects[0][1])
+                    if not tool_envelope(lenient_json_loads(chunk), self.tool_names):
+                        out.append(chunk)
+                    continue
+                if final:
+                    out.append(self._consume(len(self.buffer)))
+                break
+            last = self.buffer.rsplit("\n", 1)[-1]
+            context_last = self.line_prefix + last if "\n" not in self.buffer else last
+            hold = len(last) if re.fullmatch(r"[ \t]{0,3}[`~]{1,2}", context_last) and not final else 0
+            out.append(self._consume(len(self.buffer) - hold))
+            break
         return "".join(out)
 
-    def _decide_brace_object(self, rest: str):
-        """Scan a bare object starting at rest[0]=='{'. Returns (consumed, drop) or 'incomplete'."""
-        depth = 0
-        in_str = False
-        escaped = False
-        for index, char in enumerate(rest):
-            if in_str:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_str = False
-                continue
-            if char == '"':
-                in_str = True
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    obj = rest[: index + 1]
-                    head = "".join(obj[1:80].split())  # first chars, whitespace-stripped
-                    drop = any(key in head for key in self._TOOLISH)
-                    return index + 1, drop
-        return "incomplete"
-
     def flush(self) -> str:
-        if self.in_fence:
-            return ""
-        # An unterminated bare object that never balanced: drop it if tool-like, else release.
-        tail = self.buffer
-        self.buffer = ""
-        stripped = tail.lstrip()
-        if stripped.startswith("{") and any(key in "".join(stripped.split())[:80] for key in self._TOOLISH):
-            return ""
-        return tail
+        if not self.buffer and self.opening:
+            opening, self.opening = self.opening, ""
+            return opening
+        return self.feed("", final=True)
 
 
 def _default_stream_transport(
@@ -438,7 +472,7 @@ def stream_assistant_agent_events(
     try:
         for _ in range(max_turns):
             turns_used += 1
-            fence = _FenceFilter()
+            fence = _FenceFilter(tool_names)
             provider_gen = _stream_provider(
                 kind=kind, base_url=base_url, model=model, api_key=api_key,
                 extra_headers=spec.extra_headers, system=system, native_messages=native_messages,

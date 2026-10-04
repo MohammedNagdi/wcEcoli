@@ -1,3 +1,4 @@
+import type { AssistantStreamDone } from '../types'
 /**
  * Typed API client for the wcEcoli backend.
  * All calls go through /api which Vite proxies to the FastAPI backend.
@@ -714,12 +715,9 @@ export interface AssistantStreamHandlers {
   onUser?: (message: AssistantMessage) => void
   onDelta?: (text: string) => void
   onStatus?: (tool: string) => void
-  onDone?: (payload: {
-    conversation: AssistantConversation
-    user_message: AssistantMessage
-    assistant_message: AssistantMessage
-    proposals: AssistantToolCall[]
-  }) => void
+  /** Every parsed application event, including metadata, prevents duplicate transport fallback. */
+  onEvent?: () => void
+  onDone?: (payload: AssistantStreamDone) => void
   onError?: (message: string) => void
 }
 
@@ -745,43 +743,35 @@ export async function streamAssistantMessage(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let boundary: number
-    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-      const chunk = buffer.slice(0, boundary)
-      buffer = buffer.slice(boundary + 2)
-      const dataLine = chunk.split('\n').find((line) => line.startsWith('data:'))
-      if (!dataLine) continue
-      let event: { type?: string; [k: string]: unknown }
-      try {
-        event = JSON.parse(dataLine.slice(5).trim())
-      } catch {
-        continue
-      }
-      switch (event.type) {
-        case 'user':
-          handlers.onUser?.(event.message as AssistantMessage)
-          break
-        case 'delta':
-          handlers.onDelta?.(event.text as string)
-          break
-        case 'status':
-          handlers.onStatus?.(event.tool as string)
-          break
-        case 'done':
-          handlers.onDone?.(event as never)
-          break
-        case 'error':
-          handlers.onError?.(event.message as string)
-          break
-        default:
-          break
-      }
+  let complete = false
+  function consume(chunk: string) {
+    const data = chunk.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')
+    if (!data) return
+    let event: { type?: string; [k: string]: unknown }
+    try { event = JSON.parse(data) } catch { return }
+    if (!event || typeof event !== 'object') return
+    handlers.onEvent?.()
+    switch (event.type) {
+      case 'user': handlers.onUser?.(event.message as AssistantMessage); break
+      case 'delta': if (typeof event.text === 'string') handlers.onDelta?.(event.text); break
+      case 'status': if (typeof event.tool === 'string') handlers.onStatus?.(event.tool); break
+      case 'done': handlers.onDone?.(event as unknown as AssistantStreamDone); complete = true; break
+      case 'error': handlers.onError?.(String(event.message ?? 'Response failed')); break
     }
   }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      let match: RegExpExecArray | null
+      while ((match = /\r?\n\r?\n/.exec(buffer))) {
+        consume(buffer.slice(0, match.index).replace(/\r\n/g, '\n'))
+        buffer = buffer.slice(match.index + match[0].length)
+        if (complete) return
+      }
+      if (done) { if (buffer.trim()) consume(buffer.replace(/\r\n/g, '\n')); break }
+    }
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
 }
 
 export async function createAssistantConfirmation(data: {

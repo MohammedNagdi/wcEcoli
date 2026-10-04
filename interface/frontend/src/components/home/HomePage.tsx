@@ -72,23 +72,24 @@ function ProductPreview({
   alt,
   priority = false,
 }: {
-  name: string
+  name: 'workspace' | 'experiment' | 'results'
   alt: string
   priority?: boolean
 }) {
   const { resolvedTheme } = useTheme()
   const mode = resolvedTheme === 'dark' ? '-dark' : ''
+  const height = { workspace: 960, experiment: 730, results: 835 }[name]
   return (
     <img
       src={`/previews/${name}${mode}.webp`}
-      srcSet={`/previews/${name}${mode}-720.webp 720w, /previews/${name}${mode}.webp 1440w`}
+      srcSet={`/previews/${name}${mode}-720.webp 720w, /previews/${name}${mode}.webp 1440w, /previews/${name}${mode}-2400.webp 2400w`}
       sizes={
         priority
-          ? '(max-width: 1248px) calc(100vw - 48px), 1200px'
-          : '(max-width: 800px) calc(100vw - 48px), 700px'
+          ? '(max-width: 380px) calc(100vw - 32px), (max-width: 1248px) calc(100vw - 48px), 1200px'
+          : '(max-width: 380px) calc(100vw - 32px), (max-width: 800px) calc(100vw - 48px), (max-width: 1000px) calc((100vw - 80px) * 0.6364), (max-width: 1248px) calc((100vw - 112px) * 0.6364), 723px'
       }
-      width="1440"
-      height="960"
+      width={1200}
+      height={height}
       alt={alt}
       loading={priority ? 'eager' : 'lazy'}
       decoding="async"
@@ -220,13 +221,13 @@ export function HomePage() {
           </div>
           <figure className="home-product-frame home-hero-preview">
             <div className="home-preview-heading">
-              <span>The Explore workspace</span>
+              <span>The gene workspace</span>
               <span className="home-preview-context">Example · dnaA</span>
             </div>
             <ProductPreview
               name="workspace"
               priority
-              alt="wcEcoli gene workspace showing dnaA, its model state identifiers, genomic neighbourhood, and local regulation."
+              alt="wcEcoli gene workspace showing the gene catalog and dnaA's identifiers, chromosome position, knockout index, and genomic neighbourhood."
             />
             <figcaption>
               Start with a gene. See its biological context in one place.{' '}
@@ -284,7 +285,7 @@ export function HomePage() {
           <figure className="home-product-frame">
             <ProductPreview
               name="experiment"
-              alt="wcEcoli experiment designer configured for a dnaA knockout, showing simulation parameters, media protocol, and run summary."
+              alt="wcEcoli experiment designer configured for a dnaA knockout, showing the selected gene, simulation parameters, and run summary."
             />
             <figcaption>
               Example configuration · dnaA gene knockout. No simulation is launched from this

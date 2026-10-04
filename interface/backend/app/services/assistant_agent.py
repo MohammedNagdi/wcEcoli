@@ -32,6 +32,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
+from app.services.assistant_output import (PRESENTATION_GUIDANCE, lenient_json_loads as _lenient_json_loads, recoverable_json_objects as _iter_json_objects, tool_envelope)
 from app.config import settings
 from app.services.assistant_runtime import (
     Transport,
@@ -328,7 +329,7 @@ _FRONTIER_CALIBRATION = (
 
 
 def _stable_system(frontier: bool) -> str:
-    return _STABLE_SYSTEM_PROMPT + (_FRONTIER_CALIBRATION if frontier else "")
+    return _STABLE_SYSTEM_PROMPT + PRESENTATION_GUIDANCE + (_FRONTIER_CALIBRATION if frontier else "")
 
 
 def _agent_system_prompt(context: dict[str, Any], frontier: bool = False) -> str:
@@ -469,42 +470,6 @@ def _call_provider(
     return response, AgentStep(text, tool_calls, str(choice.get("finish_reason") or ""), raw_assistant)
 
 
-def _lenient_json_loads(chunk: str) -> Any:
-    """json.loads, but tolerate the Python-literal quirks weak models emit.
-
-    Local models (e.g. llama3.1 via Ollama) frequently write tool calls with Python
-    literals — `True`/`False`/`None` and single quotes — which are not valid JSON. Without
-    this repair, recovery fails and the raw JSON leaks into the chat. Returns None on failure.
-    """
-    try:
-        return json.loads(chunk)
-    except (json.JSONDecodeError, ValueError):
-        pass
-    repaired = re.sub(r"\bTrue\b", "true", chunk)
-    repaired = re.sub(r"\bFalse\b", "false", repaired)
-    repaired = re.sub(r"\bNone\b", "null", repaired)
-    try:
-        return json.loads(repaired)
-    except (json.JSONDecodeError, ValueError):
-        return None
-
-
-def _iter_json_objects(text: str):
-    """Yield (start, end, substring) for each top-level balanced-brace object in text."""
-    depth = 0
-    start = None
-    for index, char in enumerate(text):
-        if char == "{":
-            if depth == 0:
-                start = index
-            depth += 1
-        elif char == "}" and depth > 0:
-            depth -= 1
-            if depth == 0 and start is not None:
-                yield start, index + 1, text[start : index + 1]
-                start = None
-
-
 def _extract_text_tool_calls(
     text: str, tool_names: set[str], *, prefix: str
 ) -> tuple[str, list[NormalizedToolCall]]:
@@ -522,19 +487,10 @@ def _extract_text_tool_calls(
         obj = _lenient_json_loads(chunk)
         if not isinstance(obj, dict):
             continue
-        name = obj.get("name") or obj.get("tool") or obj.get("tool_name")
-        if not isinstance(name, str):
+        envelope = tool_envelope(obj, tool_names)
+        if envelope is None:
             continue
-        raw_args = obj.get("arguments")
-        if raw_args is None:
-            raw_args = obj.get("parameters")
-        if raw_args is None:
-            raw_args = obj.get("input")
-        # Only treat it as a (leaked) tool call if it has a params-like field or names a real tool —
-        # avoids stripping unrelated JSON the user might legitimately be discussing.
-        looks_like_call = raw_args is not None or name in tool_names
-        if not looks_like_call:
-            continue
+        name, raw_args = envelope
         # Strip the JSON from the displayed text whether or not the tool exists, so a hallucinated
         # call like {"name": "list_jobs"} never leaks as raw text.
         cut_spans.append((start, end))
@@ -550,7 +506,7 @@ def _extract_text_tool_calls(
     for start, end in reversed(cut_spans):
         cleaned = cleaned[:start] + cleaned[end:]
     # Drop now-empty code fences and collapse whitespace.
-    cleaned = re.sub(r"```(?:json|tool_code)?\s*```", "", cleaned)
+    cleaned = re.sub(r"(`{3,}|~{3,})(?:json|tool_code)?\s*\1", "", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned, calls
 

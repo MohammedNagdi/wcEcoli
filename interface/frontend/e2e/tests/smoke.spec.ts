@@ -169,8 +169,8 @@ test.describe('Assistant smoke', () => {
     await expect(msg).toContainText('Here are the available output channels.')
     await expect(msg).not.toContainText('I need a job id')
 
-    // The reasoning is preserved in a collapsible "Thought process" block.
-    const thought = page.getByText(/Thought process/)
+    // The reasoning is preserved in a collapsible "Activity details" block.
+    const thought = page.getByText(/Activity details/)
     await expect(thought).toBeVisible()
     await thought.click()
     await expect(page.getByText('I need a job id to read channels; let me check conditions first.')).toBeVisible()
@@ -184,6 +184,7 @@ test.describe('Assistant smoke', () => {
     await expect(page.getByTestId('message-assistant')).toBeVisible()
 
     // The conversation now shows in the left panel — rename it inline.
+    await page.getByLabel('Actions for e2e chat').click()
     await page.getByRole('button', { name: /^Rename / }).first().click()
     const editor = page.getByLabel('Conversation name')
     await editor.fill('My renamed chat')
@@ -354,6 +355,7 @@ test.describe('Assistant smoke', () => {
 
     const input = page.getByTestId('assistant-input')
     await expect(input).toHaveValue(/Help me assess this ML setup/)
+    await page.locator('.assistant-context > summary').click()
     await expect(page.getByText(/reviewing simulation-derived ML readiness for basal/)).toBeVisible()
 
     const requestPromise = page.waitForRequest('**/api/assistant/conversations/*/messages/stream')
@@ -808,6 +810,7 @@ test.describe('Assistant smoke', () => {
     await page.getByRole('link', { name: 'Guide' }).click()
     await page.getByTestId('assistant-dock-toggle').click()
     await expect(page.getByTestId('assistant-input')).toHaveValue('Keep this draft')
+    await page.locator('.assistant-context > summary').click()
     await expect(page.getByText('You are in the central Assistant workspace.')).toBeVisible()
   })
 
@@ -1047,6 +1050,7 @@ test.describe('Assistant smoke', () => {
     await page.goto('/assistant?gene=dnaA&prompt=Explain%20dnaA')
 
     await expect(page.getByTestId('assistant-input')).toHaveValue('Explain dnaA')
+    await page.locator('.assistant-context > summary').click()
     await expect(page.getByText('You are focused on gene dnaA.')).toBeVisible()
   })
 })

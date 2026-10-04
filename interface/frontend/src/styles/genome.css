@@ -352,7 +352,7 @@
     transform: translateY(0);
   }
 }
-@media (max-width: 1099px) {
+@container workspace (max-width: 1099px) {
   .genome-layout {
     grid-template-columns: minmax(0, 1fr);
   }

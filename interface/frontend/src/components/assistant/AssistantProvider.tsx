@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { useLocation } from 'react-router-dom'
 import {
@@ -83,7 +83,46 @@ function parseOptionalNumber(value: string | null): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+export type AssistantView = 'chat' | 'settings' | 'activity'
+export type AssistantTurnState = 'idle' | 'waiting' | 'streaming' | 'tool' | 'stopped' | 'interrupted'
+export interface InterruptedTurn {
+  conversationId: number | null
+  text: string
+  acceptedMessageId?: number
+  status: 'stopped' | 'interrupted'
+  reconciled: boolean
+}
+
+export interface ProposalReviewState {
+  preview: AssistantToolPreview | null
+  context: AssistantContext | null
+  confirmation: import('../../types').AssistantConfirmation | null
+  execution: AssistantToolExecution | null
+  uncertain: boolean
+  busy: string | null
+  conversationId?: number | null
+  messageId?: number | null
+  error: string | null
+}
 export interface AssistantContextValue {
+  proposalReviews: Record<number, ProposalReviewState>
+  setProposalReview: (id: number, patch: Partial<ProposalReviewState>) => void
+  proposalLocks: React.MutableRefObject<Set<number>>
+
+  registerLeaveGuard: (guard: ((leave: () => void) => void) | null) => void
+  dockView: AssistantView
+  setDockView: (view: AssistantView) => void
+  turnState: AssistantTurnState
+  interruptedTurn: InterruptedTurn | null
+  historyError: string | null
+  messageError: string | null
+  runtimeChanging: boolean
+  messageLoading: boolean
+  reloadConversations: () => Promise<void>
+  reloadMessages: () => Promise<void>
+  scrollPositions: React.MutableRefObject<Record<string, number>>
+  followLatestRef: React.MutableRefObject<boolean>
+
   // Panel visibility (used by the docked panel from Phase 2 on; harmless now)
   isOpen: boolean
   openAssistant: (opts?: { prompt?: string }) => void
@@ -126,6 +165,9 @@ export interface AssistantContextValue {
   streamingTool: string | null
   resolvedNote: string | null
   memory: AssistantMemory | null
+  memoryError: string | null
+  memoryLoading: boolean
+  refreshMemory: () => Promise<void>
   /** Set briefly when a turn folded earlier history into the rolling summary (in-chat marker). */
   compactionNotice: boolean
   /** Live reasoning segments emitted before tool calls during the current stream. */
@@ -143,8 +185,8 @@ export interface AssistantContextValue {
   stopStreaming: () => void
   loadConversationMessages: (conversation: AssistantConversation) => Promise<void>
   startNewChat: () => Promise<void>
-  removeConversation: (conversationId: number) => Promise<void>
-  renameConversation: (conversationId: number, title: string) => Promise<void>
+  removeConversation: (conversationId: number) => Promise<boolean>
+  renameConversation: (conversationId: number, title: string) => Promise<boolean>
   selectConversationRuntime: (providerId: string, model: string) => Promise<void>
   sendMessage: (presetContent?: string) => Promise<void>
   inspectCurrentResult: () => Promise<void>
@@ -165,6 +207,38 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   // ── visibility ──
   const [isOpen, setIsOpen] = useState(false)
+  const [proposalReviews, setProposalReviews] = useState<Record<number, ProposalReviewState>>({})
+  const proposalLocks = useRef(new Set<number>())
+  const setProposalReview = useCallback((id: number, patch: Partial<ProposalReviewState>) => setProposalReviews(current => ({ ...current, [id]: { ...(current[id] ?? { preview: null, context: null, confirmation: null, execution: null, uncertain: false, busy: null, error: null }), ...patch } })), [])
+  const [dockView, setDockView] = useState<AssistantView>('chat')
+  const leaveGuard = useRef<((leave: () => void) => void) | null>(null)
+  const registerLeaveGuard = useCallback((guard: ((leave: () => void) => void) | null) => { leaveGuard.current = guard }, [])
+  const mounted = useRef(true)
+  const runtimeRequest = useRef(0)
+  const statusRequest = useRef(0)
+  const messageRequest = useRef(0)
+  const historyRequest = useRef(0)
+  const activeIdRef = useRef<number | null>(null)
+  const sendingRef = useRef(false)
+  const scrollPositions = useRef<Record<string, number>>({})
+  const followLatestRef = useRef(true)
+  const drafts = useRef<Record<string, string>>({})
+  const [turnState, setTurnState] = useState<AssistantTurnState>('idle')
+  const [interruptedTurn, setInterruptedTurn] = useState<InterruptedTurn | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [messageError, setMessageError] = useState<string | null>(null)
+  const runtimeChangingRef = useRef(false)
+  const [runtimeChanging, setRuntimeChanging] = useState(false)
+  const manuallySelected = useRef(false)
+  const [messageLoading, setMessageLoading] = useState(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      ++statusRequest.current; ++messageRequest.current; ++historyRequest.current
+      abortRef.current?.abort()
+    }
+  }, [])
 
   // ── status ──
   const [status, setStatus] = useState<PlatformStatus | null>(null)
@@ -174,44 +248,25 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [statusError, setStatusError] = useState<string | null>(null)
 
   async function refreshAssistantStatus() {
+    const request = ++statusRequest.current
     setStatusLoading(true)
     try {
       const [platformStatus, configs, options] = await Promise.all([
         getPlatformStatus(), getAssistantProviderConfigs(), getAssistantProviderModelOptions(),
       ])
+      if (!mounted.current || request !== statusRequest.current) return
+      if (!platformStatus?.providers || !Array.isArray(configs) || !Array.isArray(options)) throw new Error('Assistant configuration could not be read.')
       setStatus(platformStatus)
       setProviderConfigs(configs)
       setProviderModelOptions(options)
       setStatusError(null)
     } catch (err) {
-      setStatusError(err instanceof Error ? err.message : String(err))
+      if (mounted.current && request === statusRequest.current) setStatusError(err instanceof Error ? err.message : String(err))
     } finally {
-      setStatusLoading(false)
+      if (mounted.current && request === statusRequest.current) setStatusLoading(false)
     }
   }
-
-  useEffect(() => {
-    let cancelled = false
-    setStatusLoading(true)
-    Promise.all([getPlatformStatus(), getAssistantProviderConfigs(), getAssistantProviderModelOptions()])
-      .then(([data, configs, options]) => {
-        if (!cancelled) {
-          setStatus(data)
-          setProviderConfigs(configs)
-          setProviderModelOptions(options)
-          setStatusError(null)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setStatusError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setStatusLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  useEffect(() => { void refreshAssistantStatus() }, [])
 
   const runtimeReady = Boolean(status?.providers.runtime_ready)
   const runtimeLabel = status?.providers.active_runtime_provider_id
@@ -263,6 +318,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   const [proposals, setProposals] = useState<AssistantToolCall[]>([])
   const [input, setInput] = useState('')
+  const inputRef = useRef(input)
+  inputRef.current = input
   const [inspectPreview, setInspectPreview] = useState<AssistantToolPreview | null>(null)
   const [inspectExecution, setInspectExecution] = useState<AssistantToolExecution | null>(null)
   const [loading, setLoading] = useState(true)
@@ -272,6 +329,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [streamingText, setStreamingText] = useState<string | null>(null)
   const [streamingTool, setStreamingTool] = useState<string | null>(null)
   const [resolvedNote, setResolvedNote] = useState<string | null>(null)
+  const memoryRequest = useRef(0)
+  const [memoryError, setMemoryError] = useState<string | null>(null)
+  const [memoryLoading, setMemoryLoading] = useState(false)
   const [memory, setMemory] = useState<AssistantMemory | null>(null)
   const [compactionNotice, setCompactionNotice] = useState(false)
   // The model's intermediate reasoning (text emitted before each tool call) — shown live as a
@@ -289,7 +349,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const selectedProviderId = activeConversation?.provider_id || draftProviderId
   const selectedModel = activeConversation?.model || draftModel
   const selectedOption = providerModelOptions.find((option) => option.provider_id === selectedProviderId)
-  const selectionAvailable = Boolean(selectedOption?.models.includes(selectedModel))
+  const selectionAvailable = !statusError && Boolean(selectedOption?.models.includes(selectedModel))
   const inspectionContextKey = [
     context.route,
     context.selected_gene,
@@ -326,21 +386,25 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     }
   }, [inspectionContextKey])
 
+  async function refreshMemory() {
+    const id = activeIdRef.current
+    const request = ++memoryRequest.current
+    setMemoryError(null)
+    if (id == null) { setMemory(null); setMemoryLoading(false); return }
+    setMemoryLoading(true)
+    try {
+      const data = await getAssistantMemory(id)
+      if (!mounted.current || request !== memoryRequest.current) return
+      if (!Array.isArray(data.remembered_genes)) throw new Error('Conversation memory could not be read.')
+      setMemory(data)
+    } catch (err) { if (mounted.current && request === memoryRequest.current) setMemoryError(err instanceof Error ? err.message : String(err)) }
+    finally { if (mounted.current && request === memoryRequest.current) setMemoryLoading(false) }
+  }
+  const memoryConversation = useRef<number | null>(null)
   useEffect(() => {
-    const id = activeConversation?.id
-    if (id == null) {
-      setMemory(null)
-      return
-    }
-    let cancelled = false
-    getAssistantMemory(id)
-      .then((data) => {
-        if (!cancelled) setMemory(data)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    if (memoryConversation.current !== activeIdRef.current) { setMemory(null); memoryConversation.current = activeIdRef.current }
+    void refreshMemory()
+    return () => { ++memoryRequest.current }
   }, [activeConversation?.id, messages.length])
 
   async function clearMemory() {
@@ -349,8 +413,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     try {
       await clearAssistantMemory(id)
       setMemory(await getAssistantMemory(id))
-    } catch {
-      /* best-effort */
+    } catch (err) {
+      setError(`Memory could not be cleared: ${err instanceof Error ? err.message : String(err)}`)
+      throw err
     }
   }
 
@@ -358,79 +423,95 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     abortRef.current?.abort()
   }
 
-  // Keep the message list pinned to the bottom *only* by scrolling the list element itself, and
-  // only when the user is already near the bottom. Using scrollIntoView here scrolled every
-  // scrollable ancestor (including the window), which yanked the whole page on each streamed token
-  // and fought the user's own scrolling. Setting scrollTop on the container avoids both.
   useEffect(() => {
     const el = scrollRef.current
-    if (!el) return
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    if (distanceFromBottom < 120) el.scrollTop = el.scrollHeight
-  }, [messages.length, sending, streamingText])
+    if (el && followLatestRef.current) el.scrollTop = el.scrollHeight
+  }, [messages.length, sending, streamingText, thinkingSegments.length, proposals.length])
 
-  // Jump straight to the latest message when switching/opening a conversation (ignore the
-  // near-bottom gate above, which is only for keeping pace during a live stream).
-  useEffect(() => {
+  function rememberDraft() {
+    drafts.current[String(activeIdRef.current ?? 'new')] = input
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [activeConversation?.id])
-
-  // The user just sent a message — always jump to the bottom so the new turn is visible, even if
-  // they had scrolled up to read an earlier answer (the near-bottom gate would otherwise block it).
-  const prevSendingRef = useRef(false)
-  useEffect(() => {
-    if (sending && !prevSendingRef.current) {
-      requestAnimationFrame(() => {
-        const el = scrollRef.current
-        if (el) el.scrollTop = el.scrollHeight
-      })
-    }
-    prevSendingRef.current = sending
-  }, [sending])
+    if (el) scrollPositions.current[String(activeIdRef.current ?? 'new')] = el.scrollTop
+  }
 
   async function loadConversationMessages(conversation: AssistantConversation) {
+    if (sendingRef.current) return
+    manuallySelected.current = true
+    rememberDraft()
+    const request = ++messageRequest.current
+    ++runtimeRequest.current
+    runtimeChangingRef.current = false
+    setRuntimeChanging(false)
+    activeIdRef.current = conversation.id
+    setActiveConversation(conversation)
+    setInput(drafts.current[String(conversation.id)] ?? '')
+    setMessageLoading(true)
+    setMessageError(null)
     setError(null)
     setCompactionNotice(false)
     setThinkingSegments([])
-    if (activeConversation?.id !== conversation.id) clearInspection()
-    setActiveConversation(conversation)
+    setInterruptedTurn(null)
+    setMessages([])
+    setProposals([])
+    clearInspection()
     try {
       const [rows, proposalRows] = await Promise.all([
         getAssistantMessages(conversation.id),
         getAssistantToolCalls({ conversation_id: conversation.id, status: 'proposed' }),
       ])
+      if (!mounted.current || request !== messageRequest.current) return
+      if (!Array.isArray(rows) || !Array.isArray(proposalRows)) throw new Error('Conversation data could not be read.')
       setMessages(rows)
-      setProposals(proposalRows)
+      setProposals(proposalRows.filter(row => !proposalReviews[row.id]?.execution?.executed && proposalReviews[row.id]?.confirmation?.status !== 'rejected'))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (mounted.current && request === messageRequest.current) setMessageError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (mounted.current && request === messageRequest.current) setMessageLoading(false)
+    }
+  }
+
+  async function reloadMessages() {
+    const id = activeIdRef.current
+    if (id == null || sendingRef.current) return
+    const request = ++messageRequest.current
+    setMessageLoading(true)
+    setMessageError(null)
+    try {
+      const [rows, calls] = await Promise.all([getAssistantMessages(id), getAssistantToolCalls({ conversation_id: id, status: 'proposed' })])
+      if (!mounted.current || request !== messageRequest.current || activeIdRef.current !== id) return
+      if (!Array.isArray(rows) || !Array.isArray(calls)) throw new Error('Conversation data could not be read.')
+      setMessages(rows)
+      setProposals(calls)
+      setInterruptedTurn(current => {
+        if (!current || current.conversationId !== id) return current
+        return current.acceptedMessageId != null && rows.some(row => row.role === 'assistant' && row.id > current.acceptedMessageId!) ? null : { ...current, reconciled: true }
+      })
+    } catch (err) {
+      if (mounted.current && request === messageRequest.current) setMessageError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (mounted.current && request === messageRequest.current) setMessageLoading(false)
     }
   }
 
   async function loadConversations() {
+    if (sendingRef.current) return
+    const request = ++historyRequest.current
     setLoading(true)
-    setError(null)
+    setHistoryError(null)
     try {
       const rows = await getAssistantConversations()
+      if (!mounted.current || request !== historyRequest.current) return
+      if (!Array.isArray(rows)) throw new Error('Conversation history could not be read.')
       setConversations(rows)
-      if (rows[0]) {
-        await loadConversationMessages(rows[0])
-      } else {
-        setActiveConversation(null)
-        setMessages([])
-        setProposals([])
-      }
+      if (!manuallySelected.current && !sendingRef.current && activeIdRef.current == null && rows[0] && !inputRef.current.trim()) await loadConversationMessages(rows[0])
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (mounted.current && request === historyRequest.current) setHistoryError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoading(false)
+      if (mounted.current && request === historyRequest.current) setLoading(false)
     }
   }
 
-  useEffect(() => {
-    loadConversations()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  useEffect(() => { void loadConversations() }, [])
 
   useEffect(() => {
     if (urlSuggestedPrompt && !input.trim() && messages.length === 0) {
@@ -443,10 +524,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setProposals([])
       return
     }
+    if (sending) return
     let cancelled = false
     getAssistantToolCalls({ conversation_id: activeConversation.id, status: 'proposed' })
       .then((proposalRows) => {
-        if (!cancelled) setProposals(proposalRows)
+        if (!cancelled) setProposals(proposalRows.filter(row => !proposalReviews[row.id]?.execution?.executed && proposalReviews[row.id]?.confirmation?.status !== 'rejected'))
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
@@ -454,9 +536,21 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [activeConversation?.id, messages.length])
+  }, [activeConversation?.id, messages.length, sending])
 
   async function startNewChat() {
+    if (sendingRef.current) return
+    manuallySelected.current = true
+    ++runtimeRequest.current
+    runtimeChangingRef.current = false
+    setRuntimeChanging(false)
+    rememberDraft()
+    ++messageRequest.current
+    activeIdRef.current = null
+    setMessageError(null)
+    setMessageLoading(false)
+    setInterruptedTurn(null)
+    setTurnState('idle')
     setError(null)
     setCompactionNotice(false)
     setThinkingSegments([])
@@ -464,7 +558,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setActiveConversation(null)
     setMessages([])
     setProposals([])
-    setInput('')
+    setInput(drafts.current.new ?? '')
     const defaultProvider = status?.providers.active_runtime_provider_id
     const option = providerModelOptions.find((item) => item.provider_id === defaultProvider) ?? providerModelOptions[0]
     setDraftProviderId(option?.provider_id ?? '')
@@ -478,50 +572,68 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   async function removeConversation(conversationId: number) {
     if (sending) {
       setError('Wait for the current assistant response before deleting this chat.')
-      return
+      return false
     }
     setError(null)
     try {
       await deleteAssistantConversation(conversationId)
       setConversations((current) => current.filter((conversation) => conversation.id !== conversationId))
-      if (activeConversation?.id === conversationId) {
+      if (activeIdRef.current === conversationId) {
+        ++messageRequest.current
+        activeIdRef.current = null
+        setInput(drafts.current.new ?? '')
+        setInterruptedTurn(null)
+        setMessageLoading(false)
+        setMessageError(null)
         setActiveConversation(null)
         setMessages([])
         setProposals([])
         clearInspection()
       }
+      delete drafts.current[String(conversationId)]
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     }
   }
 
   async function renameConversation(conversationId: number, title: string) {
     const trimmed = title.trim()
-    if (!trimmed) return
+    if (!trimmed || sendingRef.current) return false
     setError(null)
     try {
       const updated = await renameAssistantConversation(conversationId, trimmed)
       setConversations((current) => current.map((c) => (c.id === conversationId ? updated : c)))
-      if (activeConversation?.id === conversationId) setActiveConversation(updated)
+      if (activeIdRef.current === conversationId) setActiveConversation(updated)
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     }
   }
 
   async function selectConversationRuntime(providerId: string, model: string) {
-    if (sending) return
+    if (sendingRef.current) return
+    const id = activeIdRef.current
+    const request = ++runtimeRequest.current
     setError(null)
     if (!activeConversation) {
       setDraftProviderId(providerId)
       setDraftModel(model)
       return
     }
+    runtimeChangingRef.current = true
+    setRuntimeChanging(true)
     try {
       const updated = await updateAssistantConversation(activeConversation.id, { provider_id: providerId, model })
+      if (request !== runtimeRequest.current || id !== activeIdRef.current) return
       setActiveConversation(updated)
       setConversations((current) => current.map((item) => (item.id === updated.id ? updated : item)))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (request === runtimeRequest.current && id === activeIdRef.current) setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (request === runtimeRequest.current) { runtimeChangingRef.current = false; setRuntimeChanging(false) }
     }
   }
 
@@ -535,6 +647,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       provider_id: draftProviderId,
       model: draftModel,
     })
+    activeIdRef.current = conversation.id
+    delete drafts.current.new
     setActiveConversation(conversation)
     setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)])
     return conversation
@@ -542,109 +656,125 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   async function sendMessage(presetContent?: string) {
     const content = (presetContent ?? input).trim()
-    if (!content || sending || !selectionAvailable) return
+    if (!content || sendingRef.current || runtimeChangingRef.current || !selectionAvailable || messageLoading || messageError || (interruptedTurn && !interruptedTurn.reconciled)) return
+    sendingRef.current = true
     setSending(true)
+    setTurnState('waiting')
+    setInterruptedTurn(null)
     setError(null)
     setCompactionNotice(false)
     streamingRef.current = ''
     thinkingRef.current = []
     setThinkingSegments([])
     setInput('')
+    drafts.current[String(activeIdRef.current ?? 'new')] = ''
+    followLatestRef.current = true
+    const lastKnownMessageId = Math.max(0, ...messages.map(message => message.id))
     const tempId = -Date.now()
-    const optimisticUser: AssistantMessage = {
-      id: tempId,
-      conversation_id: activeConversation?.id ?? 0,
-      role: 'user',
-      content,
-      context,
-      status: 'sending',
-      created_at: new Date().toISOString(),
-      provider_id: '',
-      model: '',
+    let conversationId = activeIdRef.current
+    let userMessageId = tempId
+    let receivedEvent = false
+    let completed = false
+    let displayFrame: number | null = null
+    function cancelDisplayFrame() {
+      if (displayFrame !== null) cancelAnimationFrame(displayFrame)
+      displayFrame = null
     }
-    setMessages((current) => [...current, optimisticUser])
-
+    const controller = new AbortController()
+    abortRef.current = controller
+    setMessages(current => [...current, {
+      id: tempId, conversation_id: activeConversation?.id ?? 0, role: 'user', content, context,
+      status: 'sending', created_at: new Date().toISOString(), provider_id: '', model: '',
+    }])
     function applyExchange(exchange: AssistantExchange) {
-      setMessages((current) => [
-        ...current.filter((message) => message.id !== tempId && message.id !== exchange.user_message.id),
-        exchange.user_message,
-        exchange.assistant_message,
-      ])
+      if (!mounted.current) return
+      completed = true
+      cancelDisplayFrame()
+      setStreamingText(null)
+      setMessages(current => [...current.filter(message => message.id !== tempId && message.id !== exchange.user_message.id), exchange.user_message, exchange.assistant_message])
       setProposals(exchange.proposals ?? [])
+      activeIdRef.current = exchange.conversation.id
       setActiveConversation(exchange.conversation)
-      setConversations((current) => [exchange.conversation, ...current.filter((item) => item.id !== exchange.conversation.id)])
+      setConversations(current => [exchange.conversation, ...current.filter(item => item.id !== exchange.conversation.id)])
     }
-
     try {
       const conversation = await ensureConversation(content)
-      const controller = new AbortController()
-      abortRef.current = controller
-      let streamed = false
+      conversationId = conversation.id
+      if (controller.signal.aborted) throw new DOMException('Response stopped', 'AbortError')
       try {
         setStreamingText('')
-        await streamAssistantMessage(
-          conversation.id,
-          { content, context },
-          {
-            onUser: (message) => {
-              streamed = true
-              setMessages((current) => current.map((item) => (item.id === tempId ? message : item)))
-            },
-            onDelta: (text) => {
-              streamed = true
-              streamingRef.current += text
-              setStreamingText(streamingRef.current)
-            },
-            onStatus: (tool) => {
-              setStreamingTool(tool)
-              // A tool is about to run: whatever the model said up to here was reasoning, not the
-              // final answer — fold it into the thinking trail and reset the live answer buffer.
-              if (streamingRef.current.trim()) {
-                thinkingRef.current = [...thinkingRef.current, streamingRef.current.trim()]
-                setThinkingSegments(thinkingRef.current)
-                streamingRef.current = ''
-                setStreamingText('')
-              }
-            },
-            onDone: (payload) => {
-              streamed = true
-              const exchange = payload as unknown as AssistantExchange
-              applyExchange(exchange)
-              setCompactionNotice(Boolean((payload as { compacted?: boolean }).compacted))
-              // Attach the reasoning trail to the final assistant message (ephemeral, session-only).
-              const asstId = exchange.assistant_message?.id
-              if (asstId != null && thinkingRef.current.length > 0) {
-                setMessageThinking((current) => ({ ...current, [asstId]: thinkingRef.current }))
-              }
-              // Attach authoritative read-only tool outputs for grounded data cards.
-              const toolResults = (payload as { tool_results?: ToolResultEntry[] }).tool_results
-              if (asstId != null && Array.isArray(toolResults) && toolResults.length > 0) {
-                setMessageToolResults((current) => ({ ...current, [asstId]: toolResults }))
-              }
-            },
-            onError: (message) => setError(message),
+        await streamAssistantMessage(conversation.id, { content, context }, {
+          onEvent: () => { receivedEvent = true },
+          onUser: message => {
+            userMessageId = message.id
+            setMessages(current => current.map(item => item.id === tempId ? message : item))
           },
-          controller.signal,
-        )
-      } catch (streamErr) {
-        if (controller.signal.aborted) {
-          setMessages((current) =>
-            current.map((message) => (message.id === tempId ? { ...message, status: 'stored' } : message)),
-          )
-          return
-        }
-        if (streamed) throw streamErr
-        const exchange = await createAssistantMessage(conversation.id, { content, context })
-        applyExchange(exchange)
+          onDelta: text => {
+            streamingRef.current += text
+            if (displayFrame === null) displayFrame = requestAnimationFrame(() => {
+              displayFrame = null
+              if (mounted.current) setStreamingText(streamingRef.current)
+            })
+            setTurnState('streaming')
+          },
+          onStatus: tool => {
+            cancelDisplayFrame()
+            setStreamingTool(tool)
+            setTurnState('tool')
+            if (streamingRef.current.trim()) {
+              thinkingRef.current = [...thinkingRef.current, streamingRef.current.trim()]
+              setThinkingSegments(thinkingRef.current)
+              streamingRef.current = ''
+              setStreamingText('')
+            }
+          },
+          onDone: exchange => {
+            applyExchange(exchange)
+            setCompactionNotice(Boolean(exchange.compacted))
+            const id = exchange.assistant_message.id
+            if (thinkingRef.current.length) setMessageThinking(current => ({ ...current, [id]: thinkingRef.current }))
+            if (exchange.tool_results?.length) setMessageToolResults(current => ({ ...current, [id]: exchange.tool_results! }))
+          },
+          onError: message => { throw new Error(message) },
+        }, controller.signal)
+        if (!completed) throw new Error('The response ended before completion.')
+      } catch (err) {
+        if (completed) return
+        if (controller.signal.aborted || receivedEvent) throw err
+        applyExchange(await createAssistantMessage(conversation.id, { content, context }))
       }
+      setTurnState('idle')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setMessages((current) => current.map((message) => (message.id === tempId ? { ...message, status: 'failed' } : message)))
+      if (!mounted.current) return
+      const stopped = controller.signal.aborted
+      setTurnState(stopped ? 'stopped' : 'interrupted')
+      setInterruptedTurn({ conversationId, acceptedMessageId: receivedEvent ? userMessageId === tempId ? lastKnownMessageId : userMessageId : undefined, text: streamingRef.current || thinkingRef.current.join('\n\n'), status: stopped ? 'stopped' : 'interrupted', reconciled: !receivedEvent })
+      if (!stopped) setError(err instanceof Error ? err.message : String(err))
+      setMessages(current => current.map(message => message.id === userMessageId ? { ...message, status: receivedEvent ? 'stored' : 'failed' } : message))
+      if (!receivedEvent) {
+        setInput(content)
+        drafts.current[String(conversationId ?? 'new')] = content
+      } else if (conversationId != null) {
+        // Reconcile accepted turns; never send them through the fallback transport again.
+        try {
+          const rows = await getAssistantMessages(conversationId)
+          if (mounted.current && activeIdRef.current === conversationId && Array.isArray(rows)) {
+            setMessages(rows)
+            setInterruptedTurn(current => rows.some(row => row.role === 'assistant' && row.id > (userMessageId === tempId ? lastKnownMessageId : userMessageId)) ? null : current ? { ...current, reconciled: true } : null)
+          }
+        } catch (reloadError) {
+          setMessageError(`Stored messages could not be reloaded: ${reloadError instanceof Error ? reloadError.message : String(reloadError)}`)
+        }
+      }
     } finally {
+      cancelDisplayFrame()
+      sendingRef.current = false
       abortRef.current = null
-      setStreamingText(null)
-      setStreamingTool(null)
-      setSending(false)
+      if (mounted.current) {
+        setStreamingText(null)
+        setStreamingTool(null)
+        setSending(false)
+      }
     }
   }
 
@@ -697,7 +827,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   function handleProposalResolved(proposalId: number, outcome: 'executed' | 'rejected') {
     setProposals((current) => current.filter((item) => item.id !== proposalId))
     setResolvedNote(outcome === 'executed' ? 'Action confirmed and executed.' : 'Proposal dismissed.')
-    window.setTimeout(() => setResolvedNote(null), 3500)
+
     if (proposalId > 0) {
       dismissAssistantToolCall(proposalId, outcome).catch(() => {})
     }
@@ -709,10 +839,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     if (prompt) setInput((current) => (current.trim() ? current : prompt))
   }
   function closeAssistant() {
-    setIsOpen(false)
+    if (leaveGuard.current) leaveGuard.current(() => setIsOpen(false))
+    else setIsOpen(false)
   }
 
   const value: AssistantContextValue = {
+    proposalReviews, setProposalReview, proposalLocks,
+    registerLeaveGuard, dockView, setDockView, turnState, interruptedTurn,
+    historyError, messageError, messageLoading, runtimeChanging,
+    reloadConversations: loadConversations, reloadMessages,
+    scrollPositions, followLatestRef,
     isOpen,
     openAssistant,
     closeAssistant,
@@ -749,7 +885,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     streamingText,
     streamingTool,
     resolvedNote,
-    memory,
+    memory, memoryError, memoryLoading, refreshMemory,
     compactionNotice,
     thinkingSegments,
     messageThinking,

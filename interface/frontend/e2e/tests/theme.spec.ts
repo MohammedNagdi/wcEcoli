@@ -91,7 +91,7 @@ test.describe('Theme', () => {
     })
     expect(colors.frame).toBe('rgb(255, 255, 255)')
     expect(colors.footer).toBe('rgb(255, 255, 255)')
-    expect(colors.input).toBe('rgb(82, 82, 95)')
+    expect(colors.input).toBe('rgb(28, 28, 36)')
     const luminance = (rgb: string) => {
       const channels = (rgb.match(/\d+/g)?.slice(0, 3).map(Number) ?? []).map((value) => {
         const channel = value / 255
@@ -100,9 +100,9 @@ test.describe('Theme', () => {
       return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
     }
     expect((luminance(colors.frame) + 0.05) / (luminance(colors.input) + 0.05)).toBeGreaterThanOrEqual(4.5)
-    expect(chatBackground).toContain('rgb(249, 250, 251)')
+    expect(chatBackground).toBe('none')
     expect(assistantBackground).toBe('rgb(255, 255, 255)')
-    expect(proposalBackgrounds.panel).toBe('rgba(239, 246, 255, 0.5)')
+    expect(proposalBackgrounds.panel).toBe('rgb(255, 255, 255)')
     expect(proposalBackgrounds.card).toBe('rgb(247, 247, 250)')
   })
 
@@ -148,7 +148,7 @@ test.describe('Theme', () => {
     await page.getByTestId('assistant-input').fill('assess ml setup')
     await page.getByTestId('assistant-send').click()
 
-    const thought = page.getByText(/Thought process/)
+    const thought = page.getByText(/Activity details/)
     await expect(thought).toBeVisible()
     await thought.click()
     const panel = thought.locator('..')

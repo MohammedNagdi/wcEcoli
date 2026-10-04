@@ -137,6 +137,21 @@ for (const mode of ['light', 'dark'] as const) {
       'src',
       `/previews/workspace${mode === 'dark' ? '-dark' : ''}.webp`,
     )
+    // Each crop has its own aspect ratio; reserve the right space before it loads
+    // and offer a sharp source for high-density screens.
+    const previews = page.locator('main img')
+    for (const [index, height] of [960, 730, 835].entries()) {
+      const preview = previews.nth(index)
+      await expect(preview).toHaveAttribute('width', '1200')
+      await expect(preview).toHaveAttribute('height', String(height))
+      await expect(preview).toHaveAttribute('srcset', /-2400\.webp 2400w/)
+      const proportions = await preview.evaluate((element) => {
+        const image = element as HTMLImageElement
+        return { source: image.naturalWidth / image.naturalHeight, layout: image.clientWidth / image.clientHeight }
+      })
+      expect(proportions.source).toBeCloseTo(1200 / height, 2)
+      expect(proportions.layout).toBeCloseTo(proportions.source, 2)
+    }
     await page.locator('.home-hero-copy').evaluate(async (element) => { await Promise.all(element.getAnimations().map((animation) => animation.finished)) })
     const results = await new AxeBuilder({ page }).analyze()
     expect(

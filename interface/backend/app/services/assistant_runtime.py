@@ -15,6 +15,7 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from app.services.assistant_output import PRESENTATION_GUIDANCE
 from app.config import settings
 from app.db.models import AssistantProviderConfig
 
@@ -424,7 +425,8 @@ def _system_prompt(context: dict[str, Any]) -> str:
         "Use final plain-text lines like 'Proposal action: create_experiment', 'Proposal condition: basal', and 'Proposal targets: dnaA, crp, fis', "
         "or a small JSON block such as {\"action\":\"create_experiment\",\"proposal_targets\":[\"dnaA\",\"crp\"]}. "
         "The platform validates symbols before showing cards. "
-        f"Current page context: {_context_summary(context)}."
+        + PRESENTATION_GUIDANCE
+        + f"Current page context: {_context_summary(context)}."
         f"{page_state_block}"
         f"{platform_block}"
         f"{memory_block}"

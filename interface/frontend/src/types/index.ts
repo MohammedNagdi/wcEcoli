@@ -951,6 +951,16 @@ export interface AssistantProviderModelOption {
   models: string[]
 }
 
+export interface AssistantToolResultEntry {
+  tool_name: string
+  result: Record<string, unknown>
+}
+
+export interface AssistantStreamDone extends AssistantExchange {
+  compacted?: boolean
+  tool_results?: AssistantToolResultEntry[]
+}
+
 export interface AssistantExchange {
   conversation: AssistantConversation
   user_message: AssistantMessage

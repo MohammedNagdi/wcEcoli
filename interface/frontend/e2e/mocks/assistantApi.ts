@@ -155,9 +155,11 @@ interface MockOptions {
 export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Promise<void> {
   const reply = opts.reply ?? 'Hello there.'
   const proposals = opts.proposals ?? []
+  let turn = 0
   const streamBody = (content: string) => {
-    const userMsg = { id: 1, conversation_id: 1, role: 'user', content, context: CTX, status: 'stored', provider_id: '', model: '', created_at: '' }
-    const asstMsg = { id: 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: opts.assistantStatus ?? 'completed', provider_id: 'openai', model: 'gpt-4.1-mini', created_at: '' }
+    turn++
+    const userMsg = { id: turn * 2 - 1, conversation_id: 1, role: 'user', content, context: CTX, status: 'stored', provider_id: '', model: '', created_at: '' }
+    const asstMsg = { id: turn * 2, conversation_id: 1, role: 'assistant', content: reply, context: CTX, status: opts.assistantStatus ?? 'completed', provider_id: 'openai', model: 'gpt-4.1-mini', created_at: '' }
     const streamEvents: unknown[] = [
       { type: 'meta', provider_id: 'openai', model: 'gpt-4.1-mini' },
       { type: 'user', message: userMsg },
@@ -233,7 +235,7 @@ export async function mockAssistantApi(page: Page, opts: MockOptions = {}): Prom
   await page.route('**/api/assistant/tools/*/preview', (r) => r.fulfill({ json: PREVIEW }))
   await page.route('**/api/assistant/tools/*/execute', (r) => r.fulfill({ json: EXECUTION }))
   await page.route('**/api/assistant/confirmations/*/resolve', (r) => r.fulfill({ json: { ...CONFIRMATION, status: 'approved' } }))
-  await page.route('**/api/assistant/confirmations', (r) =>
+  await page.route('**/api/assistant/confirmations*', (r) =>
     r.request().method() === 'POST' ? r.fulfill({ json: CONFIRMATION }) : r.fulfill({ json: [] }),
   )
 }
