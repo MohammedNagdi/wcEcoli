@@ -1,6 +1,7 @@
 """Timeline parsing, validation, and condition inference helpers."""
 
 from dataclasses import dataclass
+import math
 
 from fastapi import HTTPException
 from sqlmodel import Session, select
@@ -51,6 +52,12 @@ def build_timeline_definition(events: list[TimelineEvent]) -> str:
 
 def validate_timeline_definition(session: Session, definition: str) -> str:
     """Validate a raw timeline string and return its normalized form."""
+    known_media = {recipe.media_id for recipe in session.exec(select(MediaRecipe)).all()}
+    return normalize_timeline_definition(definition, known_media)
+
+
+def normalize_timeline_definition(definition: str, known_media: set[str]) -> str:
+    """Validate against a preloaded media catalog (also used by bulk evidence reads)."""
     try:
         events = parse_timeline_definition(definition)
     except ValueError as exc:
@@ -59,19 +66,19 @@ def validate_timeline_definition(session: Session, definition: str) -> str:
     if not events:
         raise HTTPException(status_code=422, detail="Timeline must contain at least one event.")
     if events[0].time_sec != 0:
-        raise HTTPException(status_code=422, detail="Timeline must start with an event at 0 seconds.")
+        raise HTTPException(
+            status_code=422, detail="Timeline must start with an event at 0 seconds."
+        )
 
-    known_media = {
-        recipe.media_id
-        for recipe in session.exec(select(MediaRecipe)).all()
-    }
     if not known_media:
         raise HTTPException(status_code=503, detail="Media recipes are not loaded.")
 
     seen_times: set[float] = set()
     for event in events:
-        if event.time_sec < 0:
-            raise HTTPException(status_code=422, detail="Timeline event times must be non-negative.")
+        if not math.isfinite(event.time_sec) or event.time_sec < 0:
+            raise HTTPException(
+                status_code=422, detail="Timeline event times must be finite and non-negative."
+            )
         if event.time_sec in seen_times:
             raise HTTPException(status_code=422, detail="Timeline event times must be unique.")
         seen_times.add(event.time_sec)
@@ -111,7 +118,5 @@ def infer_condition_from_timeline(session: Session, definition: str, default: st
         return default
 
     first_media = events[0].media_id
-    condition = session.exec(
-        select(Condition).where(Condition.nutrients == first_media)
-    ).first()
+    condition = session.exec(select(Condition).where(Condition.nutrients == first_media)).first()
     return condition.name if condition else default

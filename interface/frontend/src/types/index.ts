@@ -568,6 +568,17 @@ export interface GeneKOSummary {
   mean_doubling_time_min: number | null
   mean_final_mass_fg: number | null
   phenotype: 'essential' | 'growth_defect' | 'neutral' | 'unknown'
+  evidence_status: 'no_experiment' | 'no_completed_jobs' | 'missing_results' | 'unavailable_metrics' | 'partial' | 'usable'
+  evidence_reason: string
+  evidence_gaps: string[]
+  usable_result_count: number
+  recorded_result_count: number
+  divided_count: number
+  division_sample_count: number
+  metric_sample_counts: Record<string, number>
+  source: DesignSource | null
+  baseline: DesignBaseline
+  aggregation_scope: string
 }
 
 export interface DesignOverview {
@@ -579,6 +590,57 @@ export interface DesignOverview {
   neutral_genes: number
   unknown_genes: number
   genes: GeneKOSummary[]
+  condition: string
+  genes_with_experiments: number
+  genes_with_usable_results: number
+  unclassified_genes: number
+  result_coverage_fraction: number
+  aggregation_scope: string
+}
+
+export interface DesignSource {
+  experiment_id: number
+  name: string
+  status: string
+  created_at: string
+  condition: string
+  timeline: string
+  resolved_protocol: string | null
+  duration_sec: number | null
+  generations: number | null
+  configured_seed_count: number | null
+  total_jobs: number
+  completed_jobs: number
+  usable_results: number
+  experiment_url: string
+}
+
+export interface DesignBaseline {
+  status: 'available' | 'unavailable' | 'unusable_comparison'
+  reason: string
+  source: DesignSource | null
+  mean_growth_rate: number | null
+  growth_rate_samples: number
+}
+
+export interface DesignJobEvidence {
+  job_id: number
+  seed: number
+  status: string
+  termination_reason: string
+  lineage_terminated: boolean
+  result_url: string
+  earliest_result_id: number | null
+  results: (SimulationResult & { terminated: boolean; termination_reason: string })[]
+}
+
+export interface DesignGeneEvidence {
+  gene: Omit<GeneDetail, 'regulated_by' | 'regulates'> & { description?: string }
+  condition: string
+  summary: GeneKOSummary
+  experiments: DesignSource[]
+  jobs: DesignJobEvidence[]
+  baseline_jobs: DesignJobEvidence[]
 }
 
 export interface EssentialityStats {

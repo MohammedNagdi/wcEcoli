@@ -1,571 +1,128 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useEffect, useMemo, useRef } from 'react'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
-import { getDesignOverview, getEssentiality } from '../../api/client'
-import type { DesignOverview, GeneKOSummary, EssentialityStats } from '../../types'
-import { ASSISTANT_GENE_SAMPLE_LIMIT, makeAssistantContextKey, summarizeKOSummary, truncateText } from '../../utils/assistantContext'
-
-const PHENOTYPE_COLORS: Record<string, string> = {
-  essential: 'bg-red-100 text-red-800',
-  growth_defect: 'bg-amber-100 text-amber-800',
-  neutral: 'bg-green-100 text-green-800',
-  unknown: 'bg-gray-100 text-gray-600',
-}
-
-const PHENOTYPE_DOT: Record<string, string> = {
-  essential: 'bg-red-500',
-  growth_defect: 'bg-amber-500',
-  neutral: 'bg-green-500',
-  unknown: 'bg-gray-400',
-}
-
-type SortKey = 'gene_symbol' | 'category' | 'phenotype' | 'mean_growth_rate' | 'mean_doubling_time_min' | 'n_completed'
-type SortDir = 'asc' | 'desc'
+import { useMediaQuery } from '../workspace/useMediaQuery'
+import { categoryLabel } from '../../utils/labels'
+import { ASSISTANT_GENE_SAMPLE_LIMIT, summarizeKOSummary, truncateText } from '../../utils/assistantContext'
+import { DesignCategories, DesignTable } from './DesignCatalog'
+import { DesignInspector } from './DesignInspector'
+import { categoryStats, matchingGenes, phenotypeLabels, phenotypes, readDesignState, sortGenes, type SortKey } from './designState'
+import { useDesignConditions, useDesignInspector, useDesignOverview } from './useDesignEvidence'
+import { useDesignScroll } from './useDesignScroll'
+import '../../styles/design.css'
 
 export function DesignPage() {
+  const [params, setParams] = useSearchParams()
   const location = useLocation()
-  const assistantCapturedAt = useRef(new Date().toISOString()).current
-  const [overview, setOverview] = useState<DesignOverview | null>(null)
-  const [essentiality, setEssentiality] = useState<EssentialityStats[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const state = readDesignState(params)
+  const overview = useDesignOverview(state.condition)
+  const conditions = useDesignConditions()
+  const inspector = useDesignInspector(state.gene, state.condition, state.experimentId)
+  const wide = useMediaQuery('(min-width: 1160px)')
+  const pageRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const positionKey = JSON.stringify({ ...state, gene: undefined, experimentId: undefined })
+  const position = useDesignScroll(positionKey, !!overview.data, !!state.gene, pageRef, scrollRef)
+  const capturedAt = useRef(new Date().toISOString()).current
+  const conditionNames = useMemo(() => [...new Set([state.condition, ...(conditions.data ?? []).map(c => c.name)])].sort(), [state.condition, conditions.data])
+  const categories = useMemo(() => [...new Set((overview.data?.genes ?? []).map(g => g.category))].sort(), [overview.data])
+  const matching = useMemo(() => matchingGenes(overview.data?.genes ?? [], state), [overview.data, state.search, state.category, state.phenotype, state.evidence])
+  const sorted = useMemo(() => sortGenes(matching, state.sort, state.direction), [matching, state.sort, state.direction])
+  const compositions = useMemo(() => categoryStats(matching), [matching])
+  const pages = Math.max(1, Math.ceil(sorted.length / state.pageSize))
+  const currentPage = Math.min(pages, state.page)
+  const pageGenes = sorted.slice((currentPage - 1) * state.pageSize, currentPage * state.pageSize)
 
-  // Filters
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [phenotypeFilter, setPhenotypeFilter] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
-
-  // Sort
-  const [sortKey, setSortKey] = useState<SortKey>('gene_symbol')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
-
-  // View toggle
-  const [view, setView] = useState<'table' | 'essentiality'>('table')
-
+  function update(changes: Record<string, string | number | null>, replace = false) {
+    const next = new URLSearchParams(params)
+    for (const [key, value] of Object.entries(changes)) {
+      if (value == null || value === '') next.delete(key); else next.set(key, String(value))
+    }
+    setParams(next, { replace, preventScrollReset: true })
+  }
+  function filter(key: string, value: string) { update({ [key]: value, page: null }, key === 'q') }
+  function sort(key: SortKey) { update({ sort: key, dir: state.sort === key && state.direction === 'asc' ? 'desc' : 'asc', page: null }) }
+  function inspect(symbol: string) {
+    position.current = { table: scrollRef.current?.scrollTop ?? 0, main: pageRef.current?.closest('main')?.scrollTop ?? 0 }
+    update({ gene: symbol, experiment: null })
+  }
+  function closeInspector() { update({ gene: null, experiment: null }) }
+  const previousGene = useRef(state.gene)
   useEffect(() => {
-    setLoading(true)
-    setError(null)
-    Promise.all([
-      getDesignOverview({
-        category: categoryFilter || undefined,
-        phenotype: phenotypeFilter || undefined,
-      }),
-      getEssentiality(),
-    ])
-      .then(([ov, ess]) => {
-        setOverview(ov)
-        setEssentiality(ess)
+    const closedGene = previousGene.current
+    previousGene.current = state.gene
+    if (closedGene && !state.gene) {
+      const frame = requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = position.current.table
+        const main = pageRef.current?.closest('main')
+        if (main) main.scrollTop = position.current.main
+        const buttons = pageRef.current?.querySelectorAll<HTMLButtonElement>('.design-gene')
+        Array.from(buttons ?? []).find(button => button.textContent === closedGene)?.focus({ preventScroll: true })
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [categoryFilter, phenotypeFilter])
-
-  // Unique categories for filter
-  const categories = useMemo(() => {
-    if (!overview) return []
-    const cats = new Set(overview.genes.map((g) => g.category))
-    return Array.from(cats).sort()
-  }, [overview])
-
-  // Filtered + sorted genes
-  const sortedGenes = useMemo(() => {
-    if (!overview) return []
-    let genes = overview.genes
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase()
-      genes = genes.filter((g) => g.gene_symbol.toLowerCase().includes(term))
+      return () => cancelAnimationFrame(frame)
     }
-    return [...genes].sort((a, b) => {
-      const dir = sortDir === 'asc' ? 1 : -1
-      const av = a[sortKey]
-      const bv = b[sortKey]
-      if (av == null && bv == null) return 0
-      if (av == null) return 1
-      if (bv == null) return -1
-      if (typeof av === 'string') return av.localeCompare(bv as string) * dir
-      return ((av as number) - (bv as number)) * dir
-    })
-  }, [overview, searchTerm, sortKey, sortDir])
+  }, [state.gene, position])
 
-  function handleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortKey(key)
-      setSortDir('asc')
-    }
+  const data = overview.data
+  const usable = data?.genes_with_usable_results ?? data?.simulated_genes ?? 0
+  const exactSelectedGene = state.gene || matching.find(g => g.gene_symbol.toLowerCase() === state.search.trim().toLowerCase())?.gene_symbol || null
+  const sample = matching.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map(summarizeKOSummary)
+  const assistantPageState = {
+    kind: 'genome_design_summary', surface: 'design', dirty: false, captured_at: capturedAt,
+    summary: `Genome Design ${state.view} view: ${matching.length} matching mechanistic genes; ${usable} genes with usable knockout results in ${state.condition}.`,
+    route: `${location.pathname}${location.search}`, loading: overview.loading, error: truncateText(overview.error), view: state.view,
+    condition: state.condition, selected_gene: state.gene || null, inspected_experiment: inspector.data?.summary.experiment_id ?? state.experimentId ?? null,
+    evidence_gaps: inspector.data?.summary.evidence_gaps ?? [],
+    overview: data ? { total_genes: data.total_genes, mechanistic_genes: data.mechanistic_genes, simulated_genes: data.simulated_genes,
+      essential_genes: data.essential_genes, growth_defect_genes: data.growth_defect_genes, neutral_genes: data.neutral_genes, unknown_genes: data.unknown_genes,
+      genes_with_usable_results: usable, genes_with_experiments: data.genes_with_experiments, simulated_percent: data.total_genes ? Math.round(usable / data.total_genes * 100) : 0 } : null,
+    filters: { search: state.search, category: state.category || null, phenotype: state.phenotype || null, evidence: state.evidence || null, exact_selected_gene: exactSelectedGene },
+    sort: { key: state.sort, direction: state.direction }, pagination: { page: currentPage, page_size: state.pageSize, total_pages: pages },
+    visible_gene_count: matching.length, visible_gene_sample: sample, visible_gene_sample_truncated: matching.length > sample.length,
+    category_options_sample: categories.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT), category_options_truncated: categories.length > ASSISTANT_GENE_SAMPLE_LIMIT,
+    phenotype_counts: Object.fromEntries(phenotypes.map(p => [p, matching.filter(g => g.phenotype === p).length])),
+    table: state.view === 'table' ? { visible_gene_count: matching.length, sample, sample_truncated: matching.length > sample.length } : null,
+    essentiality_view: state.view === 'essentiality' ? { category_count: compositions.length, category_sample: compositions.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT), category_sample_truncated: compositions.length > ASSISTANT_GENE_SAMPLE_LIMIT } : null,
   }
-
-  function sortIcon(key: SortKey) {
-    if (sortKey !== key) return '↕'
-    return sortDir === 'asc' ? '↑' : '↓'
-  }
-
-  const exactSelectedGene = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase()
-    if (!term) return null
-    const match = sortedGenes.find((gene) => gene.gene_symbol.toLowerCase() === term)
-    return match?.gene_symbol ?? null
-  }, [searchTerm, sortedGenes])
-
-  const phenotypeCounts = useMemo(() => {
-    return sortedGenes.reduce(
-      (acc, gene) => {
-        acc[gene.phenotype] += 1
-        return acc
-      },
-      { essential: 0, growth_defect: 0, neutral: 0, unknown: 0 }
-    )
-  }, [sortedGenes])
-
-  const assistantPageState = useMemo(() => {
-    const visibleGeneSample = sortedGenes.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map(summarizeKOSummary)
-    const essentialitySample = essentiality.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT).map((row) => ({
-      category: row.category,
-      total: row.total,
-      essential: row.essential,
-      growth_defect: row.growth_defect,
-      neutral: row.neutral,
-      unknown: row.unknown,
-      essential_pct: row.essential_pct,
-    }))
-    return {
-      kind: 'genome_design_summary',
-      surface: 'design',
-      summary: `Genome Design ${view} view with ${sortedGenes.length} visible gene${sortedGenes.length === 1 ? '' : 's'} and ${overview?.simulated_genes ?? 0} simulated knockout summaries.`,
-      dirty: false,
-      captured_at: assistantCapturedAt,
-      route: `${location.pathname}${location.search}`,
-      loading,
-      error: truncateText(error),
-      view,
-      overview: overview
-        ? {
-          total_genes: overview.total_genes,
-          simulated_genes: overview.simulated_genes,
-          mechanistic_genes: overview.mechanistic_genes,
-          essential_genes: overview.essential_genes,
-          growth_defect_genes: overview.growth_defect_genes,
-          neutral_genes: overview.neutral_genes,
-          unknown_genes: overview.unknown_genes,
-          simulated_percent: overview.total_genes > 0
-            ? Math.round((overview.simulated_genes / overview.total_genes) * 100)
-            : null,
-        }
-        : null,
-      filters: {
-        search: searchTerm,
-        category: categoryFilter || null,
-        phenotype: phenotypeFilter || null,
-        exact_selected_gene: exactSelectedGene,
-      },
-      sort: {
-        key: sortKey,
-        direction: sortDir,
-      },
-      visible_gene_count: sortedGenes.length,
-      visible_gene_sample: visibleGeneSample,
-      visible_gene_sample_truncated: sortedGenes.length > visibleGeneSample.length,
-      category_options_sample: categories.slice(0, ASSISTANT_GENE_SAMPLE_LIMIT),
-      category_options_truncated: categories.length > ASSISTANT_GENE_SAMPLE_LIMIT,
-      phenotype_counts: phenotypeCounts,
-      table: view === 'table'
-        ? {
-          visible_gene_count: sortedGenes.length,
-          sample: visibleGeneSample,
-          sample_truncated: sortedGenes.length > visibleGeneSample.length,
-        }
-        : null,
-      essentiality_view: view === 'essentiality'
-        ? {
-          category_count: essentiality.length,
-          category_sample: essentialitySample,
-          category_sample_truncated: essentiality.length > essentialitySample.length,
-        }
-        : null,
-    }
-  }, [
-    assistantCapturedAt,
-    categories,
-    categoryFilter,
-    error,
-    essentiality,
-    exactSelectedGene,
-    loading,
-    location.pathname,
-    location.search,
-    overview,
-    phenotypeCounts,
-    phenotypeFilter,
-    searchTerm,
-    sortDir,
-    sortKey,
-    sortedGenes,
-    view,
-  ])
-
   useRegisterAssistantContext({
-    contextKey: makeAssistantContextKey([
-      'genome_design_summary',
-      location.pathname,
-      location.search,
-      view,
-      searchTerm,
-      categoryFilter,
-      phenotypeFilter,
-      sortKey,
-      sortDir,
-      exactSelectedGene,
-      loading,
-      error,
-      sortedGenes.length,
-      overview?.simulated_genes,
-      overview?.essential_genes,
-    ]),
-    context: {
-      assistant_surface: 'design',
-      route: `${location.pathname}${location.search}`,
-      selected_gene: exactSelectedGene,
-      page_state: assistantPageState,
-    },
-    suggestedPrompt: 'Help me review this Genome Design view. Explain what the current knockout phenotype summaries can and cannot support, which filters matter, and what simulation coverage is still missing before minimal-genome conclusions.',
+    contextKey: JSON.stringify(assistantPageState),
+    context: { assistant_surface: 'design', route: `${location.pathname}${location.search}`, selected_gene: exactSelectedGene, selected_condition: state.condition,
+      selected_experiment: inspector.data?.summary.experiment_id ?? null, page_state: assistantPageState },
+    suggestedPrompt: 'Help me review this mechanistic knockout evidence, its source measurements, and the gaps in this condition. Explain the limits of the observed outcomes.',
   })
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
-        Failed to load design data: {error}
-      </div>
-    )
-  }
-
-  if (!overview) return null
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-        <h1 className="text-2xl font-bold text-gray-900">Genome Design</h1>
-        <p className="text-gray-500 mt-1">
-          In-silico gene knockout phenotype map — explore essentiality predictions
-          from whole-cell simulation results.
-        </p>
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        <p className="font-medium">Application scope</p>
-        <p className="mt-1">
-          This page is useful when a sufficiently broad knockout result library exists. Treat current calls as exploratory summaries until condition-rich simulation batches support a dedicated minimal-genome design workflow.
-        </p>
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        <SummaryCard label="Total genes" value={overview.total_genes} />
-        <SummaryCard label="Simulated" value={overview.simulated_genes} accent="blue" />
-        <SummaryCard label="Essential" value={overview.essential_genes} accent="red" />
-        <SummaryCard
-          label="Growth defect"
-          value={overview.growth_defect_genes}
-          accent="amber"
-        />
-        <SummaryCard label="Neutral" value={overview.neutral_genes} accent="green" />
-        <SummaryCard label="Unknown" value={overview.unknown_genes} accent="gray" />
-        <SummaryCard
-          label="Simulated %"
-          value={
-            overview.total_genes > 0
-              ? `${Math.round((overview.simulated_genes / overview.total_genes) * 100)}%`
-              : '—'
-          }
-        />
-      </div>
-
-      {/* View toggle */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setView('table')}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            view === 'table'
-              ? 'bg-brand-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          Gene table
-        </button>
-        <button
-          onClick={() => setView('essentiality')}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            view === 'essentiality'
-              ? 'bg-brand-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          Essentiality by category
-        </button>
-      </div>
-
-      {view === 'table' && (
-        <>
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="text"
-              placeholder="Search gene…"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <option value="">All categories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-            <select
-              value={phenotypeFilter}
-              onChange={(e) => setPhenotypeFilter(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <option value="">All phenotypes</option>
-              <option value="essential">Essential</option>
-              <option value="growth_defect">Growth defect</option>
-              <option value="neutral">Neutral</option>
-              <option value="unknown">Unknown</option>
-            </select>
-            <span className="text-xs text-gray-500 ml-2">
-              {sortedGenes.length} gene{sortedGenes.length !== 1 ? 's' : ''} shown
-            </span>
-          </div>
-
-          {/* Gene table */}
-          <div className="overflow-x-auto border border-gray-200 rounded-lg">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <Th onClick={() => handleSort('gene_symbol')}>
-                    Gene {sortIcon('gene_symbol')}
-                  </Th>
-                  <Th onClick={() => handleSort('category')}>
-                    Category {sortIcon('category')}
-                  </Th>
-                  <Th onClick={() => handleSort('phenotype')}>
-                    Phenotype {sortIcon('phenotype')}
-                  </Th>
-                  <Th onClick={() => handleSort('n_completed')}>
-                    Seeds {sortIcon('n_completed')}
-                  </Th>
-                  <Th onClick={() => handleSort('mean_growth_rate')}>
-                    Growth rate {sortIcon('mean_growth_rate')}
-                  </Th>
-                  <Th onClick={() => handleSort('mean_doubling_time_min')}>
-                    Doubling (min) {sortIcon('mean_doubling_time_min')}
-                  </Th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-600">
-                    Division
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {sortedGenes.map((g) => (
-                  <GeneRow key={g.gene_symbol} gene={g} />
-                ))}
-                {sortedGenes.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="text-center py-8 text-gray-400">
-                      No genes match filters.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      {view === 'essentiality' && (
-        <EssentialityView data={essentiality} />
-      )}
+  return <div className="design-page" ref={pageRef}>
+    <header className="design-header"><div><h1>Genome Design</h1><p>Review mechanistic knockout evidence.</p></div><span className="design-condition">Condition <strong>{state.condition}</strong></span></header>
+    <details className="design-disclosure design-scope"><summary>Scope and interpretation</summary><p>Mechanistic genes only. Expression-only genes are excluded because their knockout effects are not mechanistically represented. Outcomes summarize recorded runs, rather than biological essentiality or minimal-genome predictions. <Link to="/explore">Open the full gene workspace.</Link></p></details>
+    <section className="design-coverage" aria-label="Evidence coverage">
+      {([['Eligible genes', data?.total_genes], ['With knockout experiments', data?.genes_with_experiments ?? (data ? data.genes.filter(g => g.experiment_id != null).length : undefined)], ['With usable results', data ? usable : undefined], ['Unclassified', data?.unclassified_genes ?? data?.unknown_genes]] as const).map(([label, value]) => <div key={label}><span>{label}</span><strong>{value?.toLocaleString() ?? '—'}</strong></div>)}
+      <p>{data ? `${usable.toLocaleString()} / ${data.total_genes.toLocaleString()} eligible genes have usable results (${data.total_genes ? (100 * usable / data.total_genes).toFixed(1) : '0.0'}%).` : overview.error ? `Coverage unavailable for ${state.condition}.` : `Loading coverage for ${state.condition}…`}</p>
+    </section>
+    <div className="design-tabs" role="group" aria-label="Evidence views"><button aria-pressed={state.view === 'table'} onClick={() => update({ view: 'table' })}>Gene evidence</button><button aria-pressed={state.view === 'essentiality'} onClick={() => update({ view: 'essentiality' })}>Category summary</button></div>
+    <div className="design-toolbar">
+      <label className="design-field design-search">Search genes<input placeholder="Search gene…" value={state.search} onChange={e => filter('q', e.target.value)} type="search" /></label>
+      <label className="design-field">Condition<select aria-label="Condition" value={state.condition} onChange={e => update({ condition: e.target.value, experiment: null, page: null })}>{conditionNames.map(name => <option key={name}>{name}</option>)}</select></label>
+      <label className="design-field">Category<select aria-label="Category" value={state.category} onChange={e => filter('category', e.target.value)}><option value="">All categories</option>{state.category && !categories.includes(state.category) && <option value={state.category}>{categoryLabel(state.category)}</option>}{categories.map(category => <option value={category} key={category}>{categoryLabel(category)}</option>)}</select></label>
+      <label className="design-field">Phenotype<select aria-label="Phenotype" value={state.phenotype} onChange={e => filter('phenotype', e.target.value)}><option value="">All phenotypes</option>{phenotypes.map(p => <option key={p} value={p}>{phenotypeLabels[p]}</option>)}</select></label>
+      <label className="design-field">Evidence availability<select aria-label="Evidence availability" value={state.evidence} onChange={e => filter('evidence', e.target.value)}><option value="">All evidence</option><option value="usable">With usable results</option><option value="none">Without usable results</option><option value="partial">Partial results</option><option value="missing_results">Missing result records</option></select></label>
+      <button className="design-button" onClick={() => update({ q: null, category: null, phenotype: null, evidence: null, page: null })}>Clear filters</button>
     </div>
-  )
-}
-
-/* ── Sub-components ──────────────────────────────────────────────────── */
-
-function SummaryCard({
-  label,
-  value,
-  accent,
-}: {
-  label: string
-  value: number | string
-  accent?: string
-}) {
-  const ring = accent ? `ring-1 ring-${accent}-200` : 'ring-1 ring-gray-200'
-  return (
-    <div className={`rounded-lg p-3 bg-white ${ring}`}>
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className="text-xl font-semibold text-gray-900 mt-0.5">{value}</div>
+    {conditions.error && <div className="design-error" role="alert">Condition choices could not be loaded. <button className="design-button" onClick={conditions.retry}>Retry conditions</button></div>}
+    <div className="design-workbench" data-inspecting={!!state.gene} data-wide={wide}>
+      <section className="design-catalog" aria-label="Knockout evidence catalog" aria-busy={overview.loading}>
+        <div className="design-catalog-header"><span>{data ? `${matching.length.toLocaleString()} matching genes` : 'Evidence catalog'}</span><button className="design-button" disabled={overview.loading} onClick={overview.retry}>Refresh evidence</button></div>
+        {overview.loading && <p className="design-notice" role="status">{data ? 'Refreshing evidence…' : `Loading evidence for ${state.condition}…`}</p>}
+        {overview.error && <div className="design-error" role="alert"><p>Could not load knockout evidence for {state.condition}.</p><p>{overview.error}</p>{data && <p>Showing the last loaded evidence for this condition.</p>}<button className="design-button" onClick={overview.retry}>Retry evidence</button></div>}
+        {data && <>
+          {!usable && <div className="design-notice"><strong>No usable mechanistic knockout results for {state.condition}.</strong><p>Genes remain available for inspection. {data.genes_with_experiments ? 'Existing experiments have no usable completed results.' : 'No eligible knockout experiments have usable completed results.'} Select a gene to inspect the evidence gap or prepare an experiment.</p></div>}
+          {state.view === 'table' ? <><DesignTable genes={pageGenes} state={state} selected={state.gene} sort={sort} inspect={inspect} scrollRef={scrollRef} />
+            <div className="design-pagination"><label className="design-field">Rows per page<select aria-label="Rows per page" value={state.pageSize} onChange={e => update({ pageSize: e.target.value, page: null })}>{[25, 50, 100].map(n => <option key={n}>{n}</option>)}</select></label>
+              <span>Page {currentPage} of {pages} · {sorted.length ? (currentPage - 1) * state.pageSize + 1 : 0}–{Math.min(currentPage * state.pageSize, sorted.length)} of {sorted.length}</span>
+              <div><button className="design-button" disabled={currentPage <= 1} onClick={() => update({ page: currentPage - 1 })}>Previous page</button><button className="design-button" disabled={currentPage >= pages} onClick={() => update({ page: currentPage + 1 })}>Next page</button></div></div>
+          </> : <DesignCategories data={compositions} select={category => update({ category, view: 'table', page: null })} />}
+        </>}
+      </section>
+      {state.gene && <DesignInspector gene={state.gene} condition={state.condition} data={inspector.data} loading={inspector.loading} error={inspector.error} retry={inspector.retry} close={closeInspector} selectExperiment={id => update({ experiment: id })} wide={wide} />}
     </div>
-  )
-}
-
-function Th({
-  children,
-  onClick,
-}: {
-  children: React.ReactNode
-  onClick?: () => void
-}) {
-  return (
-    <th
-      onClick={onClick}
-      className="px-3 py-2 text-left font-medium text-gray-600 cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap"
-    >
-      {children}
-    </th>
-  )
-}
-
-function GeneRow({ gene: g }: { gene: GeneKOSummary }) {
-  return (
-    <tr className="hover:bg-gray-50">
-      <td className="px-3 py-2 font-mono font-medium text-brand-700">
-        {g.gene_symbol}
-      </td>
-      <td className="px-3 py-2 text-gray-600 max-w-[180px] truncate" title={g.category}>
-        {g.category}
-      </td>
-      <td className="px-3 py-2">
-        <span
-          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${PHENOTYPE_COLORS[g.phenotype]}`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${PHENOTYPE_DOT[g.phenotype]}`} />
-          {g.phenotype === 'growth_defect' ? 'growth defect' : g.phenotype}
-        </span>
-      </td>
-      <td className="px-3 py-2 text-gray-600 tabular-nums">
-        {g.n_completed > 0 ? g.division_rate : '—'}
-      </td>
-      <td className="px-3 py-2 text-gray-600 tabular-nums">
-        {g.mean_growth_rate != null ? g.mean_growth_rate.toFixed(6) : '—'}
-      </td>
-      <td className="px-3 py-2 text-gray-600 tabular-nums">
-        {g.mean_doubling_time_min != null ? g.mean_doubling_time_min.toFixed(1) : '—'}
-      </td>
-      <td className="px-3 py-2 text-gray-600">
-        {g.divided === true && '✓'}
-        {g.divided === false && '✗'}
-        {g.divided == null && '—'}
-      </td>
-    </tr>
-  )
-}
-
-function EssentialityView({ data }: { data: EssentialityStats[] }) {
-  if (data.length === 0) {
-    return (
-      <div className="text-gray-400 text-center py-8">
-        No essentiality data available.
-      </div>
-    )
-  }
-
-  const maxTotal = Math.max(...data.map((d) => d.total))
-
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-gray-500">
-        Gene essentiality breakdown by functional category. Bar width = proportion of
-        category total.
-      </p>
-      <div className="space-y-2">
-        {data.map((cat) => (
-          <div key={cat.category} className="flex items-center gap-3">
-            <div className="w-48 text-sm text-gray-700 truncate text-right" title={cat.category}>
-              {cat.category}
-            </div>
-            <div className="flex-1 flex items-center gap-0.5 h-6">
-              <Bar
-                width={(cat.essential / maxTotal) * 100}
-                color="bg-red-400"
-                label={`${cat.essential} essential`}
-              />
-              <Bar
-                width={(cat.growth_defect / maxTotal) * 100}
-                color="bg-amber-400"
-                label={`${cat.growth_defect} growth defect`}
-              />
-              <Bar
-                width={(cat.neutral / maxTotal) * 100}
-                color="bg-green-400"
-                label={`${cat.neutral} neutral`}
-              />
-              <Bar
-                width={(cat.unknown / maxTotal) * 100}
-                color="bg-gray-300"
-                label={`${cat.unknown} unknown`}
-              />
-            </div>
-            <div className="w-20 text-xs text-gray-500 tabular-nums">
-              {cat.essential_pct}% essential
-            </div>
-            <div className="w-10 text-xs text-gray-400 tabular-nums text-right">
-              n={cat.total}
-            </div>
-          </div>
-        ))}
-      </div>
-      {/* Legend */}
-      <div className="flex items-center gap-4 text-xs text-gray-500 mt-4">
-        <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-red-400" /> Essential
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-amber-400" /> Growth defect
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-green-400" /> Neutral
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-gray-300" /> Unknown
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function Bar({
-  width,
-  color,
-  label,
-}: {
-  width: number
-  color: string
-  label: string
-}) {
-  if (width === 0) return null
-  return (
-    <div
-      className={`${color} h-full rounded-sm`}
-      style={{ width: `${Math.max(width, 0.5)}%` }}
-      title={label}
-    />
-  )
+  </div>
 }

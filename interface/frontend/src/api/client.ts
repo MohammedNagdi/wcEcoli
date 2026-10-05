@@ -16,7 +16,7 @@ import type {
   MoleculeListResponse, MoleculeIdsResponse, MoleculeTimeseriesResponse, ResultStateExplorerResponse,
   StoichiometryNeighborhoodResponse,
   TrainRequest, TrainResponse, DataSummary,
-  DesignOverview, EssentialityStats,
+  DesignOverview, EssentialityStats, DesignGeneEvidence,
   ComparisonResponse, FailedJobSummary,
   WildtypeDelta, ConditionCatalog,
   PlatformStatus, DistributionStatus, ProviderLayerStatus, AssistantHarnessStatus,
@@ -133,8 +133,8 @@ export async function getAAPathways(): Promise<AAPathway[]> {
 
 // --- Conditions, Timelines, Variants ---
 
-export async function getConditions(): Promise<Condition[]> {
-  return fetchJSON('/conditions')
+export async function getConditions(signal?: AbortSignal): Promise<Condition[]> {
+  return fetchJSON('/conditions', { signal })
 }
 
 export async function getTimelines(): Promise<Timeline[]> {
@@ -440,22 +440,28 @@ export async function getDesignOverview(params?: {
   category?: string
   phenotype?: string
   condition?: string
-}): Promise<DesignOverview> {
+}, signal?: AbortSignal): Promise<DesignOverview> {
   const qs = new URLSearchParams()
   if (params?.category) qs.set('category', params.category)
   if (params?.phenotype) qs.set('phenotype', params.phenotype)
   if (params?.condition) qs.set('condition', params.condition || 'basal')
   const query = qs.toString()
-  return fetchJSON(`/design/overview${query ? '?' + query : ''}`)
+  return fetchJSON(`/design/overview${query ? '?' + query : ''}`, { signal })
 }
 
 export async function getEssentiality(
-  condition?: string
+  condition?: string, signal?: AbortSignal
 ): Promise<EssentialityStats[]> {
   const qs = new URLSearchParams()
   if (condition) qs.set('condition', condition)
   const query = qs.toString()
-  return fetchJSON(`/design/essentiality${query ? '?' + query : ''}`)
+  return fetchJSON(`/design/essentiality${query ? '?' + query : ''}`, { signal })
+}
+
+export async function getDesignGeneEvidence(symbol: string, condition: string, experimentId?: number, signal?: AbortSignal): Promise<DesignGeneEvidence> {
+  const qs = new URLSearchParams({ condition })
+  if (experimentId != null) qs.set('experiment_id', String(experimentId))
+  return fetchJSON(`/design/genes/${encodeURIComponent(symbol)}?${qs}`, { signal })
 }
 
 // --- Wildtype delta ---

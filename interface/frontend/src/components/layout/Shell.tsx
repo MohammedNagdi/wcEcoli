@@ -99,7 +99,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
-  const workspaceRoute = location.pathname === '/explore' || location.pathname === '/genome' || location.pathname === '/experiments' || location.pathname === '/assistant'
+  const workspaceRoute = location.pathname === '/explore' || location.pathname === '/genome' || location.pathname === '/experiments' || location.pathname === '/assistant' || location.pathname === '/design'
   const compactViewport = useMediaQuery('(max-width: 1099px)')
   const mobileViewport = useMediaQuery('(max-width: 639px)')
   const mobileWorkspace = workspaceRoute && mobileViewport
@@ -201,7 +201,7 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div
       ref={shellRef}
-      className={`app-shell flex h-screen min-h-screen overflow-hidden bg-gray-50 ${workspaceRoute ? 'workspace-shell' : ''} ${a.isOpen && besideWorkspace && location.pathname !== '/assistant' ? 'assistant-beside' : ''} ${location.pathname === '/assistant' ? 'assistant-page-shell' : ''} ${location.pathname === '/experiments' ? 'experiments-shell' : ''}`}
+      className={`app-shell flex h-screen min-h-screen overflow-hidden bg-gray-50 ${workspaceRoute ? 'workspace-shell' : ''} ${a.isOpen && besideWorkspace && location.pathname !== '/assistant' ? 'assistant-beside' : ''} ${location.pathname === '/assistant' ? 'assistant-page-shell' : ''} ${location.pathname === '/experiments' ? 'experiments-shell' : ''} ${location.pathname === '/design' ? 'design-shell' : ''}`}
     >
       {mobileWorkspace && (
         <button

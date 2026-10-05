@@ -98,6 +98,13 @@ export function summarizeKOSummary(summary: GeneKOSummary | null | undefined) {
     n_seeds: summary.n_seeds,
     divided: summary.divided,
     division_rate: summary.division_rate,
+    evidence_status: summary.evidence_status,
+    evidence_reason: summary.evidence_reason,
+    usable_result_count: summary.usable_result_count,
+    metric_sample_counts: summary.metric_sample_counts,
+    baseline_status: summary.baseline?.status,
+    mean_division_time_min: summary.mean_division_time_min,
+    mean_final_mass_fg: summary.mean_final_mass_fg,
     mean_growth_rate: summary.mean_growth_rate,
     mean_doubling_time_min: summary.mean_doubling_time_min,
   }

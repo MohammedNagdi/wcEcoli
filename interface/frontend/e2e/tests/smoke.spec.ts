@@ -777,7 +777,7 @@ test.describe('Assistant smoke', () => {
     })
     await page.keyboard.press('Escape')
 
-    await page.getByRole('button', { name: 'Essentiality by category' }).click()
+    await page.getByRole('button', { name: 'Category summary' }).click()
     await page.getByTestId('assistant-dock-toggle').click()
     requestPromise = page.waitForRequest('**/api/assistant/conversations/*/messages/stream')
     await page.getByTestId('assistant-input').fill('review essentiality')
@@ -788,7 +788,7 @@ test.describe('Assistant smoke', () => {
       view: 'essentiality',
       table: null,
       essentiality_view: {
-        category_count: 2,
+        category_count: 1,
       },
     })
     expect(body.context.page_state.essentiality_view.category_sample).toEqual(
