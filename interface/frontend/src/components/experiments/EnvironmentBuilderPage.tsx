@@ -27,6 +27,8 @@ import type {
 import { HelpTip } from '../common/HelpTip'
 import { SearchInput } from '../common/SearchInput'
 import { TimelineComposer } from './TimelineComposer'
+import './designer.css'
+import './environment-builder.css'
 
 type SaveSectionKey = 'media' | 'mediaRecipe' | 'condition' | 'tfCondition' | 'timeline'
 type SectionMode = 'existing' | 'create'
@@ -426,6 +428,10 @@ function toComposerConditions(catalog: ConditionCatalog | null, draftCondition: 
   return [...baseConditions, nextCondition]
 }
 
+function BuilderNoticeIcon() {
+  return <svg aria-hidden="true" className="builder-notice-icon" viewBox="0 0 20 20" fill="none"><path d="M10 3 18 17H2L10 3Z" stroke="currentColor" strokeWidth="1.5"/><path d="M10 7v5m0 2v1" stroke="currentColor" strokeWidth="1.5"/></svg>
+}
+
 function SectionStatus({ saved, dirty }: { saved: boolean; dirty: boolean }) {
   let classes = 'bg-slate-100 text-slate-600'
   let label = 'Not saved'
@@ -433,12 +439,12 @@ function SectionStatus({ saved, dirty }: { saved: boolean; dirty: boolean }) {
   if (saved && !dirty) {
     classes = 'bg-emerald-50 text-emerald-700'
     label = 'Saved'
-  } else if (saved && dirty) {
+  } else if (dirty) {
     classes = 'bg-amber-50 text-amber-700'
     label = 'Unsaved changes'
   }
 
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${classes}`}>{label}</span>
+  return <span data-state={dirty ? 'dirty' : saved ? 'saved' : 'unsaved'} className={`builder-status rounded-full px-2.5 py-1 text-xs font-medium ${classes}`}>{label}</span>
 }
 
 function publishActionClasses(action: string) {
@@ -468,7 +474,7 @@ function SectionSaveActions({
   publishDisabled?: boolean
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="builder-section-actions flex items-center gap-2">
       <SectionStatus saved={saved} dirty={dirty} />
       {onPublish && (
         <button
@@ -484,7 +490,7 @@ function SectionSaveActions({
         type="button"
         onClick={onSave}
         disabled={saving || publishing}
-        className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        className="builder-primary rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {saving ? 'Saving...' : 'Save'}
       </button>
@@ -528,11 +534,11 @@ function SectionCard({
   return (
     <section
       id={sectionId ? `builder-section-${sectionId}` : undefined}
-      className={`scroll-mt-24 rounded-2xl border bg-white p-5 shadow-sm transition-all duration-300 ${
-        highlighted ? 'border-cyan-300 ring-2 ring-cyan-200' : 'border-slate-200'
+      className={`builder-section scroll-mt-24 rounded-2xl border bg-white p-5 shadow-sm transition-colors duration-150 ${
+        highlighted ? 'builder-highlighted border-brand-300 ring-2 ring-brand-200' : 'border-slate-200'
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="builder-section-heading flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
@@ -608,6 +614,7 @@ function ExistingCreateToggle({
     <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
       <button
         type="button"
+        aria-pressed={mode === 'existing'}
         onClick={() => onChange('existing')}
         className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
           mode === 'existing' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -617,6 +624,7 @@ function ExistingCreateToggle({
       </button>
       <button
         type="button"
+        aria-pressed={mode === 'create'}
         onClick={() => onChange('create')}
         className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
           mode === 'create' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -2096,7 +2104,7 @@ export function EnvironmentBuilderPage() {
         <ExistingCreateToggle mode={mediaMode} onChange={setMediaMode} />
 
         {mediaMode === 'existing' ? (
-          <div className="mt-4 grid gap-4 lg:grid-cols-[0.75fr,1.25fr]">
+          <div className="builder-pair mt-4 grid gap-4 lg:grid-cols-[0.75fr,1.25fr]">
             <label className="block">
               <FieldLabel
                 label="Stock medium"
@@ -2122,7 +2130,7 @@ export function EnvironmentBuilderPage() {
                 <div>
                   <p className="text-sm font-medium text-slate-900">Selected stock summary</p>
                   {selectedStockStatus && (
-                    <span className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${selectedStockStatus.className}`}>
+                    <span className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-medium builder-badge ${selectedStockStatus.className}`}>
                       {selectedStockStatus.role}: {selectedStockStatus.detail}
                     </span>
                   )}
@@ -2182,7 +2190,7 @@ export function EnvironmentBuilderPage() {
                   Add row
                 </button>
               </div>
-              <div className="mt-3 hidden gap-3 md:grid" style={{ gridTemplateColumns: '1fr 180px auto' }}>
+              <div className="builder-row-head mt-3 hidden gap-3 md:grid" style={{ gridTemplateColumns: '1fr 180px auto' }}>
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Molecule ID</p>
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Concentration (mmol/L)</p>
                 <span />
@@ -2194,11 +2202,11 @@ export function EnvironmentBuilderPage() {
               </datalist>
               <div className="mt-1 space-y-3">
                 {draftMediaRows.map((row) => (
-                  <div key={row.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr),180px,auto]">
+                  <div key={row.id} className="builder-edit-row grid gap-3 md:grid-cols-[minmax(0,1fr),180px,auto]">
                     <input
                       type="text"
                       list="environment-molecule-options"
-                      value={row.molecule_id}
+                      aria-label={`Molecule ID for row ${row.id}`} value={row.molecule_id}
                       onChange={(event) => updateMediaRow(row.id, 'molecule_id', event.target.value)}
                       placeholder="MY_CARBON_SRC"
                       className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2206,7 +2214,7 @@ export function EnvironmentBuilderPage() {
                     <div>
                       <input
                         type="text"
-                        value={row.concentration}
+                        aria-label={`Concentration (mmol/L) for row ${row.id}`} value={row.concentration}
                         onChange={(event) => updateMediaRow(row.id, 'concentration', event.target.value)}
                         placeholder="e.g. 10.0 or Infinity"
                         className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2230,7 +2238,7 @@ export function EnvironmentBuilderPage() {
               <p className="mt-2 text-sm text-slate-500">
                 Use this only for molecule IDs missing from the reconstruction registry. Existing catalog molecules can be added directly to the stock.
               </p>
-              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(210px,0.75fr),minmax(0,1.25fr)]">
+              <div className="builder-pair mt-4 grid gap-4 xl:grid-cols-[minmax(210px,0.75fr),minmax(0,1.25fr)]">
                 <div className="min-w-0">
                   <SearchInput
                     value={environmentSearch}
@@ -2277,16 +2285,16 @@ export function EnvironmentBuilderPage() {
                       <span />
                     </div>
                     {draftEnvironmentRows.map((row) => (
-                      <div key={row.id} className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr),96px,120px,auto]">
+                      <div key={row.id} className="builder-edit-row grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr),96px,120px,auto]">
                         <input
                           type="text"
                           list="environment-molecule-options"
-                          value={row.molecule_id}
+                          aria-label={`Molecule ID for row ${row.id}`} value={row.molecule_id}
                           onChange={(event) => updateEnvironmentRow(row.id, 'molecule_id', event.target.value)}
                           className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
                         />
                         <select
-                          value={row.exchange_molecule_location}
+                          aria-label={`Exchange molecule location for row ${row.id}`} value={row.exchange_molecule_location}
                           onChange={(event) => updateEnvironmentRow(row.id, 'exchange_molecule_location', event.target.value)}
                           className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
                         >
@@ -2295,7 +2303,7 @@ export function EnvironmentBuilderPage() {
                         </select>
                         <input
                           type="text"
-                          value={row.formula_weight}
+                          aria-label={`Formula weight for row ${row.id}`} value={row.formula_weight}
                           onChange={(event) => updateEnvironmentRow(row.id, 'formula_weight', event.target.value)}
                           placeholder="None"
                           className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2334,7 +2342,7 @@ export function EnvironmentBuilderPage() {
         <ExistingCreateToggle mode={mediaRecipeMode} onChange={setMediaRecipeMode} />
 
         {mediaRecipeMode === 'existing' ? (
-          <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
+          <div className="builder-pair mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
             <label className="block">
               <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Compatible recipes</span>
               <select
@@ -2390,7 +2398,7 @@ export function EnvironmentBuilderPage() {
               <p className="font-medium text-cyan-950">A media recipe is an assembly operation, not just a name.</p>
               <p className="mt-1 leading-6">Start from one base stock, optionally mix in a supplement stock, then add or remove specific ingredients. The recipe ID is what growth conditions, media protocols, and experiments reference.</p>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="builder-pair grid gap-4 md:grid-cols-2">
             <label className="block">
               <FieldLabel
                 label="Recipe ID"
@@ -2639,7 +2647,7 @@ export function EnvironmentBuilderPage() {
         <ExistingCreateToggle mode={conditionMode} onChange={setConditionMode} />
 
         {conditionMode === 'existing' ? (
-          <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
+          <div className="builder-pair mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
             <label className="block">
               <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Compatible growth conditions</span>
               <select
@@ -2684,7 +2692,7 @@ export function EnvironmentBuilderPage() {
               <p className="font-medium text-amber-950">Create a growth condition only when you can justify the biological metadata.</p>
               <p className="mt-1 leading-6">The doubling time and TF lists are prior reconstruction metadata, not outputs calculated by this form. If they are unknown, reuse or fork the closest existing condition and edit only what is defensible.</p>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="builder-pair grid gap-4 md:grid-cols-2">
             <label className="block">
               <FieldLabel
                 label="Growth condition name"
@@ -2904,7 +2912,7 @@ export function EnvironmentBuilderPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium text-slate-900">{row.tf} <span className="font-mono text-slate-500">{row.active_tf}</span></p>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium builder-badge ${status.className}`}>{status.label}</span>
                         <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[10px] font-medium text-cyan-700">{scope}</span>
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">{row.tf_type}</span>
                       </div>
@@ -2949,7 +2957,7 @@ export function EnvironmentBuilderPage() {
 
             {draftTfRows.map((row) => (
               <div key={row.id} className="rounded-2xl border border-slate-200 p-4">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="builder-pair grid gap-3 md:grid-cols-2">
                   <label className="block">
                     <FieldLabel
                       label="TF gene symbol"
@@ -3140,7 +3148,7 @@ export function EnvironmentBuilderPage() {
         <ExistingCreateToggle mode={timelineMode} onChange={setTimelineMode} />
 
         {timelineMode === 'existing' ? (
-          <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
+          <div className="builder-pair mt-4 grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
             <label className="block">
               <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Compatible protocols</span>
               <select
@@ -3178,7 +3186,7 @@ export function EnvironmentBuilderPage() {
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-sm font-medium text-slate-900">Protocol summary</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{protocolSummary.label}</span>
+                <span className="builder-badge rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{protocolSummary.label}</span>
                 {timelineMode === 'existing' && selectedExistingTimeline && currentMediaRecipeId && (
                   <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${selectedProtocolStartsCurrent ? 'bg-cyan-50 text-cyan-700' : 'bg-amber-50 text-amber-700'}`}>
                     {selectedProtocolStartsCurrent ? 'starts here' : selectedProtocolInvolvesCurrent ? 'reaches selected recipe later' : 'different recipe'}
@@ -3193,7 +3201,7 @@ export function EnvironmentBuilderPage() {
           </div>
         ) : (
           <div className="mt-4 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="builder-pair grid gap-4 md:grid-cols-2">
               <label className="block">
                 <FieldLabel
                   label="Protocol ID"
@@ -3237,6 +3245,7 @@ export function EnvironmentBuilderPage() {
             </div>
 
             <TimelineComposer
+              restrained
               key={`${timelineSeedVersion}-${currentMediaRecipeId || 'minimal'}`}
               mediaRecipes={builderMediaRecipes}
               conditions={builderConditions}
@@ -3251,7 +3260,7 @@ export function EnvironmentBuilderPage() {
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-slate-900">Current protocol</p>
-                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{protocolSummary.label}</span>
+                <span className="builder-badge rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{protocolSummary.label}</span>
               </div>
               <p className="mt-1 text-xs text-slate-500">{protocolSummary.detail}</p>
               <p className="mt-2 break-words font-mono text-xs leading-6 text-slate-700">
@@ -3265,13 +3274,13 @@ export function EnvironmentBuilderPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-[1500px] flex-col gap-6">
-      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(22,163,74,0.15),_transparent_35%),radial-gradient(circle_at_right,_rgba(14,165,233,0.18),_transparent_30%),linear-gradient(135deg,_#0f172a,_#123b56_55%,_#0f766e)] text-white shadow-sm">
+    <div className="experiment-designer environment-builder mx-auto flex max-w-[1500px] flex-col gap-6">
+      <section className="builder-header rounded-lg border border-slate-200 bg-white">
         <div className="flex flex-col gap-6 px-6 py-8 lg:flex-row lg:items-end lg:justify-between lg:px-8">
           <div className="max-w-3xl">
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">Simulate</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Conditions Builder</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-200">
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight">Conditions Builder</h1>
+            <p className="builder-header-description mt-3 max-w-2xl text-sm leading-6 text-slate-500">
               Build reusable experiment environments by answering five connected questions: starting stock, named media recipe, growth condition, TF state rules, and media protocol. Published records appear as selectable options when designing simulations.
             </p>
           </div>
@@ -3279,11 +3288,11 @@ export function EnvironmentBuilderPage() {
           <div className="flex flex-wrap items-center gap-3">
             <Link
               to="/experiments"
-              className="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
             >
               Open experiments
             </Link>
-            <span className="inline-flex items-center rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1 text-xs font-medium text-amber-100">
+            <span className="builder-header-badge inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
               drafts saved in backend
             </span>
           </div>
@@ -3292,7 +3301,7 @@ export function EnvironmentBuilderPage() {
 
       {loadError && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {loadError}
+          <BuilderNoticeIcon />{loadError}
         </div>
       )}
 
@@ -3301,13 +3310,13 @@ export function EnvironmentBuilderPage() {
           ? 'border border-red-200 bg-red-50 text-red-700'
           : 'border border-emerald-200 bg-emerald-50 text-emerald-700'
         }`}>
-          {actionMessage.text}
+          {actionMessage.type === 'error' && <BuilderNoticeIcon />}{actionMessage.text}
         </div>
       )}
 
       {previewSection && (publishPreview || previewError) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-8">
-          <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="builder-modal fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-8">
+          <div role="dialog" aria-modal="true" aria-label="Publish review" className="builder-dialog flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
             <div className="border-b border-slate-100 px-5 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -3330,16 +3339,16 @@ export function EnvironmentBuilderPage() {
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <div role="region" aria-label="Publish changes" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {previewError && (
                 <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {previewError}
+                  <BuilderNoticeIcon />{previewError}
                 </div>
               )}
 
               {publishPreview?.warnings.length ? (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <p className="text-sm font-semibold text-amber-950">Warnings</p>
+                  <p className="text-sm font-semibold text-amber-950"><BuilderNoticeIcon />Warnings</p>
                   <ul className="mt-2 space-y-1 text-sm text-amber-900">
                     {publishPreview.warnings.map((warning) => (
                       <li key={warning}>{warning}</li>
@@ -3362,7 +3371,7 @@ export function EnvironmentBuilderPage() {
                         {change.action}
                       </span>
                     </div>
-                    <div className="max-h-56 overflow-auto p-4">
+                    <div role="region" aria-label={`Rows for ${change.file}`} tabIndex={0} className="max-h-56 overflow-auto p-4">
                       <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-700">
                         {change.rows.join('\n')}
                       </pre>
@@ -3391,7 +3400,7 @@ export function EnvironmentBuilderPage() {
                   type="button"
                   onClick={() => { void confirmPublishSection() }}
                   disabled={Boolean(publishingSection) || previewLoading || !publishPreview}
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="builder-primary rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {publishingSection ? 'Publishing...' : 'Confirm publish'}
                 </button>
@@ -3418,7 +3427,7 @@ export function EnvironmentBuilderPage() {
           </div>
         </summary>
         <div className="border-t border-slate-100 px-5 py-4">
-          <div className="grid gap-3 lg:grid-cols-5">
+          <div className="builder-dependency-grid grid gap-3">
             {dependencyMainSteps.map((step, index) => {
               const badge = dependencyBadge(step.id)
               return (
@@ -3433,7 +3442,7 @@ export function EnvironmentBuilderPage() {
                   )}
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-600 text-xs font-semibold text-white">{index + 1}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.classes}`}>{badge.label}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium builder-badge ${badge.classes}`}>{badge.label}</span>
                   </div>
                   <p className="mt-3 text-sm font-semibold leading-5 text-slate-950">{step.question}</p>
                   <p className="mt-2 break-words font-mono text-xs text-cyan-800">{dependencyAnswers[step.id]}</p>
@@ -3471,7 +3480,7 @@ export function EnvironmentBuilderPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-slate-900">{step.question}</p>
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${badge.classes}`}>{badge.label}</span>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium builder-badge ${badge.classes}`}>{badge.label}</span>
                       </div>
                       <span className="text-xs font-medium text-cyan-700">Open section</span>
                     </div>
@@ -3557,7 +3566,7 @@ export function EnvironmentBuilderPage() {
             </span>
           </div>
         </summary>
-        <div className="grid gap-3 border-t border-slate-100 px-5 py-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="builder-catalog-grid grid gap-3 border-t border-slate-100 px-5 py-4">
           {catalogStats.map((item) => (
             <div key={item.label} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
@@ -3571,12 +3580,12 @@ export function EnvironmentBuilderPage() {
       {compatibilityWarnings.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {compatibilityWarnings.map((warning) => (
-            <p key={warning} className="leading-6">{warning}</p>
+            <p key={warning} className="leading-6"><BuilderNoticeIcon />{warning}</p>
           ))}
         </div>
       )}
 
-      <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr),410px]">
+      <section className="builder-layout grid min-w-0 gap-6">
         <div className="min-w-0 space-y-4">
           {renderMediaSection()}
           {renderMediaRecipeSection()}
@@ -3585,9 +3594,9 @@ export function EnvironmentBuilderPage() {
           {renderTimelineSection()}
         </div>
 
-        <aside className="min-w-0 space-y-4">
+        <div role="group" aria-label="Build summary" className="min-w-0 space-y-4">
           <SavedStatePanel sectionSummaries={sectionSummaries} isSaved={isSaved} isDirty={isDirty} />
-        </aside>
+        </div>
       </section>
     </div>
   )

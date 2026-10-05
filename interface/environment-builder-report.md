@@ -1,0 +1,11 @@
+# Conditions Builder visual polish
+
+Reference lock: wcEcoli's workspace and polished experiment designer/batch builder, existing Inspo control alignment, and the previously selected 21st.dev disclosure and transitions.dev motion patterns. Styles are local adaptations; no external component source, framework, or dependency was added.
+
+Both Conditions Builder routes use the neutral panel header, violet primary actions/focus, restrained timeline palette, muted status markers, and neutral informational surfaces. Warnings retain their text with muted accents and decorative icons. Scientific text, units, identifiers, badges, disclosures, section order, defaults, draft snapshots, and publish sequencing remain intact.
+
+The 1500px page and 410px summary now respond to actual available container width. The summary remains in normal flow. Field pairs, editable rows, dependency overview, and catalog grids respond to container width, and both aliases use responsive shell navigation and Assistant clearance. Publish-review content and raw rows have labelled keyboard-accessible scrolling. Mode controls expose selection state. Dirty drafts correctly display the existing “Unsaved changes” label; persistence logic is unchanged.
+
+Validation: TypeScript/Vite build and whitespace checks passed. The broader Chromium/WebKit run passed all 482 existing checks plus 22 new checks. Four new preset fixtures initially omitted the composer's separate timeline API; the corrected final Conditions Builder run passed all 26 checks. Coverage includes content/order, existing/create modes, saved/dirty states, draft payloads, review-before-confirm sequencing, failed saves/publishing with retained values, preset loading, expanded-form accessibility, both routes, themes, reduced motion, 390/768/1440px layouts, effective 200% zoom, actual wheel scrolling, populated preview dialogs, long identifiers, and Assistant continuity. Contrast measurements wait for disclosure animation completion.
+
+Before/after screenshots were inspected in Chromium and WebKit. The live web container was rebuilt without resetting volumes; all automated draft and publish actions used mocked APIs. No live reconstruction publication was performed.
