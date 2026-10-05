@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, type InputHTMLAttributes } from 'react'
 
 interface Props {
   value: string
@@ -7,9 +7,10 @@ interface Props {
   className?: string
   label?: string
   id?: string
+  inputProps?: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'id'>
 }
 
-export function SearchInput({ value, onChange, placeholder = 'Search...', className = '', label, id }: Props) {
+export function SearchInput({ value, onChange, placeholder = 'Search...', className = '', label, id, inputProps }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -36,6 +37,7 @@ export function SearchInput({ value, onChange, placeholder = 'Search...', classN
         <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
       </svg>
       <input
+        {...inputProps}
         ref={inputRef}
         id={id}
         aria-label={label}

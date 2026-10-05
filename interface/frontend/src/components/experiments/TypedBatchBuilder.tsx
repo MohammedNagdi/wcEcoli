@@ -7,6 +7,8 @@ import { HelpTip } from '../common/HelpTip'
 import { categoryLabel, variantLabel } from '../../utils/labels'
 import { makeAssistantContextKey, summarizeSample, summarizeText } from '../../utils/assistantContext'
 import { TimelineComposer } from './TimelineComposer'
+import './designer.css'
+import './batch.css'
 
 type TimelineChoice = {
   id: string
@@ -262,7 +264,7 @@ function StatusChip({
   }[tone]
 
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${toneClass}`}>
+    <span className={`designer-status inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${toneClass}`}>
       <span className="text-slate-500">{label}</span>
       <span className="font-medium">{value}</span>
     </span>
@@ -277,7 +279,7 @@ function TechnicalDetails({
   children: ReactNode
 }) {
   return (
-    <details className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+    <details className="designer-disclosure rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
       <summary className="cursor-pointer select-none text-xs font-medium text-slate-600 marker:text-slate-400">
         {title}
       </summary>
@@ -291,6 +293,8 @@ function TechnicalDetails({
 export function TypedBatchBuilder() {
   const navigate = useNavigate()
   const location = useLocation()
+  const summaryRef = useRef<HTMLElement>(null)
+  const [summaryFits, setSummaryFits] = useState(false)
   const assistantCapturedAt = useRef(new Date().toISOString()).current
   const [variants, setVariants] = useState<Variant[]>([])
   const [variantDetail, setVariantDetail] = useState<VariantDetail | null>(null)
@@ -363,11 +367,7 @@ export function TypedBatchBuilder() {
     if (!['gene_knockout', 'multi_gene_knockout'].includes(variantType)) setIncludeWildtype(false)
   }, [variantType])
 
-  useEffect(() => {
-    if (!submitError) return
-    const timer = setTimeout(() => setSubmitError(null), 5000)
-    return () => clearTimeout(timer)
-  }, [submitError])
+
 
   const categories = useMemo(() => {
     return Array.from(new Set(genes.map((gene) => gene.category))).sort()
@@ -782,6 +782,15 @@ export function TypedBatchBuilder() {
     }
   }
 
+  useEffect(() => {
+    const node = summaryRef.current
+    if (!node) return
+    const measure = () => setSummaryFits(node.getBoundingClientRect().height <= window.innerHeight - 120)
+    const observer = new ResizeObserver(measure)
+    observer.observe(node); window.addEventListener('resize', measure); measure()
+    return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
+  }, [loading])
+
   const removedCount = generatedRecords.length - previewRecords.length
   const editedCount = Object.keys(rowOverrides).length
 
@@ -794,7 +803,7 @@ export function TypedBatchBuilder() {
   }
 
   return (
-    <div className="mx-auto max-w-[1260px] px-1 pb-10">
+    <div className="experiment-designer batch-designer mx-auto max-w-[1260px] px-1 pb-10">
       <Link
         to="/experiments"
         className="mb-4 inline-flex items-center text-sm font-medium text-gray-500 hover:text-gray-800"
@@ -808,11 +817,6 @@ export function TypedBatchBuilder() {
             Choose one experiment type, define record variations, media protocols, and run size.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <StatusChip label="Experiment" value={variantType ? variantLabel(variantType) : 'Select type'} tone={variantType ? 'green' : 'amber'} />
-          <StatusChip label="Media protocol" value={mediaProtocolSummary.label} tone={mediaProtocolSummary.tone} />
-          <StatusChip label="Records" value={String(previewRecords.length)} tone={previewRecords.length > 0 ? 'green' : 'amber'} />
-        </div>
       </header>
 
       {loadError && (
@@ -821,21 +825,9 @@ export function TypedBatchBuilder() {
         </div>
       )}
 
-      {submitError && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {submitError}
-        </div>
-      )}
-
-      {formErrors.length > 0 && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {formErrors[0]}
-        </div>
-      )}
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
+      <div className="designer-layout grid gap-5">
       <div className="space-y-4">
-        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
             <StepBadge>1</StepBadge>
             Batch details
@@ -843,16 +835,16 @@ export function TypedBatchBuilder() {
           </h2>
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Batch name</label>
-              <input
+              <label htmlFor="batch-name" className="mb-1 block text-xs font-medium text-gray-600">Batch name</label>
+              <input id="batch-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Description</label>
-              <textarea
+              <label htmlFor="batch-description" className="mb-1 block text-xs font-medium text-gray-600">Description</label>
+              <textarea id="batch-description"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 rows={2}
@@ -879,13 +871,14 @@ export function TypedBatchBuilder() {
           )}
         </section>
 
-        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
             <StepBadge>2</StepBadge>
             Experiment type
             <HelpTip text="A typed batch is homogeneous: all records use this one variant type." />
           </h2>
-          <select
+          <label htmlFor="batch-type" className="mb-1 block text-xs font-medium">Experiment type</label>
+          <select id="batch-type"
             value={variantType}
             onChange={(event) => {
               setVariantType(event.target.value)
@@ -943,7 +936,7 @@ export function TypedBatchBuilder() {
         </section>
 
         {['gene_knockout', 'multi_gene_knockout'].includes(variantType) ? (
-          <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <section className="rounded-lg border border-gray-200 bg-white p-4">
             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
               <StepBadge>3</StepBadge>
               {variantType === 'multi_gene_knockout' ? 'Target gene set' : 'Gene variations'}
@@ -951,14 +944,17 @@ export function TypedBatchBuilder() {
                 ? 'Add genes that resolve to at least two unique wcEcoli knockout targets. The selected targets run together as one combined knockout.'
                 : 'Add one or more genes. Each selected gene is expanded against the selected timelines and seeds.'} />
             </h2>
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <input
+            <div className="batch-gene-filters mb-3">
+              <div><label htmlFor="batch-search" className="text-xs text-gray-600">Search genes</label>
+              <input id="batch-search"
                 value={geneSearch}
                 onChange={(event) => setGeneSearch(event.target.value)}
                 placeholder="Search gene..."
                 className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
               />
-              <select
+              </div>
+              <div><label htmlFor="batch-category" className="text-xs text-gray-600">Gene category</label>
+              <select id="batch-category"
                 value={categoryFilter}
                 onChange={(event) => setCategoryFilter(event.target.value)}
                 className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
@@ -968,6 +964,7 @@ export function TypedBatchBuilder() {
                   <option key={category} value={category}>{categoryLabel(category)}</option>
                 ))}
               </select>
+              </div>
             </div>
             <div className="mb-2 flex items-center justify-between">
               <button
@@ -981,13 +978,6 @@ export function TypedBatchBuilder() {
               </button>
               <div className="flex items-center gap-3 text-xs">
                 <span className="text-gray-400">{selectedGenes.length} selected · {filteredGenes.length} shown</span>
-                <button
-                  type="button"
-                  onClick={() => setSelectedGenes([])}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  Clear all
-                </button>
               </div>
             </div>
             <div className="mb-3 rounded-lg border border-brand-100 bg-brand-50/60 p-3">
@@ -1010,7 +1000,7 @@ export function TypedBatchBuilder() {
                     type="button"
                     onClick={() => toggleGene(gene)}
                     className="rounded-md border border-brand-200 bg-white px-2.5 py-1 text-xs font-medium text-brand-700 shadow-sm hover:bg-brand-50"
-                    title="Remove gene"
+                    aria-label={`Remove selected gene ${gene.symbol}`}
                   >
                     <span className="font-mono">{gene.symbol}</span>
                     <span className="ml-1 text-brand-400">KO #{gene.ko_index} x</span>
@@ -1021,11 +1011,11 @@ export function TypedBatchBuilder() {
                 )}
               </div>
             </div>
-            <div className="max-h-[420px] overflow-y-auto rounded-lg border border-gray-200 shadow-sm">
+            <div role="region" aria-label="Available genes" tabIndex={0} className="batch-table-scroll max-h-[420px] overflow-auto rounded-lg border border-gray-200">
               <table className="w-full table-fixed text-sm">
                 <thead className="sticky top-0 z-20 border-b border-gray-200 bg-gray-100 shadow-sm">
                   <tr>
-                    <th className="w-10 bg-gray-100 px-3 py-2"></th>
+                    <th className="w-10 bg-gray-100 px-3 py-2"><span className="sr-only">Select gene</span></th>
                     <th className="w-44 bg-gray-100 px-3 py-2 text-left text-xs font-medium text-gray-500">Gene</th>
                     <th className="bg-gray-100 px-3 py-2 text-left text-xs font-medium text-gray-500">Category</th>
                     <th className="w-28 bg-gray-100 px-3 py-2 text-left text-xs font-medium text-gray-500">KO idx</th>
@@ -1040,6 +1030,7 @@ export function TypedBatchBuilder() {
                     >
                       <td className="h-10 px-3 py-1 align-middle">
                         <input
+                          aria-label={`Select ${gene.symbol}`}
                           type="checkbox"
                           checked={selectedGeneSymbols.has(gene.symbol)}
                           onClick={(event) => event.stopPropagation()}
@@ -1047,8 +1038,8 @@ export function TypedBatchBuilder() {
                           className="rounded border-gray-300"
                         />
                       </td>
-                      <td className="h-10 truncate whitespace-nowrap px-3 py-1 align-middle font-mono text-xs font-medium leading-none text-brand-700">{gene.symbol}</td>
-                      <td className="h-10 truncate whitespace-nowrap px-3 py-1 align-middle text-xs leading-none text-gray-500">{categoryLabel(gene.category)}</td>
+                      <td className="h-10 break-words px-3 py-1 align-middle font-mono text-xs font-medium leading-none text-brand-700">{gene.symbol}</td>
+                      <td className="h-10 break-words px-3 py-1 align-middle text-xs leading-none text-gray-500">{categoryLabel(gene.category)}</td>
                       <td className="h-10 whitespace-nowrap px-3 py-1 align-middle font-mono text-xs leading-none text-gray-400">{gene.ko_index}</td>
                     </tr>
                   ))}
@@ -1064,7 +1055,7 @@ export function TypedBatchBuilder() {
             </div>
           </section>
         ) : (
-          <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <section className="rounded-lg border border-gray-200 bg-white p-4">
             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
               <StepBadge>3</StepBadge>
               Index variations
@@ -1072,8 +1063,8 @@ export function TypedBatchBuilder() {
             </h2>
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label className="mb-1 block text-xs text-gray-400">Parameter index</label>
-                <input
+                <label htmlFor="batch-index" className="mb-1 block text-xs text-gray-400">Parameter index</label>
+                <input id="batch-index"
                   type="number"
                   value={variantIndex}
                   min={minVariantIndex}
@@ -1119,7 +1110,7 @@ export function TypedBatchBuilder() {
                   type="button"
                   onClick={() => removeVariantIndex(index)}
                   className="rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 shadow-sm hover:bg-brand-100"
-                  title="Remove index"
+                  aria-label={`Remove index ${index}`}
                 >
                   index {index} <span className="text-brand-400">x</span>
                 </button>
@@ -1131,17 +1122,14 @@ export function TypedBatchBuilder() {
           </section>
         )}
 
-        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
             <StepBadge>4</StepBadge>
               Media protocol
               <HelpTip text="Compose a media protocol, then add it to the batch. Add multiple protocols to create all combinations across variations and seeds." />
             </h2>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusChip label="Source" value="Batch records" tone="green" />
-              <StatusChip label="Protocol" value={mediaProtocolSummary.label} tone={mediaProtocolSummary.tone} />
-            </div>
+
           </div>
           <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
             <p className="font-medium text-slate-700">{mediaProtocolSummary.label}</p>
@@ -1149,6 +1137,7 @@ export function TypedBatchBuilder() {
           </div>
           <div className="space-y-3">
             <TimelineComposer
+              restrained
               mediaRecipes={mediaRecipes}
               conditions={conditions}
               onChange={setComposedTimelineEvents}
@@ -1167,8 +1156,8 @@ export function TypedBatchBuilder() {
               entryNounPlural="batch media protocols"
             />
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <label className="mb-1 block text-xs font-medium text-gray-600">Protocol name</label>
-              <input
+              <label htmlFor="batch-protocol-name" className="mb-1 block text-xs font-medium text-gray-600">Protocol name</label>
+              <input id="batch-protocol-name"
                 value={composedTimelineName}
                 onChange={(event) => setComposedTimelineName(event.target.value)}
                 className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
@@ -1198,7 +1187,7 @@ export function TypedBatchBuilder() {
                   type="button"
                   onClick={() => removeTimeline(timeline.id)}
                   className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 shadow-sm hover:border-red-200 hover:text-red-600"
-                  title={timeline.definition}
+                  aria-label={`Remove media protocol ${timeline.label}`} title={timeline.definition}
                 >
                   {timeline.label} x
                 </button>
@@ -1210,16 +1199,16 @@ export function TypedBatchBuilder() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
             <StepBadge>5</StepBadge>
             Simulation parameters
             <HelpTip text="Seeds are explicit values, not a count. Enter multiple seeds with commas." />
           </h2>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="designer-simulation-fields grid gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Seeds</label>
-              <input
+              <label htmlFor="batch-seeds" className="mb-1 block text-xs font-medium text-gray-600">Seeds</label>
+              <input id="batch-seeds" aria-describedby="batch-seed-hint" aria-invalid={!!seedParse.error}
                 value={seedText}
                 onChange={(event) => setSeedText(event.target.value)}
                 placeholder="0, 7, 42"
@@ -1227,13 +1216,13 @@ export function TypedBatchBuilder() {
                   seedParse.error ? 'border-red-300 bg-red-50 focus:ring-red-200' : 'border-gray-200 bg-white shadow-sm focus:border-brand-500 focus:ring-brand-500/30'
                 }`}
               />
-              <p className={`mt-1 text-xs ${seedParse.error ? 'text-red-600' : 'text-gray-400'}`}>
+              <p id="batch-seed-hint" className={`mt-1 text-xs ${seedParse.error ? 'text-red-600' : 'text-gray-400'}`}>
                 {seedParse.error || `${seedParse.values.join(', ') || 'none'}`}
               </p>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Generations</label>
-              <input
+              <label htmlFor="batch-generations" className="mb-1 block text-xs font-medium text-gray-600">Generations</label>
+              <input id="batch-generations"
                 type="number"
                 min={1}
                 value={generations}
@@ -1242,8 +1231,8 @@ export function TypedBatchBuilder() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Max duration (s)</label>
-              <input
+              <label htmlFor="batch-duration" className="mb-1 block text-xs font-medium text-gray-600">Max duration (s)</label>
+              <input id="batch-duration"
                 type="number"
                 min={60}
                 step={60}
@@ -1255,7 +1244,7 @@ export function TypedBatchBuilder() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
@@ -1291,21 +1280,21 @@ export function TypedBatchBuilder() {
 
           {formErrors.length > 0 ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-              {formErrors[0]}
+              Complete the required fields to display preview records.
             </div>
           ) : previewRecords.length === 0 ? (
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-10 text-center text-sm text-gray-400">
               No preview records yet.
             </div>
           ) : (
-            <div className="max-h-[460px] overflow-auto rounded-lg border border-gray-200 shadow-sm">
+            <div role="region" aria-label="Preview records" tabIndex={0} className="batch-table-scroll max-h-[460px] overflow-auto rounded-lg border border-gray-200">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 border-b border-gray-200 bg-gray-50/95">
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Variation</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Timeline</th>
                     <th className="w-20 px-3 py-2 text-left text-xs font-medium text-gray-500">Seed</th>
-                    <th className="w-16 px-3 py-2"></th>
+                    <th className="w-16 px-3 py-2"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1317,7 +1306,7 @@ export function TypedBatchBuilder() {
                             <span className="rounded-md bg-brand-50 px-2 py-1 font-mono text-xs font-medium text-brand-700">
                               {record.gene_symbols.length} genes
                             </span>
-                            <p className="mt-1 max-w-xs truncate text-xs text-gray-400">{record.index_hint}</p>
+                            <p className="mt-1 max-w-xs break-words text-xs text-gray-400">{record.index_hint}</p>
                           </>
                         ) : record.gene_symbol ? (
                           <>
@@ -1328,13 +1317,14 @@ export function TypedBatchBuilder() {
                           <>
                             <span className="rounded-md bg-gray-100 px-2 py-1 font-mono text-xs font-medium text-gray-700">index {record.variant_index}</span>
                             {record.index_hint && (
-                              <p className="mt-0.5 max-w-xs truncate text-xs text-gray-400">{record.index_hint}</p>
+                              <p className="mt-0.5 max-w-xs break-words text-xs text-gray-400">{record.index_hint}</p>
                             )}
                           </>
                         )}
                       </td>
                       <td className="px-3 py-2">
                         <select
+                          aria-label={`Timeline for ${record.row_id}`}
                           value={record.timeline || ''}
                           onChange={(event) => {
                             const choice = timelineOptions.find((timeline) => timeline.value === event.target.value)
@@ -1355,6 +1345,7 @@ export function TypedBatchBuilder() {
                         <input
                           type="number"
                           min={0}
+                          aria-label={`Seed for ${record.row_id}`}
                           value={record.seed}
                           onChange={(event) => updateRow(record.row_id, { seed: Math.max(0, Number(event.target.value) || 0) })}
                           className="w-16 rounded-md border border-gray-200 bg-white px-2 py-1 font-mono text-xs text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -1363,6 +1354,7 @@ export function TypedBatchBuilder() {
                       <td className="px-3 py-2 text-right">
                         <button
                           type="button"
+                          aria-label={`Remove record ${record.row_id}`}
                           onClick={() => setRemovedRows((current) => new Set(current).add(record.row_id))}
                           className="text-xs text-gray-400 hover:text-red-600"
                         >
@@ -1379,7 +1371,7 @@ export function TypedBatchBuilder() {
 
       </div>
 
-      <aside className="xl:sticky xl:top-4">
+      <aside ref={summaryRef} className="designer-summary" data-fits={summaryFits}>
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-slate-900">Batch summary</h2>
@@ -1402,7 +1394,8 @@ export function TypedBatchBuilder() {
               </dd>
               <dd className="mt-1 break-words text-xs text-slate-500">{mediaProtocolSummary.detail}</dd>
             </div>
-            <div className="grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
+          </dl>
+          <dl className="grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 mt-3">
               <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-400">Variations</dt>
                 <dd className="mt-1 text-slate-900">{variationCount}</dd>
@@ -1420,23 +1413,26 @@ export function TypedBatchBuilder() {
                 <dd className="mt-1 text-slate-900">{(lengthSec / 3600).toFixed(1)} hr</dd>
                 <dd className="mt-0.5 text-xs text-slate-400">{generations} gen</dd>
               </div>
-            </div>
+          </dl>
+          <dl className="mt-3 space-y-3 text-sm">
             {['gene_knockout', 'multi_gene_knockout'].includes(variantType) && (
               <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-400">Wildtype controls</dt>
                 <dd className="mt-1 text-slate-900">{includeWildtype ? 'Included' : 'Not included'}</dd>
               </div>
             )}
+          </dl>
             {formErrors.length > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div id="batch-blocking-reason" className="batch-warning rounded-lg border px-3 py-2 text-xs">
                 {formErrors[0]}
               </div>
             )}
-          </dl>
 
+          {submitError && <div role="alert" className="batch-error mt-4 rounded-lg border px-3 py-2 text-sm">{submitError}</div>}
           <div className="mt-5 grid gap-2">
             <button
               type="button"
+              aria-describedby={formErrors.length ? 'batch-blocking-reason' : undefined}
               onClick={submitBatch}
               disabled={submitting || formErrors.length > 0}
               className="w-full rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"

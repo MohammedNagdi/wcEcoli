@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { useId, useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import type { Condition, MediaRecipe, Timeline, UserTimeline } from '../../types'
 import { getTimelines, getUserTimelines, saveUserTimeline } from '../../api/client'
 
@@ -8,10 +8,13 @@ interface TLEvent {
   mediaId: string
 }
 
-const HEX_COLORS = [
-  '#475569', '#059669', '#7c3aed', '#ea580c', '#0891b2',
-  '#d97706', '#e11d48', '#0d9488', '#4f46e5',
+const MUTED_COLORS = [
+  'var(--designer-slate, #596579)', 'var(--designer-teal, #4F806F)',
+  'var(--designer-violet, #78639B)', 'var(--designer-rose, #9D5667)',
+  'var(--designer-blue, #536E91)', 'var(--designer-ochre, #8A681F)',
 ]
+
+const HEX_COLORS = ['#475569', '#059669', '#7c3aed', '#ea580c', '#0891b2', '#d97706', '#e11d48', '#0d9488', '#4f46e5']
 
 const TICK_INTERVAL_SEC = 1200
 const COMMON_MEDIA_IDS = [
@@ -106,6 +109,7 @@ interface Props {
   entryNounSingular?: string
   entryNounPlural?: string
   onPresetLoad?: (preset: { name: string; label: string; definition: string }) => void
+  restrained?: boolean
   onPresetClear?: () => void
 }
 
@@ -120,7 +124,10 @@ export function TimelineComposer({
   entryNounPlural = 'timelines',
   onPresetLoad,
   onPresetClear,
+  restrained = false,
 }: Props) {
+  const colors = restrained ? MUTED_COLORS : HEX_COLORS
+  const disclosureId = useId()
   const [selectedMediaId, setSelectedMediaId] = useState('')
   const [events, setEvents] = useState<TLEvent[]>([])
   const [hoverPct, setHoverPct] = useState<number | null>(null)
@@ -182,8 +189,8 @@ export function TimelineComposer({
 
   const colorIdx = useCallback((mediaId: string) => {
     const i = mediaRecipes.findIndex(r => r.media_id === mediaId)
-    return (i < 0 ? 0 : i) % HEX_COLORS.length
-  }, [mediaRecipes])
+    return (i < 0 ? 0 : i) % colors.length
+  }, [mediaRecipes, colors])
 
   const mutate = useCallback((nextEvents: TLEvent[]) => {
     const next = [...nextEvents].sort((a, b) => a.timeSec - b.timeSec)
@@ -387,7 +394,7 @@ export function TimelineComposer({
   const segments = displayEvents.map((ev, i) => {
     const startPct = (ev.timeSec / maxSec) * 100
     const endPct = i < displayEvents.length - 1 ? (displayEvents[i + 1].timeSec / maxSec) * 100 : 100
-    return { ev, startPct, widthPct: Math.max(endPct - startPct, 0.1), color: HEX_COLORS[colorIdx(ev.mediaId)] }
+    return { ev, startPct, widthPct: Math.max(endPct - startPct, 0.1), color: colors[colorIdx(ev.mediaId)] }
   })
 
   const ticks = Array.from({ length: Math.floor(maxSec / TICK_INTERVAL_SEC) + 1 }, (_, i) => i * TICK_INTERVAL_SEC)
@@ -404,6 +411,8 @@ export function TimelineComposer({
         <div className="rounded-lg border border-gray-200">
           <button
             type="button"
+            aria-expanded={presetOpen}
+            aria-controls={`${disclosureId}-presets`}
             onClick={() => setPresetOpen(o => !o)}
             className="flex w-full items-center justify-between gap-3 bg-gray-50 px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
           >
@@ -454,8 +463,10 @@ export function TimelineComposer({
             </div>
           )}
           {presetOpen && (
-            <div className="space-y-2 border-t border-gray-200 px-4 py-3">
+            <div id={`${disclosureId}-presets`} className="designer-reveal space-y-2 border-t border-gray-200 px-4 py-3">
               <select
+                aria-label="Media protocol preset"
+                aria-describedby={presetWarning ? `${disclosureId}-warning` : undefined}
                 value={selectedPreset}
                 onChange={e => { setSelectedPreset(e.target.value); setPresetWarning('') }}
                 className="w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400"
@@ -472,7 +483,7 @@ export function TimelineComposer({
                   </optgroup>
                 )}
               </select>
-              {presetWarning && <p className="text-xs text-amber-600">{presetWarning}</p>}
+              {presetWarning && <p id={`${disclosureId}-warning`} className="text-xs text-amber-600">{presetWarning}</p>}
               <button
                 type="button"
                 onClick={handleLoadPreset}
@@ -490,6 +501,8 @@ export function TimelineComposer({
             <p className="mb-2 text-xs font-medium text-gray-600">{`Save this ${entryNounSingular} for later`}</p>
             <div className="flex items-center gap-2">
               <input
+                aria-label={`Saved ${entryNounSingular} name`}
+                aria-describedby={saveStatus === 'error' ? `${disclosureId}-save-error` : undefined}
                 type="text"
                 value={timelineName}
                 onChange={e => { setTimelineName(e.target.value); setSaveStatus('idle'); setSaveError('') }}
@@ -506,7 +519,7 @@ export function TimelineComposer({
               </button>
             </div>
             {saveStatus === 'saved' && <p className="mt-2 text-xs text-emerald-600">Saved. It is now available in presets.</p>}
-            {saveStatus === 'error' && <p className="mt-2 text-xs text-red-500">{saveError}</p>}
+            {saveStatus === 'error' && <p id={`${disclosureId}-save-error`} role="alert" className="mt-2 text-xs text-red-500">{saveError}</p>}
           </div>
         )}
       </div>
@@ -524,6 +537,7 @@ export function TimelineComposer({
 
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
           <input
+            aria-label="Search media vials"
             type="search"
             value={vialSearch}
             onChange={e => {
@@ -543,13 +557,13 @@ export function TimelineComposer({
                 e.dataTransfer.setData('media-id', selectedRecipe.media_id)
               }}
               title={recipeSummary(selectedRecipe)}
-              className="flex min-w-[190px] items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium text-white shadow"
+              className="designer-vial flex min-w-[190px] items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium text-white shadow"
               style={{
-                backgroundColor: HEX_COLORS[colorIdx(selectedRecipe.media_id)],
-                borderColor: HEX_COLORS[colorIdx(selectedRecipe.media_id)],
+                backgroundColor: colors[colorIdx(selectedRecipe.media_id)],
+                borderColor: colors[colorIdx(selectedRecipe.media_id)],
               }}
             >
-              <span className="h-2.5 w-2.5 rounded-full bg-white" />
+              <span className="h-2.5 w-2.5 rounded-full bg-white" style={{ backgroundColor: restrained ? colors[colorIdx(selectedRecipe.media_id)] : undefined }} />
               <span className="truncate">{humanize(selectedRecipe.media_id)}</span>
             </button>
           )}
@@ -572,15 +586,16 @@ export function TimelineComposer({
                       e.dataTransfer.setData('media-id', r.media_id)
                     }}
                     title={recipeSummary(r)}
-                    className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                    aria-pressed={selected}
+                    className={`designer-vial flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                       selected ? 'scale-105 text-white shadow' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                     }`}
                     style={selected ? {
-                      backgroundColor: HEX_COLORS[colorIdx(r.media_id)],
-                      borderColor: HEX_COLORS[colorIdx(r.media_id)],
+                      backgroundColor: colors[colorIdx(r.media_id)],
+                      borderColor: colors[colorIdx(r.media_id)],
                     } : {}}
                   >
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: selected ? '#fff' : HEX_COLORS[colorIdx(r.media_id)] }} />
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: selected && !restrained ? '#fff' : colors[colorIdx(r.media_id)] }} />
                     <span>{humanize(r.media_id)}</span>
                   </button>
                 )
@@ -592,6 +607,8 @@ export function TimelineComposer({
         <div className="mt-3 rounded-lg border border-gray-100">
           <button
             type="button"
+            aria-expanded={browseVialsOpen}
+            aria-controls={`${disclosureId}-vials`}
             onClick={() => setBrowseVialsOpen(o => !o)}
             className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
           >
@@ -599,7 +616,7 @@ export function TimelineComposer({
             <span className={`transition-transform ${browseVialsOpen ? 'rotate-180' : ''}`}>⌄</span>
           </button>
           {browseVialsOpen && (
-            <div className="max-h-56 overflow-y-auto border-t border-gray-100 p-2">
+            <div id={`${disclosureId}-vials`} className="designer-reveal max-h-56 overflow-y-auto border-t border-gray-100 p-2">
               {filteredRecipes.length === 0 && (
                 <p className="px-2 py-3 text-xs text-gray-400">No media vials match your search.</p>
               )}
@@ -622,7 +639,7 @@ export function TimelineComposer({
                       }`}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: HEX_COLORS[colorIdx(r.media_id)] }} />
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colors[colorIdx(r.media_id)] }} />
                         <span className="truncate font-medium">{humanize(r.media_id)}</span>
                       </span>
                       <code className="hidden max-w-[150px] truncate text-[11px] text-gray-400 md:inline">{r.media_id}</code>
@@ -656,7 +673,7 @@ export function TimelineComposer({
           className="relative h-14 cursor-crosshair select-none overflow-hidden rounded-lg border border-gray-200 bg-gray-100"
         >
           {segments.map(({ ev, startPct, widthPct, color }) => (
-            <div key={ev.id} className="absolute top-0 h-full" style={{ left: `${startPct}%`, width: `${widthPct}%`, backgroundColor: color, opacity: 0.86 }} />
+            <div key={ev.id} className="absolute top-0 h-full" style={{ left: `${startPct}%`, width: `${widthPct}%`, backgroundColor: color, opacity: restrained ? 1 : 0.86 }} />
           ))}
           {displayEvents.map(ev => {
             const isDragging = dragPreview?.id === ev.id
@@ -670,11 +687,12 @@ export function TimelineComposer({
               onPointerMove={updateMarkerDrag}
               onPointerUp={finishMarkerDrag}
               onPointerCancel={finishMarkerDrag}
-              className={`absolute top-2 z-10 flex max-w-[150px] -translate-x-1/2 touch-none items-center gap-1 rounded-full border-2 border-white px-2 py-1 text-[11px] font-medium text-white shadow transition-transform ${ev.timeSec === 0 ? 'cursor-not-allowed opacity-90' : isDragging ? 'scale-110 cursor-grabbing ring-2 ring-white/70' : 'cursor-grab hover:scale-105 active:cursor-grabbing'}`}
+              aria-label={`${ev.timeSec === 0 ? 'Starting medium' : 'Shift'} at ${fmtSec(markerTime)}, ${humanize(ev.mediaId)}`}
+              className={`designer-marker absolute top-2 z-10 flex max-w-[150px] -translate-x-1/2 touch-none items-center gap-1 rounded-full border-2 border-white px-2 py-1 text-[11px] font-medium text-white shadow transition-transform ${ev.timeSec === 0 ? 'cursor-not-allowed opacity-90' : isDragging ? 'scale-110 cursor-grabbing ring-2 ring-white/70' : 'cursor-grab hover:scale-105 active:cursor-grabbing'}`}
               title={ev.timeSec === 0 ? 'Starting vial is fixed at 0 min' : `Drag left or right to adjust shift time. Crossing another shift will reorder the ${entryNounSingular}.`}
-              style={{ left: markerLeft(ev.timeSec), backgroundColor: HEX_COLORS[colorIdx(ev.mediaId)] }}
+              style={{ left: markerLeft(ev.timeSec), backgroundColor: colors[colorIdx(ev.mediaId)] }}
             >
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white" />
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: restrained ? colors[colorIdx(ev.mediaId)] : '#fff' }} />
               <span className="truncate">{fmtSec(markerTime)}</span>
             </button>
           )})}
@@ -705,13 +723,14 @@ export function TimelineComposer({
       </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-200">
-        <div className="grid grid-cols-[90px_1fr_160px_80px] bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+        <div className="designer-event-header grid grid-cols-[90px_1fr_160px_80px] bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
           <span>Time (min)</span><span>Vial</span><span>Media ID</span><span />
         </div>
         {sorted.map(ev => (
-          <div key={ev.id} className="grid grid-cols-[90px_1fr_160px_80px] items-center gap-2 border-t border-gray-100 px-3 py-2">
+          <div key={ev.id} className="designer-event-row grid grid-cols-[90px_1fr_160px_80px] items-center gap-2 border-t border-gray-100 px-3 py-2">
             <div className="flex items-center gap-1 text-xs text-gray-500">
               <input
+                aria-label={`Shift time (min) for ${ev.mediaId}, event ${sorted.indexOf(ev) + 1}`}
                 type="number"
                 value={Math.round(ev.timeSec / 60)}
                 min={0}
@@ -723,6 +742,7 @@ export function TimelineComposer({
               <span>min</span>
             </div>
             <select
+              aria-label={`Vial for event ${sorted.indexOf(ev) + 1}`}
               value={ev.mediaId}
               onChange={e => updateEventMedia(ev.id, e.target.value)}
               className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-gray-300"
@@ -732,6 +752,7 @@ export function TimelineComposer({
             <code className="truncate text-xs text-gray-500">{ev.mediaId}</code>
             <button
               type="button"
+              aria-label={`Remove event ${sorted.indexOf(ev) + 1}`}
               onClick={() => removeEvent(ev.id)}
               disabled={ev.timeSec === 0}
               className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"

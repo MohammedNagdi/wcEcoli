@@ -1,0 +1,31 @@
+/* Scoped adaptation of the existing experiment designer; no external component source. */
+.batch-designer.batch-designer :where(section, .designer-layout > div, aside, dl, dd) { min-width: 0; }
+.batch-designer.batch-designer section { border-radius: 10px; box-shadow: none; }
+.batch-designer.batch-designer :where(dd, button, p) { overflow-wrap: anywhere; }
+.batch-designer.batch-designer :where(.bg-amber-50, .bg-emerald-50, .bg-blue-50, .bg-brand-50, .bg-gray-100) {
+  background: rgb(var(--color-subtle));
+}
+.batch-designer.batch-designer :where(.border-amber-200, .border-emerald-200, .border-blue-200, .border-brand-200) { border-color: rgb(var(--color-border-subtle)); }
+.batch-designer.batch-designer :where(.text-brand-700, .text-emerald-700, .text-blue-700) { color: rgb(var(--color-text-primary)); }
+.batch-designer.batch-designer .designer-status { color: rgb(var(--color-text-primary)); }
+.batch-designer.batch-designer .batch-warning { color: var(--designer-warning); background: rgb(var(--color-subtle)); border-color: var(--designer-warning); }
+.batch-designer.batch-designer .batch-error { color: var(--designer-error); background: rgb(var(--color-subtle)); border-color: var(--designer-error); }
+.batch-designer.batch-designer .batch-table-scroll { max-width: 100%; scrollbar-gutter: stable; }
+.batch-designer.batch-designer .batch-table-scroll table { min-width: 520px; }
+.batch-designer.batch-designer .batch-table-scroll thead,
+.batch-designer.batch-designer .batch-table-scroll th { background: rgb(var(--color-surface)); opacity: 1; box-shadow: none; }
+.batch-designer.batch-designer .batch-table-scroll td { overflow-wrap: anywhere; }
+.batch-designer.batch-designer .batch-table-scroll input:not([type=checkbox]) { width: 72px; }
+.batch-designer.batch-designer .batch-table-scroll select { width: 176px; }
+.batch-designer.batch-designer button[aria-label^="Remove"] { border-radius: 6px; }
+@container designer (max-width: 599px) {
+  .batch-designer.batch-designer section > .grid { grid-template-columns: minmax(0, 1fr); }
+  .batch-designer.batch-designer section > .mt-3.flex.items-start.justify-between { flex-wrap: wrap; }
+}
+.batch-designer.batch-designer .text-brand-400 { color: rgb(var(--color-text-secondary)); }
+.batch-designer.batch-designer [class~="bg-brand-50/60"] { background: rgb(var(--color-subtle)); border-color: rgb(var(--color-border-subtle)); }
+.batch-gene-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.batch-gene-filters label { display: block; margin-bottom: 4px; }
+.batch-gene-filters :is(input, select) { width: 100%; }
+@container designer (max-width: 599px) { .batch-gene-filters { grid-template-columns: minmax(0, 1fr); } }
+.batch-designer.batch-designer .batch-table-scroll td.font-mono { color: rgb(var(--color-text-primary)); }

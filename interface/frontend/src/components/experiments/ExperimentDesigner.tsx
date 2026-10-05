@@ -14,6 +14,7 @@ import { variantLabel } from '../../utils/labels'
 import { makeAssistantContextKey } from '../../utils/assistantContext'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { TimelineComposer } from './TimelineComposer'
+import './designer.css'
 
 type TimelineBehavior = 'composer' | 'internal_override' | 'internal_conditional_override'
 
@@ -598,8 +599,8 @@ function SemanticParameterControls({
   if (variantType === 'condition') {
     return (
       <div>
-        <label className="text-xs text-gray-400 block mb-1">Growth condition encoded by this experiment type</label>
-        <select
+        <label htmlFor="designer-condition-index" className="text-xs text-gray-400 block mb-1">Growth condition encoded by this experiment type</label>
+        <select id="designer-condition-index" aria-describedby="designer-condition-hint"
           value={variantIndex}
           onChange={(event) => {
             const nextIndex = Number(event.target.value)
@@ -616,7 +617,7 @@ function SemanticParameterControls({
             </option>
           ))}
         </select>
-        <p className="text-xs text-gray-400 mt-1">
+        <p id="designer-condition-hint" className="text-xs text-gray-400 mt-1">
           This selector drives the runtime condition index and also syncs the regular condition field.
         </p>
       </div>
@@ -626,8 +627,8 @@ function SemanticParameterControls({
   if (['add_one_aa', 'remove_one_aa', 'add_one_aa_shift', 'remove_one_aa_shift'].includes(variantType)) {
     return (
       <div>
-        <label className="text-xs text-gray-400 block mb-1">Amino acid</label>
-        <select
+        <label htmlFor="designer-amino-acid" className="text-xs text-gray-400 block mb-1">Amino acid</label>
+        <select id="designer-amino-acid"
           value={variantIndex}
           onChange={(event) => setVariantIndex(Number(event.target.value))}
           className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
@@ -645,8 +646,8 @@ function SemanticParameterControls({
   if (variantType === 'remove_aas_shift') {
     return (
       <div>
-        <label className="text-xs text-gray-400 block mb-1">Amino-acid shift branch</label>
-        <select
+        <label htmlFor="designer-shift-branch" className="text-xs text-gray-400 block mb-1">Amino-acid shift branch</label>
+        <select id="designer-shift-branch" aria-describedby="designer-shift-hint"
           value={variantIndex}
           onChange={(event) => setVariantIndex(Number(event.target.value))}
           className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
@@ -657,7 +658,7 @@ function SemanticParameterControls({
             </option>
           ))}
         </select>
-        <p className="text-xs text-gray-400 mt-1">
+        <p id="designer-shift-hint" className="text-xs text-gray-400 mt-1">
           {getRemoveAasShiftOptions().find((option) => option.index === variantIndex)?.description}
         </p>
       </div>
@@ -686,8 +687,8 @@ function SemanticParameterControls({
       <div className="space-y-3">
         <div className="grid gap-3 md:grid-cols-[1fr_180px]">
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Transcription factor</label>
-            <select
+            <label htmlFor="designer-tf" className="text-xs text-gray-400 block mb-1">Transcription factor</label>
+            <select id="designer-tf" aria-describedby="designer-tf-hint"
               value={selection.mode === 'control' ? 'control' : selectedTfIndex}
               onChange={(event) => {
                 if (event.target.value === 'control') {
@@ -705,8 +706,8 @@ function SemanticParameterControls({
             </select>
           </div>
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Forced state</label>
-            <select
+            <label htmlFor="designer-tf-state" className="text-xs text-gray-400 block mb-1">Forced state</label>
+            <select id="designer-tf-state" aria-describedby="designer-tf-hint"
               value={selectedStatus}
               disabled={selection.mode === 'control'}
               onChange={(event) => setTfSelection(selectedTfIndex, event.target.value as 'active' | 'inactive')}
@@ -742,7 +743,7 @@ function SemanticParameterControls({
             </dl>
           </div>
         )}
-        <p className="text-xs text-slate-500">
+        <p id="designer-tf-hint" className="text-xs text-slate-500">
           Forced TF states use reconstruction metadata. Free-form media stacks remain available only for the control branch.
         </p>
       </div>
@@ -763,8 +764,8 @@ function SemanticParameterControls({
     return (
       <div className="grid gap-3 md:grid-cols-2">
         <div>
-          <label className="text-xs text-gray-400 block mb-1">Runtime condition block</label>
-          <select
+          <label htmlFor="designer-ppgpp-condition" className="text-xs text-gray-400 block mb-1">Runtime condition block</label>
+          <select id="designer-ppgpp-condition" aria-describedby="designer-ppgpp-hint"
             value={selectedConditionName}
             onChange={(event) => setPpgppSelection(event.target.value, factorIndex)}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
@@ -777,8 +778,8 @@ function SemanticParameterControls({
           </select>
         </div>
         <div>
-          <label className="text-xs text-gray-400 block mb-1">Fixed ppGpp factor</label>
-          <select
+          <label htmlFor="designer-ppgpp-factor" className="text-xs text-gray-400 block mb-1">Fixed ppGpp factor</label>
+          <select id="designer-ppgpp-factor" aria-describedby="designer-ppgpp-hint"
             value={factorIndex}
             onChange={(event) => setPpgppSelection(selectedConditionName, Number(event.target.value))}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
@@ -788,7 +789,7 @@ function SemanticParameterControls({
             ))}
           </select>
         </div>
-        <p className="md:col-span-2 text-xs text-slate-500">
+        <p id="designer-ppgpp-hint" className="md:col-span-2 text-xs text-slate-500">
           This variant clamps ppGpp and disables normal ppGpp synthesis/degradation dynamics for the selected condition block.
         </p>
       </div>
@@ -798,8 +799,8 @@ function SemanticParameterControls({
   if (variantType === 'sinusoidal_media') {
     return (
       <div>
-        <label className="text-xs text-gray-400 block mb-1">Oscillation period (minutes)</label>
-        <input
+        <label htmlFor="designer-oscillation" className="text-xs text-gray-400 block mb-1">Oscillation period (minutes)</label>
+        <input id="designer-oscillation" aria-describedby="designer-oscillation-hint"
           type="number"
           value={variantIndex}
           onChange={(event) => setVariantIndex(Math.max(1, Number(event.target.value)))}
@@ -807,7 +808,7 @@ function SemanticParameterControls({
           step={1}
           className="w-40 border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
         />
-        <p className="text-xs text-gray-400 mt-1">
+        <p id="designer-oscillation-hint" className="text-xs text-gray-400 mt-1">
           Media A/B are still runtime-configured; this control only sets the period.
         </p>
       </div>
@@ -1076,7 +1077,7 @@ function StatusChip({
   }[tone]
 
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${toneClass}`}>
+    <span data-tone={tone} className={`designer-status inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${toneClass}`}>
       <span className="text-slate-500">{label}</span>
       <span className="font-medium">{value}</span>
     </span>
@@ -1091,7 +1092,7 @@ function TechnicalDetails({
   children: ReactNode
 }) {
   return (
-    <details className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+    <details className="designer-disclosure rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
       <summary className="cursor-pointer select-none text-xs font-medium text-slate-600 marker:text-slate-400">
         {title}
       </summary>
@@ -1144,6 +1145,9 @@ export function ExperimentDesigner() {
   const [geneQuery, setGeneQuery] = useState(prefillGene)
   const [geneResults, setGeneResults] = useState<Gene[]>([])
   const [showGenePicker, setShowGenePicker] = useState(false)
+  const [activeGene, setActiveGene] = useState(-1)
+  const summaryRef = useRef<HTMLElement>(null)
+  const [summaryFits, setSummaryFits] = useState(false)
   const [selectedGenes, setSelectedGenes] = useState<Gene[]>([])
 
   // Gene impact preview
@@ -1478,10 +1482,11 @@ export function ExperimentDesigner() {
   // Gene search
   useEffect(() => {
     if (geneQuery.length < 1) { setGeneResults([]); return }
+    let current = true
     const timer = setTimeout(() => {
-      searchGenes(geneQuery, 8).then(setGeneResults)
+      searchGenes(geneQuery, 8).then(genes => { if (current) setGeneResults(genes) }).catch(() => { if (current) setGeneResults([]) })
     }, 200)
-    return () => clearTimeout(timer)
+    return () => { current = false; clearTimeout(timer) }
   }, [geneQuery])
 
   const selectGene = (gene: Gene) => {
@@ -1500,6 +1505,48 @@ export function ExperimentDesigner() {
       }
       return [...current, gene].sort((a, b) => a.symbol.localeCompare(b.symbol))
     })
+  }
+
+  // Sticky only when the whole summary (including its actions) fits the viewport.
+  useEffect(() => {
+    const node = summaryRef.current
+    if (!node) return
+    const measure = () => setSummaryFits(node.getBoundingClientRect().height <= window.innerHeight - 120)
+    const observer = new ResizeObserver(measure)
+    observer.observe(node); window.addEventListener('resize', measure); measure()
+    return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
+  }, [duplicateId, duplicateReady])
+
+  useEffect(() => { setActiveGene(-1) }, [geneQuery, geneResults])
+  useEffect(() => {
+    if (showGenePicker && activeGene >= 0) document.getElementById(`designer-gene-${activeGene}`)?.scrollIntoView({ block: 'nearest' })
+  }, [activeGene, showGenePicker])
+
+  const chooseSuggestion = (gene: Gene) => {
+    if (variantType === 'multi_gene_knockout') {
+      toggleMultiGene(gene); setGeneQuery(''); setShowGenePicker(false)
+    } else selectGene(gene)
+    setActiveGene(-1)
+  }
+  const geneInputProps = {
+    role: 'combobox', 'aria-autocomplete': 'list' as const,
+    'aria-expanded': showGenePicker && geneResults.length > 0,
+    'aria-controls': showGenePicker && geneResults.length > 0 ? 'designer-gene-list' : undefined,
+    'aria-activedescendant': showGenePicker && activeGene >= 0 ? `designer-gene-${activeGene}` : undefined,
+    onBlur: () => setShowGenePicker(false),
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.nativeEvent.isComposing) return
+      if (event.key === 'Escape' && showGenePicker) { event.preventDefault(); event.stopPropagation(); setShowGenePicker(false); setActiveGene(-1); return }
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && geneResults.length) {
+        event.preventDefault(); setShowGenePicker(true)
+        const available = geneResults.map((gene, i) => ({ gene, i })).filter(({ gene }) => variantType !== 'multi_gene_knockout' || gene.ko_index >= 1).map(({ i }) => i)
+        if (!available.length) return
+        const current = activeGene < 0 && event.key === 'ArrowUp' ? 0 : available.indexOf(activeGene)
+        setActiveGene(available[(current + (event.key === 'ArrowDown' ? 1 : -1) + available.length) % available.length])
+      } else if (event.key === 'Enter' && showGenePicker && activeGene >= 0) {
+        event.preventDefault(); chooseSuggestion(geneResults[activeGene])
+      }
+    },
   }
 
   const handleSave = async () => {
@@ -1551,7 +1598,7 @@ export function ExperimentDesigner() {
 
   if (duplicateId && !duplicateReady) return <div className="mx-auto max-w-2xl bg-white rounded-lg border border-gray-200 p-6"><Link className="text-brand-600" to="/experiments">← Back to experiments</Link>{duplicateError ? <div role="alert" className="mt-4"><h1 className="text-lg font-semibold">Could not duplicate experiment</h1><p className="mt-2 text-red-700">{duplicateError}</p><button className="mt-4 rounded border border-gray-200 px-3 py-2" onClick={() => setDuplicateAttempt((value) => value + 1)}>Retry</button></div> : <p role="status" className="mt-4">Loading source configuration…</p>}</div>
   return (
-    <div className="mx-auto max-w-[1260px] px-1">
+    <div className="experiment-designer mx-auto max-w-[1260px] px-1">
       <Link
         to="/experiments"
         className="mb-4 inline-flex items-center text-sm font-medium text-gray-500 hover:text-gray-800"
@@ -1566,27 +1613,24 @@ export function ExperimentDesigner() {
             {' '}<Link to="/guide" className="text-brand-600 hover:text-brand-700 hover:underline">Documentation</Link>
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <StatusChip label="Environment" value={environmentSourceLabel} tone={environmentLocked ? 'amber' : 'green'} />
-          <StatusChip label="Media protocol" value={environmentStatusText} tone={environmentLocked ? 'amber' : 'green'} />
-        </div>
       </header>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
+        <div id="designer-save-error" role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
           {error}
         </div>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
+      <div className="designer-layout grid gap-5">
       <div className="space-y-4">
         {/* --- Experiment type --- */}
         <section className="bg-white rounded-lg border border-gray-200 p-4">
-          <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+          <h2 id="designer-type-label" className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
             Experiment type
             <HelpTip text="Each experiment type modifies the simulation in a specific way. 'Gene knockout' sets a gene's RNA expression to zero - the cell must grow without the protein it encodes. Other variants alter media composition, kinetic parameters, or regulatory logic." />
           </h2>
           <select
+            aria-label="Experiment type"
             value={variantType}
             onChange={(e) => {
               setVariantType(e.target.value)
@@ -1667,7 +1711,7 @@ export function ExperimentDesigner() {
               Target gene
               <HelpTip text="The knockout sets this gene's RNA expression to zero. The model tracks all 4,749 genes, but only ~1,500 have mechanistic downstream effects (metabolic enzymes, transcription factors, ribosomal proteins). Knocking out a 'passenger' gene will show its protein declining to zero, but may not affect growth." />
             </h2>
-            <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+            <div className="designer-notice mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
               <p className="font-medium">Modeled knockout: RNA synthesis/expression is set to zero.</p>
               <p className="mt-1 text-blue-800">
                 This approximates loss of gene product during the simulation. It does not physically delete the DNA locus or remodel neighboring genes, operons, promoters, or genome architecture.
@@ -1675,16 +1719,20 @@ export function ExperimentDesigner() {
             </div>
             <div className="relative">
               <SearchInput
+                inputProps={geneInputProps}
+                label="Search gene to knock out"
                 value={geneQuery}
                 onChange={(v) => { setGeneQuery(v); setShowGenePicker(true) }}
                 placeholder="Search gene to knock out..."
               />
               {showGenePicker && geneResults.length > 0 && (
-                <div className="absolute z-10 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {geneResults.map((g) => (
+                <div id="designer-gene-list" role="listbox" aria-label="Gene suggestions" className="designer-gene-menu absolute z-10 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {geneResults.map((g, i) => (
                     <button
                       key={g.id}
-                      onClick={() => selectGene(g)}
+                      id={`designer-gene-${i}`} role="option" aria-selected={activeGene === i} tabIndex={-1}
+                      onMouseDown={event => event.preventDefault()}
+                      onClick={() => chooseSuggestion(g)}
                       className="w-full text-left px-3 py-2 text-sm hover:bg-brand-50 flex items-center justify-between"
                     >
                       <span>
@@ -1712,7 +1760,7 @@ export function ExperimentDesigner() {
               Target genes
               <HelpTip text="Select genes that resolve to at least two unique wcEcoli knockout targets. Genes sharing one RNA or transcription-unit target count as one target." />
             </h2>
-            <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+            <div className="designer-notice mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
               <p className="font-medium">Modeled multi-knockout: selected RNA synthesis/expression targets are set to zero together.</p>
               <p className="mt-1 text-blue-800">
                 This uses the same KO-index mapping as the single gene knockout variant. It does not physically delete DNA loci or remodel neighboring operons.
@@ -1720,18 +1768,22 @@ export function ExperimentDesigner() {
             </div>
             <div className="relative">
               <SearchInput
+                inputProps={geneInputProps}
+                label={variantType === 'multi_gene_knockout' ? 'Search genes to add' : 'Search gene to knock out'}
                 value={geneQuery}
                 onChange={(v) => { setGeneQuery(v); setShowGenePicker(true) }}
                 placeholder="Search genes to add..."
               />
               {showGenePicker && geneResults.length > 0 && (
-                <div className="absolute z-10 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
-                  {geneResults.map((g) => {
+                <div id="designer-gene-list" role="listbox" aria-label="Gene suggestions" className="designer-gene-menu absolute z-10 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                  {geneResults.map((g, i) => {
                     const selected = selectedGeneSymbols.has(g.symbol)
                     const disabled = g.ko_index < 1
                     return (
                       <button
                         key={g.id}
+                        id={`designer-gene-${i}`} role="option" aria-selected={selected} aria-disabled={disabled} data-active={activeGene === i} tabIndex={-1}
+                        onMouseDown={event => event.preventDefault()}
                         type="button"
                         disabled={disabled}
                         onClick={() => {
@@ -1811,6 +1863,8 @@ export function ExperimentDesigner() {
               />
             ) : (
               <input
+                aria-label={parameterSectionTitle}
+                aria-describedby={parameterIndexGuide ? "designer-index-guide" : undefined}
                 type="number"
                 value={variantIndex}
                 onChange={(e) => setVariantIndex(Number(e.target.value))}
@@ -1821,9 +1875,9 @@ export function ExperimentDesigner() {
               />
             )}
             {parameterIndexGuide && (
-              <TechnicalDetails title="Runtime index details">
+              <div id="designer-index-guide"><TechnicalDetails title="Runtime index details">
                 {parameterIndexGuide.current && (
-                  <p className={`text-xs mt-1 ${parameterIndexGuide.invalid ? 'text-amber-700' : 'text-gray-600'}`}>
+                  <p className={`text-xs mt-1 ${parameterIndexGuide.invalid ? 'designer-invalid text-amber-700' : 'text-gray-600'}`}>
                     Current selection: <span className="font-mono">{parameterIndexGuide.current}</span>
                   </p>
                 )}
@@ -1844,7 +1898,7 @@ export function ExperimentDesigner() {
                     ))}
                   </div>
                 </details>
-              </TechnicalDetails>
+              </TechnicalDetails></div>
             )}
           </section>
         )}
@@ -1855,10 +1909,10 @@ export function ExperimentDesigner() {
             Simulation parameters
             <HelpTip text="Seeds are independent random replicates - each starts from a different initial state. Generations control how many cell divisions are simulated sequentially. More seeds give statistical power; more generations reveal long-term dynamics and potential lethality." />
           </h2>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="designer-simulation-fields grid gap-4">
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Seeds (replicates)</label>
-              <input
+              <label htmlFor="designer-seeds" className="text-xs text-gray-400 block mb-1">Seeds (replicates)</label>
+              <input id="designer-seeds"
                 type="number"
                 value={seeds}
                 onChange={(e) => setSeeds(Math.max(1, Number(e.target.value)))}
@@ -1869,8 +1923,8 @@ export function ExperimentDesigner() {
               />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Generations</label>
-              <input
+              <label htmlFor="designer-generations" className="text-xs text-gray-400 block mb-1">Generations</label>
+              <input id="designer-generations" aria-describedby="designer-generations-hint"
                 type="number"
                 value={generations}
                 onChange={(e) => setGenerations(Math.max(1, Number(e.target.value)))}
@@ -1879,11 +1933,11 @@ export function ExperimentDesigner() {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono
                            focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
               />
-              <p className="text-xs text-gray-400 mt-1">sequential lineage cells</p>
+              <p id="designer-generations-hint" className="text-xs text-gray-400 mt-1">sequential lineage cells</p>
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Max cell time (s)</label>
-              <input
+              <label htmlFor="designer-duration" className="text-xs text-gray-400 block mb-1">Max cell time (s)</label>
+              <input id="designer-duration" aria-describedby="designer-duration-hint"
                 type="number"
                 value={lengthSec}
                 onChange={(e) => setLengthSec(Math.max(60, Number(e.target.value)))}
@@ -1892,7 +1946,7 @@ export function ExperimentDesigner() {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono
                            focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
               />
-              <p className="text-xs text-gray-400 mt-1">
+              <p id="designer-duration-hint" className="text-xs text-gray-400 mt-1">
                 {(lengthSec / 3600).toFixed(1)} hr per cell; lineage limit &lt;= {estimatedLineageLimitHr} hr
               </p>
             </div>
@@ -1921,13 +1975,15 @@ export function ExperimentDesigner() {
                 <span className="mb-1 block text-slate-400">Protocol view range (s)</span>
                 <input
                   type="number"
+                  aria-label="Protocol view range (s)"
+                  aria-describedby="designer-range-hint"
                   value={protocolHorizonSec}
                   onChange={(e) => setProtocolHorizonSec(Math.max(maxProtocolEventSec, Number(e.target.value)))}
                   min={maxProtocolEventSec}
                   step={60}
                   className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-brand-400"
                 />
-                <span className="mt-1 block text-slate-400">
+                <span id="designer-range-hint" className="mt-1 block text-slate-400">
                   {(protocolHorizonSec / 3600).toFixed(1)} hr display window
                 </span>
               </label>
@@ -1954,6 +2010,7 @@ export function ExperimentDesigner() {
             </div>
           ) : (
             <TimelineComposer
+              restrained
               mediaRecipes={mediaRecipes}
               conditions={conditions}
               onChange={setTimeline}
@@ -1967,8 +2024,8 @@ export function ExperimentDesigner() {
           <h2 className="text-sm font-medium text-gray-700 mb-3">Experiment details</h2>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Name</label>
-              <input
+              <label htmlFor="designer-name" className="text-xs text-gray-400 block mb-1">Name</label>
+              <input id="designer-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -1978,8 +2035,8 @@ export function ExperimentDesigner() {
               />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Description (optional)</label>
-              <textarea
+              <label htmlFor="designer-description" className="text-xs text-gray-400 block mb-1">Description (optional)</label>
+              <textarea id="designer-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={2}
@@ -1993,7 +2050,7 @@ export function ExperimentDesigner() {
 
       </div>
 
-      <aside className="xl:sticky xl:top-4">
+      <aside ref={summaryRef} className="designer-summary" data-fits={summaryFits}>
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-slate-900">Run summary</h2>
@@ -2026,7 +2083,7 @@ export function ExperimentDesigner() {
             {parameterIndexGuide?.current && variantType !== 'gene_knockout' && (
               <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-400">{parameterSectionTitle}</dt>
-                <dd className={`mt-1 text-xs ${parameterIndexGuide.invalid ? 'text-amber-700' : 'text-slate-700'}`}>
+                <dd className={`mt-1 text-xs ${parameterIndexGuide.invalid ? 'designer-invalid text-amber-700' : 'text-slate-700'}`}>
                   {parameterIndexGuide.current}
                 </dd>
               </div>
@@ -2051,7 +2108,8 @@ export function ExperimentDesigner() {
                 </dd>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
+          </dl>
+          <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
               <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-400">Replicates</dt>
                 <dd className="mt-1 text-slate-900">{seeds} x {generations} gen</dd>
@@ -2061,12 +2119,12 @@ export function ExperimentDesigner() {
                 <dd className="mt-1 text-slate-900">{(lengthSec / 3600).toFixed(1)} hr</dd>
                 <dd className="mt-0.5 text-xs text-slate-400">lineage &lt;= {estimatedLineageLimitHr} hr</dd>
               </div>
-            </div>
           </dl>
 
           <div className="mt-5 grid gap-2">
             <button
               onClick={handleSave}
+              aria-describedby={error ? "designer-save-error" : undefined}
               disabled={saveBlocked}
               className="w-full px-5 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
