@@ -18,6 +18,7 @@ import type {
   StoichiometryNeighborhoodResponse,
 } from '../../types'
 import { useTheme } from '../theme/ThemeProvider'
+import { useResultPalette, resultSeriesDash } from './ResultPalette'
 
 // Constants
 const TYPE_LABELS: Record<string, string> = {
@@ -44,10 +45,6 @@ const TYPE_DESCRIPTIONS: Record<string, string> = {
   aa_pool: 'Amino-acid pool size series from GrowthLimits.',
 }
 
-const CHART_COLORS = [
-  '#2563eb', '#dc2626', '#059669', '#7c3aed', '#d97706',
-  '#0891b2', '#be185d', '#4f46e5', '#ea580c', '#65a30d',
-]
 
 const MAX_SELECTED = 5
 const BROWSE_LIMIT = 100
@@ -218,7 +215,7 @@ function StoichiometryPanel({
 }
 
 // Shared chart builder
-function buildChartData(timeseries: MoleculeTimeseries[]) {
+function buildChartData(timeseries: MoleculeTimeseries[], colors: readonly string[]) {
   const grouped: Record<string, MoleculeTimeseries[]> = {}
   for (const ts of timeseries) {
     if (!grouped[ts.molecule_id]) grouped[ts.molecule_id] = []
@@ -226,7 +223,7 @@ function buildChartData(timeseries: MoleculeTimeseries[]) {
   }
 
   return Object.entries(grouped).flatMap(([molId, series], molIdx) => {
-    const color = CHART_COLORS[molIdx % CHART_COLORS.length]
+    const color = colors[molIdx % colors.length]
     const sorted = [...series].sort((a, b) => a.generation - b.generation)
 
     if (sorted.length === 1) {
@@ -235,6 +232,7 @@ function buildChartData(timeseries: MoleculeTimeseries[]) {
         label: molId,
         data: pts.map((p) => ({ x: p.time / 60, y: p.value })),
         borderColor: color,
+        borderDash: resultSeriesDash(molIdx),
         backgroundColor: 'transparent',
         borderWidth: 1.5,
         pointRadius: 0,
@@ -252,7 +250,7 @@ function buildChartData(timeseries: MoleculeTimeseries[]) {
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.3,
-        borderDash: genIdx > 0 ? [4, 2] : undefined,
+        borderDash: genIdx > 0 ? [4, 2] : resultSeriesDash(molIdx),
       }
     })
   })
@@ -265,8 +263,8 @@ function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
       text: '#cbd5e1',
       muted: '#94a3b8',
       grid: 'rgba(148,163,184,0.18)',
-      tooltipBg: '#0f172a',
-      tooltipBorder: '#334155',
+      tooltipBg: '#1e1e27',
+      tooltipBorder: '#393945',
     }
     : {
       text: '#374151',
@@ -285,7 +283,7 @@ function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
           maintainAspectRatio: false,
           interaction: { mode: 'index' as const, intersect: false },
           plugins: {
-            legend: { display: true, position: 'top' as const, labels: { boxWidth: 12, font: { size: 11 }, color: chartTheme.text } },
+            legend: { display: true, position: 'top' as const, labels: { boxWidth: 12, font: { size: 13 }, color: chartTheme.text } },
             tooltip: {
               backgroundColor: chartTheme.tooltipBg,
               borderColor: chartTheme.tooltipBorder,
@@ -301,14 +299,14 @@ function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
           scales: {
             x: {
               type: 'linear' as const,
-              title: { display: true, text: 'Time (min)', font: { size: 11 }, color: chartTheme.muted },
+              title: { display: true, text: 'Time (min)', font: { size: 13 }, color: chartTheme.muted },
               grid: { color: chartTheme.grid },
-              ticks: { font: { size: 10 }, color: chartTheme.muted },
+              ticks: { font: { size: 13 }, color: chartTheme.muted },
             },
             y: {
-              title: { display: true, text: unit, font: { size: 11 }, color: chartTheme.muted },
+              title: { display: true, text: unit, font: { size: 13 }, color: chartTheme.muted },
               grid: { color: chartTheme.grid },
-              ticks: { font: { size: 10 }, color: chartTheme.muted },
+              ticks: { font: { size: 13 }, color: chartTheme.muted },
             },
           },
         }}
@@ -326,6 +324,7 @@ export function ResultStateExplorer({
   geneSymbol?: string
   variantType?: string
 }) {
+  const colors = useResultPalette()
   const [data, setData] = useState<ResultStateExplorerResponse | null>(null)
   const [stoichiometry, setStoichiometry] = useState<StoichiometryNeighborhoodResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -429,7 +428,7 @@ export function ResultStateExplorer({
   const focusLabel = isGeneKnockout ? 'gene knockout target' : 'experiment focus gene'
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
+    <div className="result-state-explorer bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
       <div className="px-4 py-3 border-b border-gray-100 bg-slate-50">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -555,9 +554,9 @@ export function ResultStateExplorer({
               final value vs WT delta
             </div>
           </div>
-          <div className="border border-gray-200 rounded-lg overflow-x-auto">
+          <div className="result-state-table result-table-scroll border border-gray-200 rounded-lg overflow-x-auto" role="region" aria-label="Recommended state variables" tabIndex={0}>
             <div className="min-w-[760px]">
-              <div className="grid grid-cols-[1.1fr_1fr_1.4fr_0.9fr_0.9fr_auto] gap-3 bg-gray-50 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+              <div className="result-state-table-heading grid grid-cols-[1.1fr_1fr_1.4fr_0.9fr_0.9fr_auto] gap-3 bg-gray-50 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
                 <span>Role</span>
                 <span>Gene</span>
                 <span>State variable</span>
@@ -568,7 +567,7 @@ export function ResultStateExplorer({
               {topVariables.map((variable) => {
                 const key = variableKey(variable)
                 const series = plotted[key]
-                const datasets = series ? buildChartData(series) : []
+                const datasets = series ? buildChartData(series, colors) : []
                 const unit = series?.[0]?.unit ?? 'molecules'
                 const isFocus = variable.role === 'focus'
                 const deltaClass = variable.delta_pct == null
@@ -651,6 +650,7 @@ export function MoleculeExplorer({
   geneSymbol?: string
   variantType?: string
 }) {
+  const colors = useResultPalette()
   const [types, setTypes] = useState<MoleculeTypeInfo[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Record<string, string[]>>({})
@@ -785,7 +785,7 @@ export function MoleculeExplorer({
     setTimeseries([])
   }
 
-  const datasets = buildChartData(timeseries)
+  const datasets = buildChartData(timeseries, colors)
   const unit = timeseries[0]?.unit ?? 'molecules'
 
   if (typesLoading) {
@@ -816,7 +816,7 @@ export function MoleculeExplorer({
 
   return (
     <div>
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="result-molecule-explorer bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="w-full px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
           <div className="text-left">
             <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
@@ -835,6 +835,7 @@ export function MoleculeExplorer({
           </div>
           <button
             type="button"
+            aria-expanded={explorerOpen} aria-controls="result-molecule-body"
             onClick={() => setExplorerOpen(!explorerOpen)}
             className="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
             aria-label={explorerOpen ? 'Collapse molecule explorer' : 'Expand molecule explorer'}
@@ -846,7 +847,7 @@ export function MoleculeExplorer({
         </div>
 
         {explorerOpen && (
-          <div className="p-4">
+          <div id="result-molecule-body" className="p-4">
             <div className="mb-3 rounded-lg border border-gray-200 bg-slate-50 px-3 py-3">
               <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -876,7 +877,7 @@ export function MoleculeExplorer({
               </div>
             </div>
 
-            <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
+            <div className="result-output-types mb-3">
               {types.map((t) => (
                 <button
                   key={t.molecule_type}
@@ -926,7 +927,7 @@ export function MoleculeExplorer({
                     Close browse
                   </button>
                 </div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[260px,1fr]">
+                <div className="result-output-browse mt-3">
                   <input
                     type="text"
                     value={browseSearch}
@@ -1010,7 +1011,7 @@ export function MoleculeExplorer({
               )}
             </div>
 
-            <div className="flex gap-4">
+            <div className="result-output-selection">
               <div className="flex-1 min-w-0">
                 {searchQuery.length >= 2 && resultGroups.length > 0 && (
                   <div className="max-h-72 overflow-y-auto rounded-md border border-gray-200">
@@ -1061,7 +1062,7 @@ export function MoleculeExplorer({
               </div>
 
               {selected.length > 0 && (
-                <div className="w-52 shrink-0">
+                <div className="result-selected-output">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs font-medium text-gray-500">
                       Selected ({selected.length}/{MAX_SELECTED})
@@ -1075,7 +1076,7 @@ export function MoleculeExplorer({
                       <div key={selectedKey(item)} className="flex items-center gap-2 px-2 py-1 rounded bg-gray-50 text-xs">
                         <span
                           className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                          style={{ backgroundColor: colors[i % colors.length] }}
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-mono">{item.id}</span>

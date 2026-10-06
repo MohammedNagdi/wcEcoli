@@ -1,0 +1,122 @@
+/* Reference lock: wcEcoli workspace; Hex metric/chart alignment; Buildkite status
+   grouping; Origin UI disclosure treatment. Original local adaptation. */
+.result-detail.result-detail { container: result-detail / inline-size; max-width: 1260px; width: 100%; min-width: 0; margin-inline: auto; --result-complete: #4f806f; --result-active: #536e91; --result-warning: #8a681f; --result-error: #9d5667; --result-slate: #7b7b88; }
+.dark .result-detail.result-detail { --result-complete: #73a394; --result-active: #819cbc; --result-warning: #b8955c; --result-error: #bc7988; --result-slate: #9898a6; }
+.app-shell.result-detail-shell > main { overflow-y: auto; overflow-x: hidden; padding-bottom: 88px; scroll-padding: 24px 0 88px; scrollbar-gutter: stable; }
+@media (max-width: 639px) { .app-shell.result-detail-shell > main { scroll-padding-top: 72px; } }
+.result-detail-content { min-width: 0; }
+.result-detail.result-detail :where(div,section,aside,span,p,dd,button) { min-width: 0; }
+.result-detail.result-detail :is(h1,h2,h3,p,dd,span,a,button) { overflow-wrap: anywhere; }
+.result-detail.result-detail :is(.text-gray-300,.text-gray-400,.text-gray-500,.text-gray-600,.text-slate-500,.text-slate-600) { color: rgb(var(--color-text-secondary)); }
+.result-detail.result-detail :is(.text-gray-700,.text-gray-800,.text-gray-900) { color: rgb(var(--color-text-primary)); }
+.result-detail.result-detail :is(.bg-white,.bg-gray-50,.bg-slate-50) { background-color: rgb(var(--color-surface)); }
+.result-detail.result-detail :is([class*=border-gray-],[class*=border-slate-]) { border-color: rgb(var(--color-border-subtle)); }
+.result-detail.result-detail :is([class*=bg-emerald-],[class*=bg-green-],[class*=bg-amber-],[class*=bg-yellow-],[class*=bg-cyan-],[class*=bg-indigo-],[class*=bg-violet-],[class*=bg-blue-],[class*=bg-red-],[class*=bg-brand-]) { background-color: rgb(var(--color-subtle)); }
+.result-detail.result-detail :is([class*=text-emerald-],[class*=text-green-],[class*=text-amber-],[class*=text-yellow-],[class*=text-cyan-],[class*=text-indigo-],[class*=text-violet-],[class*=text-blue-],[class*=text-brand-]) { color: rgb(var(--color-text-primary)); }
+.result-detail.result-detail :is([class*=border-emerald-],[class*=border-green-],[class*=border-amber-],[class*=border-yellow-],[class*=border-cyan-],[class*=border-indigo-],[class*=border-violet-],[class*=border-blue-],[class*=border-brand-]) { border-color: rgb(var(--color-border-subtle)); }
+.result-detail.result-detail :is([class*=text-red-]) { color: #963b4b; }
+.dark .result-detail.result-detail :is([class*=text-red-]) { color: #dfa0aa; }
+.result-detail.result-detail :is(.text-xs,[class*=text-\[11px\]],[class*=text-\[10px\]]) { font-size: 13px; line-height: 1.5; }
+.result-detail.result-detail p { font-size: 14px; line-height: 1.6; }
+.result-detail.result-detail h1 { font-size: 22px; line-height: 1.35; }
+.result-detail.result-detail h2 { font-size: 16px; line-height: 1.4; }
+.result-detail.result-detail h3 { font-size: 14px; line-height: 1.5; }
+.result-detail.result-detail :is(section,aside,.result-plot,.result-state-explorer,.result-molecule-explorer) { border-radius: 10px; }
+.result-detail.result-detail :is(button,input,select,a[class*=rounded]) { border-radius: 8px; }
+.result-detail.result-detail span[class*=rounded] { border-radius: 6px; }
+.result-detail.result-detail .shadow-sm { box-shadow: none; }
+.result-detail.result-detail :is(button,a,input,select,tr) { transition: color 120ms ease-out, background-color 120ms ease-out, border-color 120ms ease-out; }
+.result-detail.result-detail :is(button,input,select,a,[tabindex]):focus-visible { outline: 2px solid rgb(var(--color-focus)); outline-offset: 3px; }
+.result-detail.result-detail :is(button,a)[class*=hover]:hover { background-color: rgb(var(--color-elevated)); }
+.result-detail.result-detail a:not(.result-analysis-path a) { color: rgb(var(--color-focus)); }
+.result-detail.result-detail :is(button[aria-pressed=true],button[class*=border-brand-300]) { background-color: rgb(var(--color-subtle)); border-color: rgb(var(--color-focus)); color: rgb(var(--color-text-primary)); }
+.result-detail.result-detail button:disabled { cursor: not-allowed; }
+.result-detail-header { margin-bottom: 24px; }
+.result-detail.result-detail .result-analysis-path { display: grid; grid-template-columns: minmax(0,1fr); border: 1px solid rgb(var(--color-border-subtle)); border-radius: 10px; overflow: hidden; background: rgb(var(--color-surface)); gap: 0; }
+.result-detail.result-detail .result-analysis-path a { border: 0; border-radius: 0; padding: 12px 16px; background: transparent; }
+.result-detail.result-detail .result-analysis-path a + a { border-top: 1px solid rgb(var(--color-border-subtle)); }
+.result-detail.result-detail section { margin-bottom: 24px; scroll-margin-top: 24px; background: rgb(var(--color-surface)); border: 1px solid rgb(var(--color-border-subtle)); }
+.result-detail.result-detail section > :is(.border-b,.result-section-heading) { padding: 14px 16px; background: color-mix(in srgb, rgb(var(--color-subtle)) 35%, rgb(var(--color-surface))); border-bottom: 1px solid rgb(var(--color-border-subtle)); border-radius: 10px 10px 0 0; }
+.result-detail.result-detail #timeseries, .result-detail.result-detail #model-outputs { padding: 0; }
+.result-detail.result-detail #timeseries > .flex:first-child { padding: 14px 16px; background: color-mix(in srgb, rgb(var(--color-subtle)) 35%, rgb(var(--color-surface))); border-bottom: 1px solid rgb(var(--color-border-subtle)); border-radius: 10px 10px 0 0; }
+.result-detail.result-detail #timeseries > :not(:first-child), .result-detail.result-detail #model-outputs > :not(:first-child) { margin-inline: 16px; }
+.result-detail.result-detail #model-outputs > :last-child { margin-bottom: 16px; }
+.result-phenotype-body { display: grid; gap: 16px; }
+.result-metric-strip, .result-comparison-metrics { display: grid; grid-template-columns: minmax(0,1fr); gap: 0; background: color-mix(in srgb, rgb(var(--color-subtle)) 45%, rgb(var(--color-surface))); border-radius: 8px; }
+.result-detail.result-detail .result-summary-metric { border: 0; border-radius: 0; padding: 16px; background: transparent; }
+.result-detail.result-detail .result-summary-metric + .result-summary-metric { border-top: 1px solid rgb(var(--color-border-subtle)); }
+.result-summary-metric > p:last-child { font-variant-numeric: tabular-nums; font-size: 18px; line-height: 1.4; }
+.result-detail.result-detail .result-next-step { padding: 16px; border-radius: 8px; border: 0; border-left: 2px solid rgb(var(--color-focus)); background: color-mix(in srgb, rgb(var(--color-subtle)) 45%, rgb(var(--color-surface))); }
+.result-next-step p { max-width: 80ch; }
+.result-detail.result-detail .result-run-context { padding: 16px 0 0; border: 0; border-top: 1px solid rgb(var(--color-border-subtle)); border-radius: 0; background: transparent; }
+.result-context-fields { display: grid; grid-template-columns: minmax(0,1fr); gap: 0 24px; }
+.result-context-field { display: grid; gap: 4px; align-content: start; padding: 10px 0; border-bottom: 1px solid rgb(var(--color-border-subtle)); }
+.result-context-field[data-field=Timeline] { grid-column: 1 / -1; }
+.result-context-field dd { line-height: 1.55; font-size: 13px; }
+.result-detail.result-detail .result-source-notice { padding: 10px 12px; border: 0; border-left: 2px solid var(--result-complete); border-radius: 6px; background: rgb(var(--color-subtle)); }
+.result-detail.result-detail .result-source-notice[class*=bg-amber] { border-left-color: var(--result-warning); }
+.result-status::before,.result-baseline-status::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: var(--result-slate); }
+.result-status[data-status=done]::before,.result-baseline-status[class*=bg-emerald]::before { background: var(--result-complete); }
+.result-status[data-status=failed]::before { background: var(--result-error); }
+.result-status[class*=bg-blue]::before,.result-baseline-status[class*=bg-blue]::before { background: var(--result-active); }
+.result-baseline-status[class*=bg-amber]::before { background: var(--result-warning); }
+.result-detail.result-detail .result-warning { border: 0; border-left: 3px solid var(--result-warning); padding: 16px; background: rgb(var(--color-subtle)); }
+.result-comparison-metrics { gap: 16px; background: transparent; }
+.result-detail.result-detail .result-comparison-metrics > div { background: rgb(var(--color-subtle)); padding: 16px; border: 0; }
+.result-comparison-notes { display: grid; gap: 16px; grid-template-columns: minmax(0,1fr); }
+.result-detail.result-detail .result-comparison-notes > div { border: 0; padding: 16px 0; border-top: 1px solid rgb(var(--color-border-subtle)); border-radius: 0; }
+.result-chart-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: 16px; margin-block: 24px 16px; }
+.result-detail.result-detail .result-plot { padding: 16px; }
+.result-detail.result-detail .result-plot p { font-size: 13px; }
+.result-detail.result-detail canvas { max-width: 100%; }
+.result-channel-groups > div { align-items: start; }
+.result-detail.result-detail .result-channel-groups > div > span { width: 100%; }
+.result-table-scroll { overflow: auto; max-height: 65dvh; overscroll-behavior: auto; }
+.result-table-scroll table { width: 100%; min-width: 700px; border-collapse: separate; border-spacing: 0; }
+.result-table-scroll th,.result-state-table-heading { position: sticky; top: 0; z-index: 1; background: rgb(var(--color-surface)); }
+.result-table-scroll :is(th,td) { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.result-detail.result-detail .result-state-table-heading { background: rgb(var(--color-surface)); }
+.result-output-types { display: grid; grid-template-columns: minmax(0,1fr); gap: 8px; }
+.result-output-browse,.result-output-selection { display: grid; grid-template-columns: minmax(0,1fr); gap: 16px; }
+.result-selected-output { min-width: 0; }
+.result-detail.result-detail .result-selected-output .truncate { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.result-detail.result-detail :is(.result-state-explorer,.result-molecule-explorer) > div:first-child { padding: 16px; background: rgb(var(--color-subtle)); }
+.result-detail.result-detail :is(.result-state-explorer,.result-molecule-explorer) > div:first-child > .flex { flex-wrap: wrap; }
+.result-detail.result-detail .result-molecule-explorer > div:first-child { gap: 12px; align-items: start; }
+.result-detail.result-detail #result-channel-groups, .result-detail.result-detail #result-model-depth, .result-detail.result-detail #result-molecule-body, .result-detail.result-detail #result-generation-table { animation: result-disclosure 200ms ease-out; }
+@container result-detail (min-width: 420px) { .result-metric-strip,.result-comparison-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } .result-detail.result-detail .result-summary-metric:nth-child(2) { border-top: 0; } .result-detail.result-detail .result-summary-metric:nth-child(even) { border-left: 1px solid rgb(var(--color-border-subtle)); } .result-output-types { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@container result-detail (min-width: 480px) { .result-detail.result-detail .result-analysis-path { grid-template-columns: repeat(2,minmax(0,1fr)); } .result-detail.result-detail .result-analysis-path a:nth-child(2) { border-top: 0; } .result-detail.result-detail .result-analysis-path a:nth-child(even) { border-left: 1px solid rgb(var(--color-border-subtle)); } }
+@container result-detail (min-width: 640px) { .result-context-fields { grid-template-columns: repeat(2,minmax(0,1fr)); } .result-context-field { grid-template-columns: 110px minmax(0,1fr); gap: 12px; } .result-output-types { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@container result-detail (min-width: 700px) { .result-output-selection { grid-template-columns: minmax(0,1fr) 220px; } .result-output-browse { grid-template-columns: 260px minmax(0,1fr); } .result-detail.result-detail .result-channel-groups > div > span { width: 112px; } }
+@container result-detail (min-width: 800px) { .result-metric-strip,.result-comparison-metrics { grid-template-columns: repeat(4,minmax(0,1fr)); } .result-detail.result-detail .result-summary-metric + .result-summary-metric { border-top: 0; border-left: 1px solid rgb(var(--color-border-subtle)); } .result-comparison-notes { grid-template-columns: repeat(2,minmax(0,1fr)); } .result-detail.result-detail .result-analysis-path { grid-template-columns: repeat(4,minmax(0,1fr)); } .result-detail.result-detail .result-analysis-path a + a { border-top: 0; border-left: 1px solid rgb(var(--color-border-subtle)); } }
+@container result-detail (min-width: 900px) { .result-chart-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@container result-detail (min-width: 960px) { .result-output-types { grid-template-columns: repeat(5,minmax(0,1fr)); } }
+@keyframes result-disclosure { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .result-detail.result-detail *, .result-detail.result-detail *::before { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+/* Adapt inherited viewport flex/grid utilities to this workbench's own width. */
+.result-detail.result-detail [class*=lg\:flex-row] { flex-direction: column; }
+.result-detail.result-detail [class*=lg\:grid-cols-] { grid-template-columns: minmax(0,1fr); }
+.result-detail.result-detail .grid[class*=md\:grid-cols-] { grid-template-columns: repeat(auto-fit,minmax(min(180px,100%),1fr)); }
+.result-detail.result-detail #diagnostics > button { padding: 16px; background: rgb(var(--color-subtle)); }
+.result-detail.result-detail #diagnostics > button > span:first-child > span:first-child { font-size: 16px; }
+.result-detail.result-detail .result-molecule-explorer > div:first-child > div { flex: 1; }
+.result-detail.result-detail .result-molecule-explorer > div:first-child > button { flex-shrink: 0; }
+@container result-detail (min-width: 700px) { .result-detail.result-detail [class*=lg\:flex-row] { flex-direction: row; } }
+.result-detail.result-detail .truncate { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.result-detail.result-detail .result-state-table > div { min-width: 760px; }
+.result-detail.result-detail .text-bio-gene { color: rgb(var(--color-text-primary)); }
+.result-detail.result-detail .result-next-step > div, .result-detail.result-detail .result-section-heading { flex-direction: column; align-items: start; }
+@container result-detail (min-width: 800px) { .result-detail.result-detail .result-next-step > div, .result-detail.result-detail .result-section-heading { flex-direction: row; } }
+
+/* Consistent reading scale: 13px metadata, 14px prose, 16px sections, 18px values. */
+.result-detail.result-detail .result-summary-metric > p:first-child { font-size: 13px; font-weight: 500; line-height: 1.5; margin-bottom: 6px; }
+.result-detail.result-detail .result-summary-metric > p:nth-child(2) { font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: -0.01em; }
+.result-detail.result-detail .result-summary-metric > p:nth-child(3) { font-size: 13px; }
+.result-detail.result-detail :is(.result-run-context h3,.result-next-step h3,.result-comparison-notes h3) { font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: normal; color: rgb(var(--color-text-primary)); }
+.result-detail.result-detail .result-context-field dt { font-size: 13px; text-transform: none; letter-spacing: normal; font-weight: 500; }
+.result-detail.result-detail .result-context-field dd { color: rgb(var(--color-text-primary)); }
+.result-detail.result-detail .result-next-step a { font-size: 13px; padding: 6px 10px; border: 1px solid rgb(var(--color-border-subtle)); background: rgb(var(--color-surface)); }
+.result-detail.result-detail .result-analysis-path a { padding-block: 10px; }
+.result-detail.result-detail .result-analysis-path a > span:first-child { font-weight: 500; }
+.result-detail.result-detail .result-source-notice { background: color-mix(in srgb, rgb(var(--color-subtle)) 45%, rgb(var(--color-surface))); }
+.result-detail.result-detail .result-source-notice { font-size: 13px; }

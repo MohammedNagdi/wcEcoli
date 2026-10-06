@@ -21,6 +21,8 @@ import type { SimulationJob, ResultsResponse, ResultsSummary, TimeseriesData, Ex
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { statusLabel, variantLabel } from '../../utils/labels'
 import { useTheme } from '../theme/ThemeProvider'
+import { useResultPalette, resultSeriesDash } from './ResultPalette'
+import './result-detail.css'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
@@ -36,33 +38,31 @@ function singleGeneSymbol(value?: string) {
 
 interface ChannelDef {
   title: string
-  color: string
-  fillColor: string
   group: string
 }
 
 const CHANNEL_CONFIG: Record<string, ChannelDef> = {
-  cell_mass:            { title: 'Cell mass',             color: '#2563eb', fillColor: 'rgba(37,99,235,0.08)',    group: 'Mass & growth' },
-  dry_mass:             { title: 'Dry mass',              color: '#1d4ed8', fillColor: 'rgba(29,78,216,0.08)',    group: 'Mass & growth' },
-  protein_mass:         { title: 'Protein mass',          color: '#7c3aed', fillColor: 'rgba(124,58,237,0.08)',   group: 'Mass & growth' },
-  rna_mass:             { title: 'RNA mass',              color: '#dc2626', fillColor: 'rgba(220,38,38,0.08)',    group: 'Mass & growth' },
-  dna_mass:             { title: 'DNA mass',              color: '#d97706', fillColor: 'rgba(217,119,6,0.08)',    group: 'Mass & growth' },
-  small_molecule_mass:  { title: 'Small-molecule mass',   color: '#0d9488', fillColor: 'rgba(13,148,136,0.08)',   group: 'Mass & growth' },
-  growth_rate:          { title: 'Growth rate',           color: '#059669', fillColor: 'rgba(5,150,105,0.08)',    group: 'Mass & growth' },
-  cell_volume:          { title: 'Cell volume',           color: '#6366f1', fillColor: 'rgba(99,102,241,0.08)',   group: 'Mass & growth' },
-  mrna_counts:          { title: 'mRNA count',            color: '#0891b2', fillColor: 'rgba(8,145,178,0.08)',    group: 'Gene expression' },
-  trna_charged_fraction:{ title: 'tRNA charged fraction', color: '#be185d', fillColor: 'rgba(190,24,93,0.08)',    group: 'Gene expression' },
-  ppgpp_conc:           { title: 'ppGpp concentration',   color: '#9333ea', fillColor: 'rgba(147,51,234,0.08)',   group: 'Regulation' },
-  aa_pool_size:         { title: 'Amino-acid pool',       color: '#e11d48', fillColor: 'rgba(225,29,72,0.08)',    group: 'Regulation' },
-  ntp_pool_size:        { title: 'NTP pool',              color: '#f59e0b', fillColor: 'rgba(245,158,11,0.08)',   group: 'Regulation' },
-  aa_supply_total:      { title: 'AA supply rate',        color: '#84cc16', fillColor: 'rgba(132,204,22,0.08)',   group: 'Regulation' },
-  aa_synthesis_total:   { title: 'AA synthesis rate',     color: '#22c55e', fillColor: 'rgba(34,197,94,0.08)',    group: 'Regulation' },
-  fba_objective:        { title: 'FBA objective',         color: '#14b8a6', fillColor: 'rgba(20,184,166,0.08)',   group: 'Metabolism' },
-  exchange_flux_total:  { title: 'Exchange flux (total)', color: '#06b6d4', fillColor: 'rgba(6,182,212,0.08)',    group: 'Metabolism' },
-  reaction_flux_total:  { title: 'Reaction flux (total)', color: '#8b5cf6', fillColor: 'rgba(139,92,246,0.08)',   group: 'Metabolism' },
-  ribosome_elongation_rate:    { title: 'Ribosome elongation rate',  color: '#f43f5e', fillColor: 'rgba(244,63,94,0.08)',   group: 'Translation' },
-  ribosome_actual_elongations: { title: 'Ribosome elongations',      color: '#fb923c', fillColor: 'rgba(251,146,60,0.08)',  group: 'Translation' },
-  n_oric:               { title: 'Origins of replication', color: '#a855f7', fillColor: 'rgba(168,85,247,0.08)',  group: 'Replication' },
+  cell_mass:            { title: 'Cell mass',    group: 'Mass & growth' },
+  dry_mass:             { title: 'Dry mass',    group: 'Mass & growth' },
+  protein_mass:         { title: 'Protein mass',   group: 'Mass & growth' },
+  rna_mass:             { title: 'RNA mass',    group: 'Mass & growth' },
+  dna_mass:             { title: 'DNA mass',    group: 'Mass & growth' },
+  small_molecule_mass:  { title: 'Small-molecule mass',   group: 'Mass & growth' },
+  growth_rate:          { title: 'Growth rate',    group: 'Mass & growth' },
+  cell_volume:          { title: 'Cell volume',   group: 'Mass & growth' },
+  mrna_counts:          { title: 'mRNA count',    group: 'Gene expression' },
+  trna_charged_fraction:{ title: 'tRNA charged fraction',    group: 'Gene expression' },
+  ppgpp_conc:           { title: 'ppGpp concentration',   group: 'Regulation' },
+  aa_pool_size:         { title: 'Amino-acid pool',    group: 'Regulation' },
+  ntp_pool_size:        { title: 'NTP pool',   group: 'Regulation' },
+  aa_supply_total:      { title: 'AA supply rate',   group: 'Regulation' },
+  aa_synthesis_total:   { title: 'AA synthesis rate',    group: 'Regulation' },
+  fba_objective:        { title: 'FBA objective',   group: 'Metabolism' },
+  exchange_flux_total:  { title: 'Exchange flux (total)',    group: 'Metabolism' },
+  reaction_flux_total:  { title: 'Reaction flux (total)',   group: 'Metabolism' },
+  ribosome_elongation_rate:    { title: 'Ribosome elongation rate',   group: 'Translation' },
+  ribosome_actual_elongations: { title: 'Ribosome elongations',  group: 'Translation' },
+  n_oric:               { title: 'Origins of replication',  group: 'Replication' },
 }
 
 const DEFAULT_ACTIVE = new Set([
@@ -104,10 +104,6 @@ const CHART_PRESETS = [
 
 type ChartPresetId = typeof CHART_PRESETS[number]['id'] | 'custom'
 
-const SEED_COLORS = [
-  '#2563eb', '#059669', '#dc2626', '#7c3aed', '#d97706',
-  '#0891b2', '#be185d', '#4f46e5', '#ea580c', '#65a30d',
-]
 
 // Helpers
 
@@ -285,8 +281,8 @@ function TimeseriesChart({
       text: '#cbd5e1',
       muted: '#94a3b8',
       grid: 'rgba(148,163,184,0.18)',
-      tooltipBg: '#0f172a',
-      tooltipBorder: '#334155',
+      tooltipBg: '#1e1e27',
+      tooltipBorder: '#393945',
     }
     : {
       text: '#374151',
@@ -295,16 +291,19 @@ function TimeseriesChart({
       tooltipBg: '#ffffff',
       tooltipBorder: '#e5e7eb',
     }
-  const config = CHANNEL_CONFIG[channel] ?? { title: channel, color: '#6b7280', fillColor: 'rgba(107,114,128,0.08)', group: 'Other' }
+  const config = CHANNEL_CONFIG[channel] ?? { title: channel, group: 'Other' }
   const multiSeed = series.length > 1
+  const colors = useResultPalette()
+  const channelColor = colors[Math.max(0, Object.keys(CHANNEL_CONFIG).indexOf(channel)) % colors.length]
 
   const datasets = series.map((s, i) => {
     const sampled = downsample(s.points)
     return {
       label: multiSeed ? s.label : config.title,
       data: sampled.map((p) => ({ x: p.time / 60, y: p.value })),
-      borderColor: multiSeed ? SEED_COLORS[i % SEED_COLORS.length] : config.color,
-      backgroundColor: multiSeed ? 'transparent' : config.fillColor,
+      borderColor: multiSeed ? colors[i % colors.length] : channelColor,
+      backgroundColor: multiSeed ? 'transparent' : channelColor + '10',
+      borderDash: multiSeed ? resultSeriesDash(i) : undefined,
       borderWidth: 1.5,
       pointRadius: 0,
       tension: 0.3,
@@ -313,7 +312,7 @@ function TimeseriesChart({
   })
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
+    <div className="result-plot bg-white rounded-lg border border-gray-200 p-4">
       <h3 className="text-sm font-medium text-gray-700 mb-3">{config.title}
         <span className="text-xs text-gray-400 ml-2">({series[0]?.unit})</span>
       </h3>
@@ -325,7 +324,7 @@ function TimeseriesChart({
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-              legend: { display: multiSeed, position: 'top', labels: { boxWidth: 12, font: { size: 11 }, color: chartTheme.text } },
+              legend: { display: multiSeed, position: 'top', labels: { boxWidth: 12, font: { size: 13 }, color: chartTheme.text } },
               tooltip: {
                 backgroundColor: chartTheme.tooltipBg,
                 borderColor: chartTheme.tooltipBorder,
@@ -341,14 +340,14 @@ function TimeseriesChart({
             scales: {
               x: {
                 type: 'linear',
-                title: { display: true, text: 'Time (min)', font: { size: 11 }, color: chartTheme.muted },
+                title: { display: true, text: 'Time (min)', font: { size: 13 }, color: chartTheme.muted },
                 grid: { color: chartTheme.grid },
-                ticks: { font: { size: 10 }, color: chartTheme.muted },
+                ticks: { font: { size: 13 }, color: chartTheme.muted },
               },
               y: {
-                title: { display: true, text: series[0]?.unit ?? '', font: { size: 11 }, color: chartTheme.muted },
+                title: { display: true, text: series[0]?.unit ?? '', font: { size: 13 }, color: chartTheme.muted },
                 grid: { color: chartTheme.grid },
-                ticks: { font: { size: 10 }, color: chartTheme.muted },
+                ticks: { font: { size: 13 }, color: chartTheme.muted },
               },
             },
           }}
@@ -361,6 +360,7 @@ function TimeseriesChart({
 // Main page
 
 export function ResultsPage() {
+  const colors = useResultPalette()
   const { jobId } = useParams<{ jobId: string }>()
   const location = useLocation()
   const { setWorkspaceUrlState } = useUrlWorkspaceState()
@@ -627,9 +627,9 @@ export function ResultsPage() {
   if (!job || !results) return null
 
   return (
-    <div className="h-full overflow-y-auto pr-1">
-      <div className="max-w-6xl mx-auto pb-8">
-      <div className="mb-5">
+    <div className="result-detail">
+      <div className="result-detail-content">
+      <div className="result-detail-header mb-5">
         <Link to="/results" className="text-sm font-medium text-gray-400 hover:text-gray-600">&larr; All results</Link>
         <div className="mt-2 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -637,7 +637,7 @@ export function ResultsPage() {
             <h1 className="text-2xl font-semibold text-gray-900">{resultTitle}</h1>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <span className={'rounded-full border px-2.5 py-1 font-medium ' + statusTone(job.status)}>
+            <span className={'result-status rounded-full border px-2.5 py-1 font-medium ' + statusTone(job.status)} data-status={job.status}>
               {statusLabel(job.status)}
             </span>
             <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-500">
@@ -666,10 +666,10 @@ export function ResultsPage() {
             />
           </div>
         </div>
-        <div className="grid gap-4 p-4 lg:grid-cols-[1fr,280px]">
+        <div className="result-phenotype-body p-4">
           <div>
             {primarySummary && (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="result-metric-strip">
                 <SummaryCard
                   label="Division time"
                   value={primarySummary.division_time_sec != null ? (primarySummary.division_time_sec / 60).toFixed(1) + ' min' : '-'}
@@ -702,9 +702,9 @@ export function ResultsPage() {
               focusGeneSymbol={focusGeneSymbol}
             />
           </div>
-          <aside className="rounded-lg border border-gray-200 bg-slate-50 p-3">
+          <aside className="result-run-context rounded-lg border border-gray-200 bg-slate-50 p-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Run context</h3>
-            <dl className="mt-3 space-y-2 text-xs">
+            <dl className="result-context-fields mt-3 text-xs">
               <InfoRow label="Experiment" value={experiment?.name || `Experiment #${job.experiment_id}`} />
               <InfoRow label="Type" value={variantLabel(experiment?.variant_type ?? job.variant_type)} />
               <InfoRow label="Gene" value={resolvedGeneSymbol || experiment?.gene_symbol || 'Not gene-specific'} mono />
@@ -713,7 +713,7 @@ export function ResultsPage() {
               <InfoRow label="Generations" value={String(job.generations)} />
               <InfoRow label="Data source" value={dataSourceLabel(job, isMock)} />
             </dl>
-            <p className={'mt-3 rounded border px-2 py-2 text-xs ' + (isMock ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800')}>
+            <p className={'result-source-notice mt-3 rounded border px-2 py-2 text-xs ' + (isMock ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800')}>
               {dataSourceDescription(job, isMock)}
             </p>
           </aside>
@@ -747,6 +747,7 @@ export function ResultsPage() {
             <span className="text-gray-400">{visibleChannels.length} of {channels.length} channels selected</span>
             <button
               type="button"
+              aria-expanded={showChannelGroups} aria-controls="result-channel-groups"
               onClick={() => setShowChannelGroups((current) => !current)}
               className="rounded-full border border-gray-200 bg-white px-2.5 py-1 font-medium text-gray-600 hover:bg-gray-50"
             >
@@ -763,6 +764,7 @@ export function ResultsPage() {
                 key={preset.id}
                 type="button"
                 disabled={availableCount === 0}
+                aria-pressed={chartPreset === preset.id}
                 onClick={() => applyPreset(preset.id, channels)}
                 className={'rounded-lg border px-3 py-2 text-left text-xs transition-colors ' + (
                   chartPreset === preset.id
@@ -790,7 +792,7 @@ export function ResultsPage() {
         </p>
 
         {showChannelGroups && (
-          <div className="mt-4 space-y-2 border-t border-gray-100 pt-4">
+          <div id="result-channel-groups" className="result-channel-groups mt-4 space-y-2 border-t border-gray-100 pt-4">
             {Object.entries(grouped).map(([groupName, chs]) => (
               <div key={groupName} className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-medium text-gray-400 w-28 shrink-0">{groupName}</span>
@@ -800,6 +802,7 @@ export function ResultsPage() {
                   return (
                     <button
                       key={ch}
+                      aria-pressed={active}
                       onClick={() => toggleChannel(ch)}
                       className={'px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ' + (
                         active
@@ -809,7 +812,7 @@ export function ResultsPage() {
                     >
                       <span
                         className="inline-block w-2 h-2 rounded-full mr-1.5"
-                        style={{ backgroundColor: cfg?.color ?? '#6b7280', opacity: active ? 1 : 0.3 }}
+                        style={{ backgroundColor: colors[Math.max(0, Object.keys(CHANNEL_CONFIG).indexOf(ch)) % colors.length], opacity: active ? 1 : 0.3 }}
                       />
                       {cfg?.title ?? ch}
                     </button>
@@ -819,9 +822,7 @@ export function ResultsPage() {
             ))}
           </div>
         )}
-      </section>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+      <div className="result-chart-grid">
         {visibleChannels.map((ch) => (
           <TimeseriesChart key={ch} channel={ch} series={results.timeseries[ch]} />
         ))}
@@ -833,9 +834,11 @@ export function ResultsPage() {
         </div>
       )}
 
+      </section>
+
       {job.status === 'done' && (
         <section id="model-outputs" className="mb-8">
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="result-section-heading mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-900">4. Model outputs</h2>
@@ -850,6 +853,7 @@ export function ResultsPage() {
             </div>
             <button
               type="button"
+              aria-expanded={showModelDepth} aria-controls="result-model-depth"
               onClick={() => setShowModelDepth((current) => !current)}
               className="w-fit rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
             >
@@ -857,9 +861,9 @@ export function ResultsPage() {
             </button>
           </div>
           {showModelDepth && (
-            <HelpNote variant="model-depth">
+            <div id="result-model-depth"><HelpNote variant="model-depth">
               <strong>Model depth:</strong>{' '}The wcEcoli model tracks transcription, translation, and degradation for all 4,749 E. coli genes, but only ~1,500 have <em>mechanistic downstream effects</em> (enzymatic reactions, TF regulation, complex formation). The remaining genes are passengers: their mRNA and protein levels are simulated, but knocking them out may not visibly alter growth rate.
-            </HelpNote>
+            </HelpNote></div>
           )}
           <div className="mt-3" />
           <ResultStateExplorer
@@ -879,6 +883,7 @@ export function ResultsPage() {
         <section id="diagnostics" className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-8">
           <button
             type="button"
+            aria-expanded={showRunTable} aria-controls="result-generation-table"
             onClick={() => setShowRunTable((current) => !current)}
             className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
           >
@@ -891,6 +896,7 @@ export function ResultsPage() {
             <span className="text-xs font-medium text-gray-500">{showRunTable ? 'Hide table' : 'Show table'}</span>
           </button>
           {showRunTable && (
+          <div id="result-generation-table" className="result-table-scroll" role="region" aria-label="Per-generation diagnostics" tabIndex={0}>
           <table className="w-full border-t border-gray-100 text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -923,6 +929,7 @@ export function ResultsPage() {
               ))}
             </tbody>
           </table>
+          </div>
           )}
         </section>
       )}
@@ -950,7 +957,7 @@ function AnalysisPath({
   ]
 
   return (
-    <nav className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="Result analysis workflow">
+    <nav className="result-analysis-path mt-4" aria-label="Result analysis workflow">
       {items.map((item, index) => (
         <a
           key={item.href}
@@ -981,7 +988,7 @@ function NextStepCallout({
     : 'No matching WT comparison is attached. Treat absolute values cautiously and compare against a compatible WT run if possible.'
 
   return (
-    <div className="mt-4 rounded-lg border border-brand-100 bg-brand-50/50 px-3 py-3">
+    <div className="result-next-step mt-4 rounded-lg border border-brand-100 bg-brand-50/50 px-3 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-800">Recommended next step</h3>
@@ -1009,7 +1016,7 @@ function SummaryCard({ label, value, help, deltaPct }: {
   label: string; value: string; help?: string; deltaPct?: number | null
 }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+    <div className="result-summary-metric bg-white rounded-lg border border-gray-200 px-4 py-3">
       <p className="text-xs text-gray-400 mb-0.5 flex items-center gap-1">
         {label}
         {help && <HelpTip text={help} position="bottom" />}
@@ -1029,7 +1036,7 @@ function SummaryCard({ label, value, help, deltaPct }: {
 
 function InfoRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="grid grid-cols-[90px,1fr] gap-2">
+    <div className="result-context-field" data-field={label}>
       <dt className="font-medium uppercase tracking-wide text-gray-400">{label}</dt>
       <dd className={(mono ? 'font-mono ' : '') + 'min-w-0 break-words text-gray-700'}>{value}</dd>
     </div>
@@ -1072,7 +1079,7 @@ function ComparisonBaseline({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className={'rounded-full border px-2.5 py-1 font-medium ' + (
+          <span className={'result-baseline-status rounded-full border px-2.5 py-1 font-medium ' + (
             hasWildtype
               ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
               : pendingStatus
@@ -1096,7 +1103,7 @@ function ComparisonBaseline({
 
       {hasWildtype ? (
         <div className="p-4">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="result-comparison-metrics">
             {rows.map((row) => (
               <div key={row.key} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
@@ -1127,7 +1134,7 @@ function ComparisonBaseline({
             ))}
           </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-[1fr,1.4fr]">
+          <div className="result-comparison-notes mt-4">
             <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Interpretation</h3>
               <p className="mt-2 text-sm text-gray-700">
@@ -1172,7 +1179,7 @@ function ComparisonBaseline({
         </div>
       ) : (
         <div className="p-4">
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+          <div className="result-warning rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
             {pendingStatus ? (
               <p>
                 A condition-matched WT baseline exists as experiment #{wtDelta?.wt_experiment_id}, but it is currently {statusLabel(wtDelta?.wt_status ?? '')}. Relative deltas will appear after it completes.

@@ -1,0 +1,538 @@
+[
+  {
+    "text": "(",
+    "count": 1
+  },
+  {
+    "text": ")",
+    "count": 2
+  },
+  {
+    "text": "Loading results...",
+    "count": 1
+  },
+  {
+    "text": "Failed to load results:",
+    "count": 1
+  },
+  {
+    "text": "Back to experiments",
+    "count": 1
+  },
+  {
+    "text": "&larr; All results",
+    "count": 1
+  },
+  {
+    "text": "Single simulation result",
+    "count": 1
+  },
+  {
+    "text": "Job",
+    "count": 1
+  },
+  {
+    "text": "#",
+    "count": 1
+  },
+  {
+    "text": "Seed",
+    "count": 2
+  },
+  {
+    "text": "1. Phenotype summary",
+    "count": 1
+  },
+  {
+    "text": "This section answers whether the simulation completed, how its growth phenotype compares with the condition-matched wildtype when available, and whether the plotted curves are extracted from a completed run.",
+    "count": 1
+  },
+  {
+    "text": "Division time",
+    "count": 2
+  },
+  {
+    "text": "Time from simulated cell birth to division. Compare this with doubling time: division is a discrete cell-cycle event, while doubling time is calculated from growth rate.",
+    "count": 1
+  },
+  {
+    "text": "Final mass",
+    "count": 2
+  },
+  {
+    "text": "Final simulated cell mass. Large changes can indicate broad biomass allocation effects even when division still occurs.",
+    "count": 1
+  },
+  {
+    "text": "Growth rate",
+    "count": 2
+  },
+  {
+    "text": "Specific growth rate near the end of the simulation. This is often the first phenotype to compare against WT.",
+    "count": 1
+  },
+  {
+    "text": "Doubling time",
+    "count": 1
+  },
+  {
+    "text": "Mass-doubling estimate from growth rate. It can differ from observed division time when the simulated cell cycle and biomass growth are not perfectly aligned.",
+    "count": 1
+  },
+  {
+    "text": "Run context",
+    "count": 1
+  },
+  {
+    "text": "Experiment",
+    "count": 1
+  },
+  {
+    "text": "Type",
+    "count": 1
+  },
+  {
+    "text": "Gene",
+    "count": 2
+  },
+  {
+    "text": "Condition",
+    "count": 1
+  },
+  {
+    "text": "Timeline",
+    "count": 1
+  },
+  {
+    "text": "Generations",
+    "count": 1
+  },
+  {
+    "text": "Data source",
+    "count": 1
+  },
+  {
+    "text": "3. Time-series workbench",
+    "count": 1
+  },
+  {
+    "text": "Presets choose a small set of simulation channels for a specific interpretation task. You can still toggle individual channels; doing so creates a custom view.",
+    "count": 1
+  },
+  {
+    "text": "Selected channels are plotted below. Keep the view narrow while forming a hypothesis, then add channels as needed.",
+    "count": 1
+  },
+  {
+    "text": "of",
+    "count": 2
+  },
+  {
+    "text": "channels selected",
+    "count": 1
+  },
+  {
+    "text": "available channel",
+    "count": 1
+  },
+  {
+    "text": "Custom selection",
+    "count": 1
+  },
+  {
+    "text": "No channels are selected. Choose a preset or turn on individual channels to show plots.",
+    "count": 1
+  },
+  {
+    "text": "4. Model outputs",
+    "count": 1
+  },
+  {
+    "text": "Use this after the phenotype and time-series pass. It links the selected gene to plot-ready RNAs, proteins, reactions, metabolites, and regulatory neighbors when those outputs exist for this run.",
+    "count": 1
+  },
+  {
+    "text": "Inspect linked state variables and then search the broader simulation output catalog.",
+    "count": 1
+  },
+  {
+    "text": "Model depth:",
+    "count": 1
+  },
+  {
+    "text": "The wcEcoli model tracks transcription, translation, and degradation for all 4,749 E. coli genes, but only ~1,500 have",
+    "count": 1
+  },
+  {
+    "text": "mechanistic downstream effects",
+    "count": 1
+  },
+  {
+    "text": "(enzymatic reactions, TF regulation, complex formation). The remaining genes are passengers: their mRNA and protein levels are simulated, but knocking them out may not visibly alter growth rate.",
+    "count": 1
+  },
+  {
+    "text": "Per-generation diagnostics",
+    "count": 1
+  },
+  {
+    "text": "summary rows. Open this when checking replicate or generation-level differences.",
+    "count": 1
+  },
+  {
+    "text": "Gen",
+    "count": 1
+  },
+  {
+    "text": "Doubling",
+    "count": 1
+  },
+  {
+    "text": ".",
+    "count": 4
+  },
+  {
+    "text": "Recommended next step",
+    "count": 1
+  },
+  {
+    "text": "Model-output inspection will focus on",
+    "count": 1
+  },
+  {
+    "text": "Open plots",
+    "count": 1
+  },
+  {
+    "text": "Open outputs",
+    "count": 1
+  },
+  {
+    "text": "% vs WT",
+    "count": 1
+  },
+  {
+    "text": "2. WT baseline",
+    "count": 1
+  },
+  {
+    "text": "This uses the latest completed wildtype experiment with the same condition. It is a phenotype reference, not proof of causality and not necessarily a perfect seed or timeline match.",
+    "count": 1
+  },
+  {
+    "text": "Compare this result against the condition-matched WT before deciding which model outputs to inspect.",
+    "count": 1
+  },
+  {
+    "text": "Open comparison",
+    "count": 1
+  },
+  {
+    "text": "This run",
+    "count": 1
+  },
+  {
+    "text": "WT baseline",
+    "count": 1
+  },
+  {
+    "text": "Interpretation",
+    "count": 1
+  },
+  {
+    "text": "Suggested next views",
+    "count": 1
+  },
+  {
+    "text": "No preset recommendation is available until a WT delta is computed.",
+    "count": 1
+  },
+  {
+    "text": "A condition-matched WT baseline exists as experiment #",
+    "count": 1
+  },
+  {
+    "text": ", but it is currently",
+    "count": 1
+  },
+  {
+    "text": ". Relative deltas will appear after it completes.",
+    "count": 1
+  },
+  {
+    "text": "No completed condition-matched WT baseline is available for this result. Absolute curves can still be inspected, but relative fitness or phenotype claims need a compatible WT run.",
+    "count": 1
+  },
+  {
+    "text": "Stoichiometry neighborhood",
+    "count": 1
+  },
+  {
+    "text": "Reconstruction reactions catalyzed by",
+    "count": 1
+  },
+  {
+    "text": "; adjacency only, not causal evidence.",
+    "count": 1
+  },
+  {
+    "text": "reaction",
+    "count": 1
+  },
+  {
+    "text": "flux plottable",
+    "count": 1
+  },
+  {
+    "text": "metabolite output",
+    "count": 1
+  },
+  {
+    "text": "-&gt;",
+    "count": 1
+  },
+  {
+    "text": "catalysts:",
+    "count": 1
+  },
+  {
+    "text": "Showing first 6 of",
+    "count": 1
+  },
+  {
+    "text": "; use reaction search for the rest.",
+    "count": 1
+  },
+  {
+    "text": "Resolving result-linked state variables...",
+    "count": 1
+  },
+  {
+    "text": "State explorer unavailable:",
+    "count": 1
+  },
+  {
+    "text": "Result state explorer",
+    "count": 1
+  },
+  {
+    "text": "Maps the selected result gene to model state variables that can be plotted directly. Rows are grouped by biological role and ranked by absolute final-value delta versus the matching wildtype job when one is available.",
+    "count": 1
+  },
+  {
+    "text": "Maps the",
+    "count": 1
+  },
+  {
+    "text": "to plottable mRNAs, proteins, complexes, reactions, metabolites, and regulatory-neighborhood genes.",
+    "count": 1
+  },
+  {
+    "text": "plottable state variable",
+    "count": 1
+  },
+  {
+    "text": "What to inspect first",
+    "count": 1
+  },
+  {
+    "text": "Start with the largest available final-value shifts versus the matching WT. This ranks model outputs for inspection; it does not prove which molecule caused the phenotype.",
+    "count": 1
+  },
+  {
+    "text": "Regulatory links",
+    "count": 1
+  },
+  {
+    "text": "+",
+    "count": 2
+  },
+  {
+    "text": "more",
+    "count": 1
+  },
+  {
+    "text": "Recommended state variables",
+    "count": 1
+  },
+  {
+    "text": "final value vs WT delta",
+    "count": 1
+  },
+  {
+    "text": "Role",
+    "count": 1
+  },
+  {
+    "text": "State variable",
+    "count": 1
+  },
+  {
+    "text": "Final",
+    "count": 1
+  },
+  {
+    "text": "Delta",
+    "count": 1
+  },
+  {
+    "text": "output table:",
+    "count": 1
+  },
+  {
+    "text": "No trajectory was returned for",
+    "count": 1
+  },
+  {
+    "text": "linked state variable",
+    "count": 1
+  },
+  {
+    "text": "are cataloged but not exposed as plottable molecule outputs for this job.",
+    "count": 1
+  },
+  {
+    "text": "Loading molecule data...",
+    "count": 1
+  },
+  {
+    "text": "Molecule Explorer",
+    "count": 1
+  },
+  {
+    "text": "Advanced output-series search. Search by gene symbol, EcoCyc ID, protein, metabolite, reaction, or raw output ID. Counts below are plottable simulation output series, not unique biological molecules.",
+    "count": 1
+  },
+  {
+    "text": "plottable output series for this cell —",
+    "count": 1
+  },
+  {
+    "text": "state-variable counts",
+    "count": 1
+  },
+  {
+    "text": "FBA flux/delta terms",
+    "count": 1
+  },
+  {
+    "text": "Per-cell count of distinct plottable series — not a total across seeds, generations, or other runs (it's the same for every result). It exceeds the number of distinct biological molecules because mRNA is offered at both transcription-unit and gene/cistron level, and reversible reactions appear as forward+reverse fluxes. Plotting one molecule returns one trajectory per cell lineage (seeds × generations).",
+    "count": 1
+  },
+  {
+    "text": "&#9660;",
+    "count": 1
+  },
+  {
+    "text": "Search path",
+    "count": 1
+  },
+  {
+    "text": "Use the chips below as example searches. They do not filter the catalog or select a biological category; they just fill the search box with common terms. Gene symbols resolve to their model outputs when possible, and raw output IDs are still supported for exact lookup.",
+    "count": 1
+  },
+  {
+    "text": "Browse",
+    "count": 1
+  },
+  {
+    "text": "Showing plottable output IDs from this family. Filter within the family, then select up to",
+    "count": 1
+  },
+  {
+    "text": "outputs to plot together.",
+    "count": 1
+  },
+  {
+    "text": "Close browse",
+    "count": 1
+  },
+  {
+    "text": "Loading output IDs...",
+    "count": 1
+  },
+  {
+    "text": "Showing",
+    "count": 1
+  },
+  {
+    "text": "output series",
+    "count": 1
+  },
+  {
+    "text": ". Search by gene symbol or name above to narrow.",
+    "count": 1
+  },
+  {
+    "text": "No output IDs match this filter.",
+    "count": 1
+  },
+  {
+    "text": "match",
+    "count": 1
+  },
+  {
+    "text": "No matches for &ldquo;",
+    "count": 1
+  },
+  {
+    "text": "&rdquo;",
+    "count": 1
+  },
+  {
+    "text": "Type at least 2 characters to search",
+    "count": 1
+  },
+  {
+    "text": "Selected (",
+    "count": 1
+  },
+  {
+    "text": "/",
+    "count": 1
+  },
+  {
+    "text": "Clear all",
+    "count": 1
+  },
+  {
+    "text": "&times;",
+    "count": 1
+  },
+  {
+    "text": "Loading trajectories...",
+    "count": 1
+  },
+  {
+    "text": "No timeseries data available for the selected molecules.",
+    "count": 1
+  },
+  {
+    "text": "Search by biological name; raw output IDs are optional.",
+    "count": 1
+  },
+  {
+    "text": "e.g.",
+    "count": 1
+  },
+  {
+    "text": "aaeB",
+    "count": 1
+  },
+  {
+    "text": ",",
+    "count": 3
+  },
+  {
+    "text": "rpoB",
+    "count": 1
+  },
+  {
+    "text": "GLC",
+    "count": 1
+  },
+  {
+    "text": "ACETATEKINA-RXN",
+    "count": 1
+  }
+]
