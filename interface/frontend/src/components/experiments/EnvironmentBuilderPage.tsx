@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { makeAssistantContextKey, summarizeText } from '../../utils/assistantContext'
 import {
@@ -29,6 +29,8 @@ import { SearchInput } from '../common/SearchInput'
 import { TimelineComposer } from './TimelineComposer'
 import './designer.css'
 import './environment-builder.css'
+import { BuilderGuidanceLayout, BuilderNavigation, BUILDER_SECTIONS } from './BuilderWorkbench'
+import './builder-workbench.css'
 
 type SaveSectionKey = 'media' | 'mediaRecipe' | 'condition' | 'tfCondition' | 'timeline'
 type SectionMode = 'existing' | 'create'
@@ -540,7 +542,8 @@ function SectionCard({
     >
       <div className="builder-section-heading flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+          {sectionId && <p className="builder-section-label">{SECTION_LABELS[sectionId]}</p>}
+          <h2 tabIndex={-1} className="text-base font-semibold text-slate-900">{title}</h2>
           <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
         </div>
         {(actions || collapsible) && (
@@ -790,6 +793,13 @@ function getSectionSummaries({
 
 export function EnvironmentBuilderPage() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const navigationFrame = useRef(0)
+  const navigationIntent = useRef<{ id: string; top: number | null; started: number } | null>(null)
+  const previousHash = useRef(location.hash)
+  const [activeAnchor, setActiveAnchor] = useState<string>('builder-overview')
+  const activeNavItem = BUILDER_SECTIONS.find(item => item.id === activeAnchor)
+  const activeBuilderSection = activeNavItem && 'key' in activeNavItem ? activeNavItem.key : null
   const assistantCapturedAt = useRef(new Date().toISOString()).current
   const [catalog, setCatalog] = useState<ConditionCatalog | null>(null)
   const [loading, setLoading] = useState(true)
@@ -2018,7 +2028,7 @@ export function EnvironmentBuilderPage() {
       'conditions_builder_draft',
       location.pathname,
       location.search,
-      highlightedSection,
+      activeBuilderSection,
       MAIN_SECTION_KEYS.map((section) => `${section}:${isDirty(section) ? 1 : 0}:${isSaved(section) ? 1 : 0}`).join(','),
       selectedMediaStockName,
       selectedMediaRecipeId,
@@ -2033,7 +2043,7 @@ export function EnvironmentBuilderPage() {
     context: {
       assistant_surface: 'conditions_builder',
       route: `${location.pathname}${location.search}`,
-      selected_builder_section: highlightedSection,
+      selected_builder_section: activeBuilderSection,
       page_state: assistantPageState,
     },
     suggestedPrompt: 'Help me review this Conditions Builder draft. Check the five-step dependency chain, saved versus dirty sections, valid publish order, and whether the media recipe, growth condition, TF rules, and media protocol are internally consistent.',
@@ -2057,21 +2067,102 @@ export function EnvironmentBuilderPage() {
     })
   }
 
-  function jumpToDependencyStep(stepId: DependencyStepId) {
-    const target = DEPENDENCY_SECTION_TARGETS[stepId]
-    if (!target) return
+  function navigateToSection(id: string) {
+    navigate(`${location.pathname}${location.search}#${id}`)
+    if (location.hash === `#${id}`) revealSection(id)
+  }
 
-    setCollapsedSections((current) => ({
-      ...current,
-      [target]: false,
-    }))
-    setHighlightedSection(target)
-    window.requestAnimationFrame(() => {
-      document.getElementById(`builder-section-${target}`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
+  function revealSection(id: string) {
+    const section = BUILDER_SECTIONS.find(item => item.id === id) || (id === 'builder-exchange-registry' ? { id, key: 'media' } as const : undefined)
+    if (!section) return
+    navigationIntent.current = { id, top: null, started: Date.now() }
+    setActiveAnchor(id === 'builder-exchange-registry' ? 'builder-section-media' : id)
+    if ('key' in section) {
+      setCollapsedSections(current => ({ ...current, [section.key]: false }))
+      setHighlightedSection(section.key)
+    }
+    if (id === 'builder-catalog') setCatalogOpen(true)
+    window.cancelAnimationFrame(navigationFrame.current)
+    navigationFrame.current = window.requestAnimationFrame(() => {
+      const node = document.getElementById(id) || (id === 'builder-exchange-registry' ? document.getElementById('builder-section-media') : null)
+      if (!node) { navigationIntent.current = null; return }
+      if (node instanceof HTMLDetailsElement) node.open = true
+      let ancestor = node.parentElement?.closest('details')
+      while (ancestor) { ancestor.open = true; ancestor = ancestor.parentElement?.closest('details') }
+      // Native details and React's collapsed sections must be laid out before focus.
+      navigationFrame.current = window.requestAnimationFrame(() => {
+        navigationFrame.current = 0
+        if (!node.isConnected) return
+        const heading = node.querySelector<HTMLElement>('h2, summary, button') || node
+        if (!['BUTTON', 'SUMMARY', 'A', 'INPUT', 'SELECT'].includes(heading.tagName)) heading.setAttribute('tabindex', '-1')
+        heading.focus({ preventScroll: true })
+        const main = node.closest('main')
+        if (main) {
+          const top = Math.max(0, Math.min(main.scrollHeight - main.clientHeight, main.scrollTop + node.getBoundingClientRect().top - main.getBoundingClientRect().top - (parseFloat(getComputedStyle(main).scrollPaddingTop) || 16)))
+          navigationIntent.current = { id, top, started: Date.now() }
+          main.scrollTo({ top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+          if (Math.abs(main.scrollTop - top) <= 2) navigationIntent.current = null
+        }
+        setActiveAnchor(id === 'builder-exchange-registry' ? 'builder-section-media' : id)
       })
     })
+  }
+
+  useEffect(() => {
+    const id = location.hash.slice(1)
+    if (id) revealSection(id)
+    else if (previousHash.current) revealSection('builder-overview')
+    previousHash.current = location.hash
+    return () => window.cancelAnimationFrame(navigationFrame.current)
+  }, [location.hash])
+
+  useEffect(() => {
+    const node = document.getElementById('builder-overview')
+    const main = node?.closest('main')
+    if (!main) return
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const intent = navigationIntent.current
+      if (intent && Date.now() - intent.started < 1500) {
+        if (intent.top === null || Math.abs(main.scrollTop - intent.top) > 2) return
+        navigationIntent.current = null
+        return
+      }
+      navigationIntent.current = null
+      const viewport = main.getBoundingClientRect()
+      const top = viewport.top + (parseFloat(getComputedStyle(main).scrollPaddingTop) || 16)
+      const bottom = viewport.bottom - 16
+      // Pick the main section occupying the most readable viewport space.
+      const candidates = BUILDER_SECTIONS.map(item => {
+        const node = document.getElementById(item.id)
+        const rect = node?.getBoundingClientRect()
+        return { id: item.id, visible: rect ? Math.max(0, Math.min(rect.bottom, bottom) - Math.max(rect.top, top)) : 0 }
+      }).sort((a, b) => b.visible - a.visible)
+      let current: string = candidates[0]?.visible ? candidates[0].id : 'builder-overview'
+      setActiveAnchor(current)
+    }
+    const onScroll = () => { if (!frame) frame = window.requestAnimationFrame(update) }
+    const interrupt = () => { navigationIntent.current = null; window.cancelAnimationFrame(navigationFrame.current); navigationFrame.current = 0; onScroll() }
+    const onKey = (event: KeyboardEvent) => { if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)) interrupt() }
+    const observer = new ResizeObserver(onScroll)
+    const content = main.querySelector('.builder-document')
+    if (content) observer.observe(content)
+    main.addEventListener('scroll', onScroll)
+    main.addEventListener('wheel', interrupt, { passive: true })
+    main.addEventListener('touchstart', interrupt, { passive: true })
+    main.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onScroll)
+    update()
+    return () => {
+      main.removeEventListener('scroll', onScroll); main.removeEventListener('wheel', interrupt)
+      main.removeEventListener('touchstart', interrupt); main.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onScroll); observer.disconnect(); window.cancelAnimationFrame(frame)
+    }
+  }, [])
+
+  function jumpToDependencyStep(stepId: DependencyStepId) {
+    navigateToSection(stepId === 'environment' ? 'builder-exchange-registry' : `builder-section-${DEPENDENCY_SECTION_TARGETS[stepId]}`)
   }
 
   function renderSectionActions(section: SaveSectionKey) {
@@ -2155,11 +2246,10 @@ export function EnvironmentBuilderPage() {
             </div>
           </div>
         ) : (
-          <div className="mt-4 space-y-5">
-            <div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+          <BuilderGuidanceLayout guidance={<div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
               <p className="font-medium text-cyan-950">Create a raw stock only when the reconstruction does not already contain the extracellular mixture you need.</p>
               <p className="mt-1 leading-6">Each row is one molecule available outside the cell. Use exact molecule IDs from the registry below; finite concentrations constrain availability, while <span className="font-mono">Infinity</span> means unconstrained supply.</p>
-            </div>
+            </div>}>
             <label className="block">
               <FieldLabel
                 label="New medium stock name"
@@ -2203,22 +2293,22 @@ export function EnvironmentBuilderPage() {
               <div className="mt-1 space-y-3">
                 {draftMediaRows.map((row) => (
                   <div key={row.id} className="builder-edit-row grid gap-3 md:grid-cols-[minmax(0,1fr),180px,auto]">
-                    <input
+                    <label className="builder-row-control"><span className="builder-stacked-label">Molecule ID</span><input
                       type="text"
                       list="environment-molecule-options"
                       aria-label={`Molecule ID for row ${row.id}`} value={row.molecule_id}
                       onChange={(event) => updateMediaRow(row.id, 'molecule_id', event.target.value)}
                       placeholder="MY_CARBON_SRC"
                       className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                    />
+                    /></label>
                     <div>
-                      <input
+                      <label className="builder-row-control"><span className="builder-stacked-label">Concentration (mmol/L)</span><input
                         type="text"
                         aria-label={`Concentration (mmol/L) for row ${row.id}`} value={row.concentration}
                         onChange={(event) => updateMediaRow(row.id, 'concentration', event.target.value)}
                         placeholder="e.g. 10.0 or Infinity"
                         className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                      />
+                      /></label>
                       <p className="mt-1 text-[11px] text-slate-400">Infinity = unconstrained supply</p>
                     </div>
                     <button
@@ -2233,7 +2323,7 @@ export function EnvironmentBuilderPage() {
               </div>
             </div>
 
-            <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <details id="builder-exchange-registry" className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <summary className="cursor-pointer text-sm font-medium text-slate-900">Exchange molecule registry</summary>
               <p className="mt-2 text-sm text-slate-500">
                 Use this only for molecule IDs missing from the reconstruction registry. Existing catalog molecules can be added directly to the stock.
@@ -2286,28 +2376,28 @@ export function EnvironmentBuilderPage() {
                     </div>
                     {draftEnvironmentRows.map((row) => (
                       <div key={row.id} className="builder-edit-row grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr),96px,120px,auto]">
-                        <input
+                        <label className="builder-row-control"><span className="builder-stacked-label">Molecule ID</span><input
                           type="text"
                           list="environment-molecule-options"
                           aria-label={`Molecule ID for row ${row.id}`} value={row.molecule_id}
                           onChange={(event) => updateEnvironmentRow(row.id, 'molecule_id', event.target.value)}
                           className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                        />
-                        <select
+                        /></label>
+                        <label className="builder-row-control"><span className="builder-stacked-label">Exchange location</span><select
                           aria-label={`Exchange molecule location for row ${row.id}`} value={row.exchange_molecule_location}
                           onChange={(event) => updateEnvironmentRow(row.id, 'exchange_molecule_location', event.target.value)}
                           className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
                         >
                           <option value="[p]">[p]</option>
                           <option value="[c]">[c]</option>
-                        </select>
-                        <input
+                        </select></label>
+                        <label className="builder-row-control"><span className="builder-stacked-label">Formula weight</span><input
                           type="text"
                           aria-label={`Formula weight for row ${row.id}`} value={row.formula_weight}
                           onChange={(event) => updateEnvironmentRow(row.id, 'formula_weight', event.target.value)}
                           placeholder="None"
                           className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
-                        />
+                        /></label>
                         <button
                           type="button"
                           onClick={() => removeEnvironmentRow(row.id)}
@@ -2321,7 +2411,7 @@ export function EnvironmentBuilderPage() {
                 </div>
               </div>
             </details>
-          </div>
+          </BuilderGuidanceLayout>
         )}
       </SectionCard>
     )
@@ -2393,11 +2483,10 @@ export function EnvironmentBuilderPage() {
             </div>
           </div>
         ) : (
-          <div className="mt-4 space-y-4">
-            <div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+          <BuilderGuidanceLayout guidance={<div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
               <p className="font-medium text-cyan-950">A media recipe is an assembly operation, not just a name.</p>
               <p className="mt-1 leading-6">Start from one base stock, optionally mix in a supplement stock, then add or remove specific ingredients. The recipe ID is what growth conditions, media protocols, and experiments reference.</p>
-            </div>
+            </div>}>
             <div className="builder-pair grid gap-4 md:grid-cols-2">
             <label className="block">
               <FieldLabel
@@ -2626,7 +2715,7 @@ export function EnvironmentBuilderPage() {
               </p>
             </label>
             </div>
-          </div>
+          </BuilderGuidanceLayout>
         )}
       </SectionCard>
     )
@@ -2687,11 +2776,10 @@ export function EnvironmentBuilderPage() {
             </div>
           </div>
         ) : (
-          <div className="mt-4 space-y-4">
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <BuilderGuidanceLayout guidance={<div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <p className="font-medium text-amber-950">Create a growth condition only when you can justify the biological metadata.</p>
               <p className="mt-1 leading-6">The doubling time and TF lists are prior reconstruction metadata, not outputs calculated by this form. If they are unknown, reuse or fork the closest existing condition and edit only what is defensible.</p>
-            </div>
+            </div>}>
             <div className="builder-pair grid gap-4 md:grid-cols-2">
             <label className="block">
               <FieldLabel
@@ -2865,7 +2953,7 @@ export function EnvironmentBuilderPage() {
               <p className="mt-1 text-xs leading-5 text-slate-500">List only TF complexes that this condition turns off relative to basal. Use <span className="font-mono">[]</span> for none.</p>
             </label>
             </div>
-          </div>
+          </BuilderGuidanceLayout>
         )}
       </SectionCard>
     )
@@ -2936,11 +3024,10 @@ export function EnvironmentBuilderPage() {
             </div>
           </div>
         ) : (
-          <div className="mt-4 space-y-3">
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <BuilderGuidanceLayout guidance={<div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <p className="font-medium text-amber-950">Create TF state rules only for reconstruction-level regulatory states you can justify.</p>
               <p className="mt-1 leading-6">These rows do not simulate a free-form TF knockout. They define when a TF complex is considered active or inactive under nutrient and optional genotype contexts.</p>
-            </div>
+            </div>}>
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-slate-900">Draft TF state rules</p>
@@ -3123,7 +3210,7 @@ export function EnvironmentBuilderPage() {
                 </div>
               </div>
             ))}
-          </div>
+          </BuilderGuidanceLayout>
         )}
       </SectionCard>
     )
@@ -3276,21 +3363,31 @@ export function EnvironmentBuilderPage() {
   return (
     <div className="experiment-designer environment-builder mx-auto flex max-w-[1500px] flex-col gap-6">
       <section className="builder-header rounded-lg border border-slate-200 bg-white">
-        <div className="flex flex-col gap-6 px-6 py-8 lg:flex-row lg:items-end lg:justify-between lg:px-8">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">Simulate</p>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight">Conditions Builder</h1>
-            <p className="builder-header-description mt-3 max-w-2xl text-sm leading-6 text-slate-500">
+        <div className="builder-header-layout">
+          <div className="builder-header-main">
+            <div className="builder-header-identity">
+              <span className="builder-header-emblem" aria-hidden="true">
+                <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 4h8M13 4v9L6.5 24a2.7 2.7 0 0 0 2.3 4h14.4a2.7 2.7 0 0 0 2.3-4L19 13V4" />
+                  <path d="M10 19h12M13 23h.01M19 25h.01" />
+                </svg>
+              </span>
+              <div>
+                <p className="builder-header-kicker">Simulate</p>
+                <h1 className="text-2xl font-semibold tracking-tight">Conditions Builder</h1>
+              </div>
+            </div>
+            <p className="builder-header-description text-sm leading-6 text-slate-500">
               Build reusable experiment environments by answering five connected questions: starting stock, named media recipe, growth condition, TF state rules, and media protocol. Published records appear as selectable options when designing simulations.
             </p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="builder-header-utilities">
             <Link
               to="/experiments"
               className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
             >
               Open experiments
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 10h12m-5-5 5 5-5 5" /></svg>
             </Link>
             <span className="builder-header-badge inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
               drafts saved in backend
@@ -3410,47 +3507,40 @@ export function EnvironmentBuilderPage() {
         </div>
       )}
 
-      <details
-        open={dependencyOpen}
-        onToggle={(event) => setDependencyOpen((event.target as HTMLDetailsElement).open)}
-        className="rounded-2xl border border-slate-200 bg-white shadow-sm"
-      >
-        <summary className="cursor-pointer list-none px-5 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Five-question dependency map</p>
-              <p className="mt-1 text-sm text-slate-500">Move from raw medium to experiment-ready environment. Use the exchange registry only when you need a new molecule ID.</p>
-            </div>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-              {dependencyOpen ? 'Hide' : 'Show'}
-            </span>
-          </div>
-        </summary>
-        <div className="border-t border-slate-100 px-5 py-4">
-          <div className="builder-dependency-grid grid gap-3">
+      <div className="builder-workbench">
+        <BuilderNavigation active={activeAnchor} onNavigate={navigateToSection}
+          status={key => isDirty(key as SaveSectionKey) ? 'Unsaved changes' : isSaved(key as SaveSectionKey) ? 'Saved' : 'Not saved'}
+          />
+        <div className="builder-document">
+      <section id="builder-overview" className="builder-overview">
+        <h2 tabIndex={-1} className="text-base font-semibold">Five-question dependency map</h2>
+        <p className="mt-1 text-sm text-slate-500">Move from raw medium to experiment-ready environment. Use the exchange registry only when you need a new molecule ID.</p>
+        <div className="mt-4">
+          <ol className="builder-dependency-grid builder-dependency-sequence" aria-label="Environment dependency sequence">
             {dependencyMainSteps.map((step, index) => {
               const badge = dependencyBadge(step.id)
               return (
-                <button
-                  key={step.id}
-                  type="button"
-                  onClick={() => jumpToDependencyStep(step.id)}
-                  className="group relative rounded-2xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-cyan-300 hover:bg-cyan-50/40"
-                >
-                  {index < dependencyMainSteps.length - 1 && (
-                    <span className="pointer-events-none absolute -right-3 top-1/2 hidden h-px w-3 bg-slate-300 lg:block" />
-                  )}
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-600 text-xs font-semibold text-white">{index + 1}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium builder-badge ${badge.classes}`}>{badge.label}</span>
-                  </div>
-                  <p className="mt-3 text-sm font-semibold leading-5 text-slate-950">{step.question}</p>
-                  <p className="mt-2 break-words font-mono text-xs text-cyan-800">{dependencyAnswers[step.id]}</p>
-                  <p className="mt-2 text-xs leading-5 text-slate-500">{step.label}</p>
-                </button>
+                <li key={step.id}>
+                  <button
+                    type="button"
+                    onClick={() => jumpToDependencyStep(step.id)}
+                    className="builder-dependency-step"
+                  >
+                    <span className="builder-dependency-number" aria-hidden="true">{index + 1}</span>
+                    <div className="builder-dependency-content">
+                      <p className="builder-dependency-label">{step.label}</p>
+                      <p className="builder-dependency-question">{step.question}</p>
+                    </div>
+                    <div className="builder-dependency-evidence">
+                      <p className="builder-dependency-answer font-mono">{dependencyAnswers[step.id]}</p>
+                      <span className={`builder-badge builder-dependency-status ${badge.classes}`}>{badge.label}</span>
+                    </div>
+                    <svg className="builder-dependency-arrow" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m7 5 5 5-5 5" /></svg>
+                  </button>
+                </li>
               )
             })}
-          </div>
+          </ol>
 
           <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3">
             <p className="text-sm font-semibold text-cyan-950">How to read this flow</p>
@@ -3458,6 +3548,8 @@ export function EnvironmentBuilderPage() {
             <p className="mt-2 text-sm leading-6 text-cyan-800">Key handoff: recipe ID to growth-condition nutrients to TF nutrient fields to protocol start.</p>
           </div>
 
+          <details data-builder-reference open={dependencyOpen} onToggle={event => setDependencyOpen(event.currentTarget.open)} className="builder-reference mt-4">
+            <summary><span className="builder-disclosure-title"><svg className="builder-disclosure-chevron" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 3 5 5-5 5" /></svg><span>Detailed dependency reference</span></span><span>{dependencyOpen ? 'Hide' : 'Show'}</span></summary>
           <div className="mt-4 space-y-4">
             {dependencyMainSteps.map((step, index) => {
               const badge = dependencyBadge(step.id)
@@ -3506,7 +3598,7 @@ export function EnvironmentBuilderPage() {
                   </button>
 
                   {step.id === 'media' && dependencyBranchStep && (
-                    <div className="ml-6 mt-3 border-l-2 border-dashed border-amber-200 pl-4">
+                    <div id="builder-exchange-reference" className="ml-6 mt-3 border-l-2 border-dashed border-amber-200 pl-4">
                       <button
                         type="button"
                         onClick={() => jumpToDependencyStep(dependencyBranchStep.id)}
@@ -3547,19 +3639,25 @@ export function EnvironmentBuilderPage() {
               )
             })}
           </div>
+          </details>
         </div>
-      </details>
+      </section>
 
-      <details
+
+
+      <details id="builder-catalog"
         open={catalogOpen}
         onToggle={(event) => setCatalogOpen((event.target as HTMLDetailsElement).open)}
         className="rounded-2xl border border-slate-200 bg-white shadow-sm"
       >
         <summary className="cursor-pointer list-none px-5 py-4">
           <div className="flex items-center justify-between gap-3">
-            <div>
+            <div className="builder-disclosure-title">
+              <svg className="builder-disclosure-chevron" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 3 5 5-5 5" /></svg>
+              <div>
               <p className="text-sm font-semibold text-slate-900">Catalog status</p>
               <p className="mt-1 text-sm text-slate-500">Collapsed by default, with current data availability across the condition catalog.</p>
+              </div>
             </div>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
               {catalogOpen ? 'Hide' : 'Show'}
@@ -3594,10 +3692,14 @@ export function EnvironmentBuilderPage() {
           {renderTimelineSection()}
         </div>
 
-        <div role="group" aria-label="Build summary" className="min-w-0 space-y-4">
+
+
+        <div id="builder-summary" role="group" aria-label="Build summary" className="min-w-0 space-y-4">
           <SavedStatePanel sectionSummaries={sectionSummaries} isSaved={isSaved} isDirty={isDirty} />
         </div>
       </section>
+        </div>
+      </div>
     </div>
   )
 }

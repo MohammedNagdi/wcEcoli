@@ -1,0 +1,3115 @@
+{
+  "checkpoint": "759c8187f",
+  "entries": [
+    {
+      "kind": "dependency",
+      "text": "media",
+      "line": 104,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 104,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 106
+    },
+    {
+      "kind": "dependency",
+      "text": "condition/media/*.tsv",
+      "line": 105,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 105,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 107
+    },
+    {
+      "kind": "dependency",
+      "text": "Medium stock",
+      "line": 106,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 106,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 108
+    },
+    {
+      "kind": "dependency",
+      "text": "What raw medium stock am I starting from?",
+      "line": 107,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 107,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 109
+    },
+    {
+      "kind": "dependency",
+      "text": "Choose the extracellular molecule and concentration table.",
+      "line": 108,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 108,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 110
+    },
+    {
+      "kind": "dependency",
+      "text": "A medium stock lists extracellular molecules and concentrations. Finite values cap availability; Infinity means the molecule is treated as unconstrained for the run.",
+      "line": 109,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 109,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 111
+    },
+    {
+      "kind": "dependency",
+      "text": "Known molecule IDs.",
+      "line": 110,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 110,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 112
+    },
+    {
+      "kind": "dependency",
+      "text": "A stock name such as MIX0-57.",
+      "line": 111,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 111,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 113
+    },
+    {
+      "kind": "dependency",
+      "text": "Used as the base of a media recipe.",
+      "line": 112,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 112,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 114
+    },
+    {
+      "kind": "dependency",
+      "text": "environment",
+      "line": 115,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 115,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 117
+    },
+    {
+      "kind": "dependency",
+      "text": "condition/environment_molecules.tsv",
+      "line": 116,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 116,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 118
+    },
+    {
+      "kind": "dependency",
+      "text": "Exchange molecule registry",
+      "line": 117,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 117,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 119
+    },
+    {
+      "kind": "dependency",
+      "text": "Do I need a new exchange molecule ID?",
+      "line": 118,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 118,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 120
+    },
+    {
+      "kind": "dependency",
+      "text": "Registers new molecule IDs.",
+      "line": 119,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 119,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 121
+    },
+    {
+      "kind": "dependency",
+      "text": "Use this only when a medium needs a molecule ID that the reconstruction does not already know. Most common metabolites are already registered.",
+      "line": 120,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 120,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 122
+    },
+    {
+      "kind": "dependency",
+      "text": "Only if a new medium needs a new ID.",
+      "line": 121,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 121,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 123
+    },
+    {
+      "kind": "dependency",
+      "text": "Molecule IDs such as MY_CARBON_SRC.",
+      "line": 122,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 122,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 124
+    },
+    {
+      "kind": "dependency",
+      "text": "Those IDs can be used in media stocks and recipes.",
+      "line": 123,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 123,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 125
+    },
+    {
+      "kind": "dependency",
+      "text": "mediaRecipe",
+      "line": 127,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 127,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 129
+    },
+    {
+      "kind": "dependency",
+      "text": "condition/media_recipes.tsv",
+      "line": 128,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 128,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 130
+    },
+    {
+      "kind": "dependency",
+      "text": "Media recipe",
+      "line": 129,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 129,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 131
+    },
+    {
+      "kind": "dependency",
+      "text": "How should this media recipe be assembled for experiments?",
+      "line": 130,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 130,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 132
+    },
+    {
+      "kind": "dependency",
+      "text": "Choose or define the recipe operation: base stock, optional mixed stock, and ingredient additions or removals.",
+      "line": 131,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 131,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 133
+    },
+    {
+      "kind": "dependency",
+      "text": "A recipe combines a base medium stock with supplements or ingredients and assigns one short ID, such as minimal_acetate. Downstream records use this recipe ID instead of the raw stock name.",
+      "line": 132,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 132,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 134
+    },
+    {
+      "kind": "dependency",
+      "text": "A base medium and any ingredient IDs.",
+      "line": 133,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 133,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 135
+    },
+    {
+      "kind": "dependency",
+      "text": "A recipe ID such as minimal_acetate.",
+      "line": 134,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 134,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 136
+    },
+    {
+      "kind": "dependency",
+      "text": "Used as nutrients in growth conditions.",
+      "line": 135,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 135,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 137
+    },
+    {
+      "kind": "dependency",
+      "text": "condition",
+      "line": 138,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 138,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 140
+    },
+    {
+      "kind": "dependency",
+      "text": "condition/condition_defs.tsv",
+      "line": 139,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 139,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 141
+    },
+    {
+      "kind": "dependency",
+      "text": "Growth condition",
+      "line": 140,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 140,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 142
+    },
+    {
+      "kind": "dependency",
+      "text": "What biological growth condition should this recipe represent?",
+      "line": 141,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 141,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 143
+    },
+    {
+      "kind": "dependency",
+      "text": "Attach biological context such as expected growth, TF lists, and genotype perturbations.",
+      "line": 142,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 142,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 144
+    },
+    {
+      "kind": "dependency",
+      "text": "A growth condition ties a media recipe to expected growth behavior and regulatory state. This is what later appears as a selectable condition for experiments.",
+      "line": 143,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 143,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 145
+    },
+    {
+      "kind": "dependency",
+      "text": "A recipe ID from Media Recipe.",
+      "line": 144,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 144,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 146
+    },
+    {
+      "kind": "dependency",
+      "text": "A condition name, nutrients, TF lists, and doubling time.",
+      "line": 145,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 145,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 147
+    },
+    {
+      "kind": "dependency",
+      "text": "Keeps TF rules aligned to the same setup.",
+      "line": 146,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 146,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 148
+    },
+    {
+      "kind": "dependency",
+      "text": "tfCondition",
+      "line": 149,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 149,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 151
+    },
+    {
+      "kind": "dependency",
+      "text": "condition/tf_condition.tsv",
+      "line": 150,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 150,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 152
+    },
+    {
+      "kind": "dependency",
+      "text": "TF state rules",
+      "line": 151,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 151,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 153
+    },
+    {
+      "kind": "dependency",
+      "text": "Which TF state rules belong to this recipe?",
+      "line": 152,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 152,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 154
+    },
+    {
+      "kind": "dependency",
+      "text": "Select reconstruction rules that explain active or inactive TF states.",
+      "line": 153,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 153,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 155
+    },
+    {
+      "kind": "dependency",
+      "text": "These optional rows describe when a TF complex is active or inactive under nutrient contexts. They are not a free-form TF knockout; they encode reconstruction-level regulatory states.",
+      "line": 154,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 154,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 156
+    },
+    {
+      "kind": "dependency",
+      "text": "The same recipe context used by the growth condition.",
+      "line": 155,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 155,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 157
+    },
+    {
+      "kind": "dependency",
+      "text": "Active and inactive TF rules.",
+      "line": 156,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 156,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 158
+    },
+    {
+      "kind": "dependency",
+      "text": "Finishes the regulatory context before building a protocol.",
+      "line": 157,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 157,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 159
+    },
+    {
+      "kind": "dependency",
+      "text": "timeline",
+      "line": 160,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 160,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 162
+    },
+    {
+      "kind": "dependency",
+      "text": "condition/timelines_def.tsv",
+      "line": 161,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 161,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 163
+    },
+    {
+      "kind": "dependency",
+      "text": "Media protocol",
+      "line": 162,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 162,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 164
+    },
+    {
+      "kind": "dependency",
+      "text": "Does the environment stay constant or shift over time?",
+      "line": 163,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 163,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 165
+    },
+    {
+      "kind": "dependency",
+      "text": "Choose a static medium or a time-ordered media-shift protocol.",
+      "line": 164,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 164,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 166
+    },
+    {
+      "kind": "dependency",
+      "text": "A protocol is a time-ordered list of recipe changes, for example \"0 minimal, 3600 minimal_acetate\". The UI shows minutes and hours; published catalog rows store event times in seconds.",
+      "line": 165,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 165,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 167
+    },
+    {
+      "kind": "dependency",
+      "text": "Recipe IDs; the first event should start from the current recipe.",
+      "line": 166,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 166,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 168
+    },
+    {
+      "kind": "dependency",
+      "text": "The final protocol string.",
+      "line": 167,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 167,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 169
+    },
+    {
+      "kind": "dependency",
+      "text": "A complete experiment-ready setup.",
+      "line": 168,
+      "owner": "DEPENDENCY_STEPS",
+      "checkpointOwner": "DEPENDENCY_STEPS",
+      "checkpointLine": 168,
+      "workbenchOwner": "DEPENDENCY_STEPS",
+      "workbenchLine": 170
+    },
+    {
+      "kind": "title",
+      "text": "Build summary",
+      "line": 650,
+      "owner": "SavedStatePanel",
+      "checkpointOwner": "SavedStatePanel",
+      "checkpointLine": 650,
+      "workbenchOwner": "SavedStatePanel",
+      "workbenchLine": 653
+    },
+    {
+      "kind": "title",
+      "text": "1. What raw medium stock am I starting from?",
+      "line": 2097,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2097,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2188
+    },
+    {
+      "kind": "label",
+      "text": "Stock medium",
+      "line": 2110,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2110,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2201
+    },
+    {
+      "kind": "tooltip",
+      "text": "Medium stock names come from files under condition/media. They are usually uppercase names such as MIX0-57 or MIX0-844.",
+      "line": 2111,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2111,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2202
+    },
+    {
+      "kind": "text",
+      "text": "-",
+      "line": 2122,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2122,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2213
+    },
+    {
+      "kind": "text",
+      "text": "·",
+      "line": 2122,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2122,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2213
+    },
+    {
+      "kind": "text",
+      "text": "Selected stock summary",
+      "line": 2131,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2131,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2222
+    },
+    {
+      "kind": "text",
+      "text": ":",
+      "line": 2134,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2134,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2225
+    },
+    {
+      "kind": "text",
+      "text": "Fork &amp; edit",
+      "line": 2144,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2144,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2235
+    },
+    {
+      "kind": "text",
+      "text": "Create a raw stock only when the reconstruction does not already contain the extracellular mixture you need.",
+      "line": 2160,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2160,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2250
+    },
+    {
+      "kind": "text",
+      "text": "Each row is one molecule available outside the cell. Use exact molecule IDs from the registry below; finite concentrations constrain availability, while",
+      "line": 2161,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2161,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2251
+    },
+    {
+      "kind": "text",
+      "text": "Infinity",
+      "line": 2161,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2161,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2251
+    },
+    {
+      "kind": "text",
+      "text": "means unconstrained supply.",
+      "line": 2161,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2161,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2251
+    },
+    {
+      "kind": "label",
+      "text": "New medium stock name",
+      "line": 2165,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2165,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2255
+    },
+    {
+      "kind": "tooltip",
+      "text": "Use the file stem only, without .tsv. Repo convention here is usually uppercase names such as MY_NEW_MIX.",
+      "line": 2166,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2166,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2256
+    },
+    {
+      "kind": "placeholder",
+      "text": "MY_NEW_MIX",
+      "line": 2176,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2176,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2266
+    },
+    {
+      "kind": "text",
+      "text": "This creates a raw stock file under",
+      "line": 2179,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2179,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2269
+    },
+    {
+      "kind": "text",
+      "text": "condition/media",
+      "line": 2179,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2179,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2269
+    },
+    {
+      "kind": "text",
+      "text": ". It is not experiment-selectable until a media recipe uses it.",
+      "line": 2179,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2179,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2269
+    },
+    {
+      "kind": "text",
+      "text": "Stock composition",
+      "line": 2184,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2184,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2274
+    },
+    {
+      "kind": "text",
+      "text": "Add row",
+      "line": 2190,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2190,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2280
+    },
+    {
+      "kind": "text",
+      "text": "Molecule ID",
+      "line": 2194,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2194,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2284
+    },
+    {
+      "kind": "text",
+      "text": "Concentration (mmol/L)",
+      "line": 2195,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2195,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2285
+    },
+    {
+      "kind": "placeholder",
+      "text": "MY_CARBON_SRC",
+      "line": 2211,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2211,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2301
+    },
+    {
+      "kind": "placeholder",
+      "text": "e.g. 10.0 or Infinity",
+      "line": 2219,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2219,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2309
+    },
+    {
+      "kind": "text",
+      "text": "Infinity = unconstrained supply",
+      "line": 2222,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2222,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2312
+    },
+    {
+      "kind": "text",
+      "text": "Remove",
+      "line": 2229,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2229,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2319
+    },
+    {
+      "kind": "text",
+      "text": "Exchange molecule registry",
+      "line": 2237,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2237,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2327
+    },
+    {
+      "kind": "text",
+      "text": "Use this only for molecule IDs missing from the reconstruction registry. Existing catalog molecules can be added directly to the stock.",
+      "line": 2239,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2239,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2329
+    },
+    {
+      "kind": "placeholder",
+      "text": "Search existing environment molecules...",
+      "line": 2246,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2246,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2336
+    },
+    {
+      "kind": "text",
+      "text": "Draft registry rows",
+      "line": 2265,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2265,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2355
+    },
+    {
+      "kind": "text",
+      "text": "Add row",
+      "line": 2271,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2271,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2361
+    },
+    {
+      "kind": "text",
+      "text": "Molecule ID",
+      "line": 2276,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2276,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2296
+    },
+    {
+      "kind": "text",
+      "text": "Location",
+      "line": 2278,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2278,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2368
+    },
+    {
+      "kind": "text",
+      "text": "Formula weight",
+      "line": 2282,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2282,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2372
+    },
+    {
+      "kind": "text",
+      "text": "[p]",
+      "line": 2301,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2301,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2391
+    },
+    {
+      "kind": "text",
+      "text": "[c]",
+      "line": 2302,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2302,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2392
+    },
+    {
+      "kind": "placeholder",
+      "text": "None",
+      "line": 2308,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2308,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2398
+    },
+    {
+      "kind": "text",
+      "text": "Remove",
+      "line": 2316,
+      "owner": "renderMediaSection",
+      "checkpointOwner": "renderMediaSection",
+      "checkpointLine": 2316,
+      "workbenchOwner": "renderMediaSection",
+      "workbenchLine": 2406
+    },
+    {
+      "kind": "title",
+      "text": "2. How should this media recipe be assembled for experiments?",
+      "line": 2335,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2335,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2425
+    },
+    {
+      "kind": "text",
+      "text": "Compatible recipes",
+      "line": 2347,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2347,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2437
+    },
+    {
+      "kind": "text",
+      "text": "-",
+      "line": 2355,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2355,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2445
+    },
+    {
+      "kind": "text",
+      "text": "Existing recipes are filtered so their base medium matches the selected medium stock. Supplement-only stocks will not show recipes until they are used through a base recipe.",
+      "line": 2360,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2360,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2450
+    },
+    {
+      "kind": "text",
+      "text": "Recipe summary",
+      "line": 2365,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2365,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2455
+    },
+    {
+      "kind": "text",
+      "text": "Fork &amp; edit",
+      "line": 2372,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2372,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2462
+    },
+    {
+      "kind": "text",
+      "text": "Base stock",
+      "line": 2385,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2385,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2475
+    },
+    {
+      "kind": "text",
+      "text": "Added stock",
+      "line": 2386,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2386,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2476
+    },
+    {
+      "kind": "text",
+      "text": "Ingredients",
+      "line": 2387,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2387,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2477
+    },
+    {
+      "kind": "text",
+      "text": "No compatible media recipe is currently available for the selected medium stock.",
+      "line": 2391,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2391,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2481
+    },
+    {
+      "kind": "text",
+      "text": "A media recipe is an assembly operation, not just a name.",
+      "line": 2398,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2398,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2487
+    },
+    {
+      "kind": "text",
+      "text": "Start from one base stock, optionally mix in a supplement stock, then add or remove specific ingredients. The recipe ID is what growth conditions, media protocols, and experiments reference.",
+      "line": 2399,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2399,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2488
+    },
+    {
+      "kind": "label",
+      "text": "Recipe ID",
+      "line": 2404,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2404,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2493
+    },
+    {
+      "kind": "tooltip",
+      "text": "Use lowercase snake_case for named recipe IDs, for example minimal_acetate or my_new_media.",
+      "line": 2405,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2405,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2494
+    },
+    {
+      "kind": "text",
+      "text": "This is the stable ID users will later select in condition and protocol fields.",
+      "line": 2413,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2413,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2502
+    },
+    {
+      "kind": "label",
+      "text": "Base medium",
+      "line": 2417,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2417,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2506
+    },
+    {
+      "kind": "tooltip",
+      "text": "This should match a medium stock file name such as MIX0-57 or MY_NEW_MIX.",
+      "line": 2418,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2418,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2507
+    },
+    {
+      "kind": "label",
+      "text": "Base stocks",
+      "line": 2426,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2426,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2515
+    },
+    {
+      "kind": "text",
+      "text": "-",
+      "line": 2428,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2428,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2517
+    },
+    {
+      "kind": "label",
+      "text": "Supplement stocks",
+      "line": 2433,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2433,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2522
+    },
+    {
+      "kind": "text",
+      "text": "-",
+      "line": 2435,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2435,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2524
+    },
+    {
+      "kind": "label",
+      "text": "Other or draft stocks",
+      "line": 2440,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2440,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2529
+    },
+    {
+      "kind": "text",
+      "text": "-",
+      "line": 2442,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2442,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2531
+    },
+    {
+      "kind": "text",
+      "text": "Use the stock that supplies the main extracellular composition.",
+      "line": 2447,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2447,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2536
+    },
+    {
+      "kind": "label",
+      "text": "Base medium volume (L)",
+      "line": 2451,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2451,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2540
+    },
+    {
+      "kind": "tooltip",
+      "text": "Relative mixing volume for the base stock. Use 1.0 when this recipe uses only the base stock.",
+      "line": 2452,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2452,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2541
+    },
+    {
+      "kind": "text",
+      "text": "For a mixed recipe, this is the base stock fraction or volume used in the recipe.",
+      "line": 2460,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2460,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2549
+    },
+    {
+      "kind": "label",
+      "text": "Added medium",
+      "line": 2464,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2464,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2553
+    },
+    {
+      "kind": "tooltip",
+      "text": "Select an existing stock medium to mix with the base medium at the specified volume ratio, or choose None.",
+      "line": 2465,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2465,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2554
+    },
+    {
+      "kind": "text",
+      "text": "None",
+      "line": 2472,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2472,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2561
+    },
+    {
+      "kind": "label",
+      "text": "Supplement stocks",
+      "line": 2474,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2474,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2563
+    },
+    {
+      "kind": "text",
+      "text": "-",
+      "line": 2476,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2476,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2565
+    },
+    {
+      "kind": "label",
+      "text": "Base stocks, valid but uncommon as mix-ins",
+      "line": 2481,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2481,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2570
+    },
+    {
+      "kind": "text",
+      "text": "-",
+      "line": 2483,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2483,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2572
+    },
+    {
+      "kind": "label",
+      "text": "Other or draft stocks",
+      "line": 2488,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2488,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2577
+    },
+    {
+      "kind": "text",
+      "text": "-",
+      "line": 2490,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2490,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2579
+    },
+    {
+      "kind": "text",
+      "text": "Use this for supplement stocks such as amino-acid mixes. Base stocks are model-valid mix-ins, but uncommon and should be used deliberately.",
+      "line": 2495,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2495,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2584
+    },
+    {
+      "kind": "label",
+      "text": "Added medium volume (L)",
+      "line": 2499,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2499,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2588
+    },
+    {
+      "kind": "tooltip",
+      "text": "Relative mixing volume for the added stock. Use 0 when no added stock is selected.",
+      "line": 2500,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2500,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2589
+    },
+    {
+      "kind": "text",
+      "text": "For example, amino-acid medium uses base volume",
+      "line": 2508,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2508,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2597
+    },
+    {
+      "kind": "text",
+      "text": "0.8",
+      "line": 2508,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2508,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2597
+    },
+    {
+      "kind": "text",
+      "text": "and supplement volume",
+      "line": 2508,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2508,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2597
+    },
+    {
+      "kind": "text",
+      "text": "0.2",
+      "line": 2508,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2508,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2597
+    },
+    {
+      "kind": "text",
+      "text": ".",
+      "line": 2508,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2508,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2597
+    },
+    {
+      "kind": "label",
+      "text": "Ingredients",
+      "line": 2512,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2512,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2601
+    },
+    {
+      "kind": "text",
+      "text": "Choose a catalog molecule...",
+      "line": 2521,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2521,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2610
+    },
+    {
+      "kind": "text",
+      "text": "Add ingredient",
+      "line": 2532,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2532,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2621
+    },
+    {
+      "kind": "title",
+      "text": "Remove ingredient from the encoded ingredient arrays",
+      "line": 2543,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2543,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2632
+    },
+    {
+      "kind": "text",
+      "text": "x",
+      "line": 2545,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2545,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2634
+    },
+    {
+      "kind": "text",
+      "text": "Use exact molecule IDs. Leave",
+      "line": 2556,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2556,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2645
+    },
+    {
+      "kind": "text",
+      "text": "[]",
+      "line": 2556,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2556,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2645
+    },
+    {
+      "kind": "text",
+      "text": "when the base/added stocks already define the recipe.",
+      "line": 2556,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2556,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2645
+    },
+    {
+      "kind": "text",
+      "text": "Ingredient edits are position-matched arrays.",
+      "line": 2559,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2559,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2648
+    },
+    {
+      "kind": "text",
+      "text": "The first value in each edit array applies to the first ingredient, the second value to the second ingredient, and so on. Use either weight edits or count edits to define the amount. Runtime recipe generation uses weight first if both are present.",
+      "line": 2561,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2561,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2650
+    },
+    {
+      "kind": "text",
+      "text": "Infinity",
+      "line": 2565,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2565,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2654
+    },
+    {
+      "kind": "text",
+      "text": "means unconstrained availability.",
+      "line": 2565,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2565,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2654
+    },
+    {
+      "kind": "text",
+      "text": "-Infinity",
+      "line": 2566,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2566,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2655
+    },
+    {
+      "kind": "text",
+      "text": "forces the ingredient concentration to zero.",
+      "line": 2566,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2566,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2655
+    },
+    {
+      "kind": "text",
+      "text": "Volume edits change the final mixed volume and dilute the resulting medium.",
+      "line": 2567,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2567,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2656
+    },
+    {
+      "kind": "text",
+      "text": "Check ingredient edits before publishing",
+      "line": 2571,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2571,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2660
+    },
+    {
+      "kind": "label",
+      "text": "Ingredient weight edits (g)",
+      "line": 2582,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2582,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2671
+    },
+    {
+      "kind": "tooltip",
+      "text": "Model-style bracketed list aligned with Ingredients. Use numbers, Infinity, or -Infinity.",
+      "line": 2583,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2583,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2672
+    },
+    {
+      "kind": "text",
+      "text": "Valid examples:",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "text",
+      "text": "[]",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "text",
+      "text": ",",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "text",
+      "text": "[Infinity]",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "text",
+      "text": ",",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "text",
+      "text": "[-Infinity]",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "text",
+      "text": ", or",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "text",
+      "text": "[0.01]",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "text",
+      "text": ". Finite gram values require formula-weight metadata.",
+      "line": 2592,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2592,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2681
+    },
+    {
+      "kind": "label",
+      "text": "Ingredient count edits (mmol)",
+      "line": 2598,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2598,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2687
+    },
+    {
+      "kind": "tooltip",
+      "text": "Model-style bracketed list aligned with Ingredients. Use this for mmol additions/removals when weight is not appropriate.",
+      "line": 2599,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2599,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2688
+    },
+    {
+      "kind": "text",
+      "text": "Valid examples:",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "text",
+      "text": "[]",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "text",
+      "text": ",",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "text",
+      "text": "[Infinity]",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "text",
+      "text": ",",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "text",
+      "text": "[-Infinity]",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "text",
+      "text": ", or",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "text",
+      "text": "[0.2]",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "text",
+      "text": ". Use this when adding a finite amount in mmol or when formula weight is unknown.",
+      "line": 2608,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2608,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2697
+    },
+    {
+      "kind": "label",
+      "text": "Ingredient volume edits (L)",
+      "line": 2614,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2614,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2703
+    },
+    {
+      "kind": "tooltip",
+      "text": "Model-style bracketed list aligned with Ingredients. Use [] for zero added volume, or one volume value per ingredient.",
+      "line": 2615,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2615,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2704
+    },
+    {
+      "kind": "text",
+      "text": "Usually",
+      "line": 2624,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2624,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2713
+    },
+    {
+      "kind": "text",
+      "text": "[]",
+      "line": 2624,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2624,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2713
+    },
+    {
+      "kind": "text",
+      "text": ", which the model treats as zero added volume for each ingredient. Use values such as",
+      "line": 2624,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2624,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2713
+    },
+    {
+      "kind": "text",
+      "text": "[0.025]",
+      "line": 2625,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2625,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2714
+    },
+    {
+      "kind": "text",
+      "text": "only when the ingredient addition has a real liquid volume.",
+      "line": 2625,
+      "owner": "renderMediaRecipeSection",
+      "checkpointOwner": "renderMediaRecipeSection",
+      "checkpointLine": 2625,
+      "workbenchOwner": "renderMediaRecipeSection",
+      "workbenchLine": 2714
+    },
+    {
+      "kind": "title",
+      "text": "3. What biological growth condition should this recipe represent?",
+      "line": 2640,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2640,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2729
+    },
+    {
+      "kind": "text",
+      "text": "Compatible growth conditions",
+      "line": 2652,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2652,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2741
+    },
+    {
+      "kind": "text",
+      "text": "Existing growth conditions are filtered so their nutrients field matches the current media recipe.",
+      "line": 2663,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2663,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2752
+    },
+    {
+      "kind": "text",
+      "text": "Growth condition summary",
+      "line": 2668,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2668,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2757
+    },
+    {
+      "kind": "text",
+      "text": "Fork &amp; edit",
+      "line": 2675,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2675,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2764
+    },
+    {
+      "kind": "text",
+      "text": "Nutrients",
+      "line": 2680,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2680,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2769
+    },
+    {
+      "kind": "text",
+      "text": "Genotype perturbations",
+      "line": 2681,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2681,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2770
+    },
+    {
+      "kind": "text",
+      "text": "Active TFs",
+      "line": 2682,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2682,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2771
+    },
+    {
+      "kind": "text",
+      "text": "No compatible growth condition is available for the current media recipe.",
+      "line": 2685,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2685,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2774
+    },
+    {
+      "kind": "text",
+      "text": "Create a growth condition only when you can justify the biological metadata.",
+      "line": 2692,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2692,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2780
+    },
+    {
+      "kind": "text",
+      "text": "The doubling time and TF lists are prior reconstruction metadata, not outputs calculated by this form. If they are unknown, reuse or fork the closest existing condition and edit only what is defensible.",
+      "line": 2693,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2693,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2781
+    },
+    {
+      "kind": "label",
+      "text": "Growth condition name",
+      "line": 2698,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2698,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2786
+    },
+    {
+      "kind": "tooltip",
+      "text": "Use lowercase snake_case, for example acetate, with_aa, or my_condition.",
+      "line": 2699,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2699,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2787
+    },
+    {
+      "kind": "text",
+      "text": "This name appears in experiment condition dropdowns after publish.",
+      "line": 2707,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2707,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2795
+    },
+    {
+      "kind": "label",
+      "text": "Nutrients / recipe ID",
+      "line": 2711,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2711,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2799
+    },
+    {
+      "kind": "tooltip",
+      "text": "This should match the media recipe ID used by the growth condition, usually the recipe selected above.",
+      "line": 2712,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2712,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2800
+    },
+    {
+      "kind": "text",
+      "text": "This should be the media recipe whose biological context you are defining.",
+      "line": 2723,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2723,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2811
+    },
+    {
+      "kind": "label",
+      "text": "Doubling time (min)",
+      "line": 2727,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2727,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2815
+    },
+    {
+      "kind": "tooltip",
+      "text": "Measured or literature-supported expected doubling time in minutes. This is catalog metadata, not inferred by the builder.",
+      "line": 2728,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2728,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2816
+    },
+    {
+      "kind": "text",
+      "text": "Use a measured or literature-supported value. For basal minimal glucose, the catalog uses",
+      "line": 2736,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2736,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2824
+    },
+    {
+      "kind": "text",
+      "text": "44.0",
+      "line": 2736,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2736,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2824
+    },
+    {
+      "kind": "text",
+      "text": "min.",
+      "line": 2736,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2736,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2824
+    },
+    {
+      "kind": "label",
+      "text": "Genotype perturbations",
+      "line": 2740,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2740,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2828
+    },
+    {
+      "kind": "text",
+      "text": "Choose a known state ID...",
+      "line": 2750,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2750,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2838
+    },
+    {
+      "kind": "text",
+      "text": "Force to 0",
+      "line": 2761,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2761,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2849
+    },
+    {
+      "kind": "text",
+      "text": "means no genotype perturbation. Example:",
+      "line": 2771,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2771,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2859
+    },
+    {
+      "kind": "text",
+      "text": "forces that RNA state to zero.",
+      "line": 2771,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2771,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2859
+    },
+    {
+      "kind": "label",
+      "text": "Active TF complexes",
+      "line": 2775,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2775,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2863
+    },
+    {
+      "kind": "text",
+      "text": "Choose TF complex...",
+      "line": 2784,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2784,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2872
+    },
+    {
+      "kind": "text",
+      "text": "Add",
+      "line": 2795,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2795,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2883
+    },
+    {
+      "kind": "text",
+      "text": "x",
+      "line": 2807,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2807,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2895
+    },
+    {
+      "kind": "text",
+      "text": "List only TF complexes that this condition turns on relative to basal. Use",
+      "line": 2818,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2818,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2906
+    },
+    {
+      "kind": "text",
+      "text": "[]",
+      "line": 2818,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2818,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2906
+    },
+    {
+      "kind": "text",
+      "text": "for none.",
+      "line": 2818,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2818,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2906
+    },
+    {
+      "kind": "label",
+      "text": "Inactive TF complexes",
+      "line": 2822,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2822,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2910
+    },
+    {
+      "kind": "text",
+      "text": "Choose TF complex...",
+      "line": 2831,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2831,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2919
+    },
+    {
+      "kind": "text",
+      "text": "Add",
+      "line": 2842,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2842,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2930
+    },
+    {
+      "kind": "text",
+      "text": "x",
+      "line": 2854,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2854,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2942
+    },
+    {
+      "kind": "text",
+      "text": "List only TF complexes that this condition turns off relative to basal. Use",
+      "line": 2865,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2865,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2953
+    },
+    {
+      "kind": "text",
+      "text": "[]",
+      "line": 2865,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2865,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2953
+    },
+    {
+      "kind": "text",
+      "text": "for none.",
+      "line": 2865,
+      "owner": "renderConditionSection",
+      "checkpointOwner": "renderConditionSection",
+      "checkpointLine": 2865,
+      "workbenchOwner": "renderConditionSection",
+      "workbenchLine": 2953
+    },
+    {
+      "kind": "title",
+      "text": "4. Which TF state rules belong to this recipe?",
+      "line": 2879,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2879,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 2967
+    },
+    {
+      "kind": "text",
+      "text": "Existing TF rules are filtered so either active nutrients or inactive nutrients matches the current media recipe.",
+      "line": 2891,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2891,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 2979
+    },
+    {
+      "kind": "text",
+      "text": "active nutrients=",
+      "line": 2920,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2920,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3008
+    },
+    {
+      "kind": "text",
+      "text": "· inactive nutrients=",
+      "line": 2920,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2920,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3008
+    },
+    {
+      "kind": "text",
+      "text": "active genotype=",
+      "line": 2924,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2924,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3012
+    },
+    {
+      "kind": "text",
+      "text": "· inactive genotype=",
+      "line": 2924,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2924,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3012
+    },
+    {
+      "kind": "text",
+      "text": "No existing TF state rules match the current media recipe yet.",
+      "line": 2933,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2933,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3021
+    },
+    {
+      "kind": "text",
+      "text": "Create TF state rules only for reconstruction-level regulatory states you can justify.",
+      "line": 2941,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2941,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3028
+    },
+    {
+      "kind": "text",
+      "text": "These rows do not simulate a free-form TF knockout. They define when a TF complex is considered active or inactive under nutrient and optional genotype contexts.",
+      "line": 2942,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2942,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3029
+    },
+    {
+      "kind": "text",
+      "text": "Draft TF state rules",
+      "line": 2946,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2946,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3033
+    },
+    {
+      "kind": "text",
+      "text": "These rows encode nutrient-dependent active and inactive TF states used by the reconstruction.",
+      "line": 2947,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2947,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3034
+    },
+    {
+      "kind": "text",
+      "text": "Add row",
+      "line": 2954,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2954,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3041
+    },
+    {
+      "kind": "label",
+      "text": "TF gene symbol",
+      "line": 2963,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2963,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3050
+    },
+    {
+      "kind": "tooltip",
+      "text": "Short transcription-factor gene symbol, for example crp, fnr, or arcA.",
+      "line": 2964,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2964,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3051
+    },
+    {
+      "kind": "text",
+      "text": "Choose TF gene...",
+      "line": 2971,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2971,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3058
+    },
+    {
+      "kind": "text",
+      "text": "- current draft value",
+      "line": 2973,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2973,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3060
+    },
+    {
+      "kind": "text",
+      "text": "Use a TF gene already present in the reconstruction rules.",
+      "line": 2979,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2979,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3066
+    },
+    {
+      "kind": "label",
+      "text": "Active TF complex",
+      "line": 2983,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2983,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3070
+    },
+    {
+      "kind": "tooltip",
+      "text": "Model complex or monomer ID for the active regulatory form.",
+      "line": 2984,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2984,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3071
+    },
+    {
+      "kind": "text",
+      "text": "Choose active TF complex...",
+      "line": 2991,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2991,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3078
+    },
+    {
+      "kind": "text",
+      "text": "- current draft value",
+      "line": 2993,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2993,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3080
+    },
+    {
+      "kind": "text",
+      "text": "Use a model complex or monomer ID already present in TF state rules.",
+      "line": 2999,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 2999,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3086
+    },
+    {
+      "kind": "label",
+      "text": "Active nutrient recipe",
+      "line": 3003,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3003,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3090
+    },
+    {
+      "kind": "tooltip",
+      "text": "Recipe context where this TF complex is considered active.",
+      "line": 3004,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3004,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3091
+    },
+    {
+      "kind": "text",
+      "text": "The media recipe under which the active state applies.",
+      "line": 3015,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3015,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3102
+    },
+    {
+      "kind": "label",
+      "text": "Inactive nutrient recipe",
+      "line": 3019,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3019,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3106
+    },
+    {
+      "kind": "tooltip",
+      "text": "Contrasting recipe context where this TF complex is considered inactive.",
+      "line": 3020,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3020,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3107
+    },
+    {
+      "kind": "text",
+      "text": "The comparison recipe where the same TF rule is inactive.",
+      "line": 3031,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3031,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3118
+    },
+    {
+      "kind": "label",
+      "text": "Active genotype context",
+      "line": 3035,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3035,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3122
+    },
+    {
+      "kind": "text",
+      "text": "Add known state ID forced to 0...",
+      "line": 3049,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3049,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3136
+    },
+    {
+      "kind": "placeholder",
+      "text": "{}",
+      "line": 3059,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3059,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3146
+    },
+    {
+      "kind": "text",
+      "text": "means no genotype constraint for the active state.",
+      "line": 3062,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3062,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3149
+    },
+    {
+      "kind": "label",
+      "text": "Inactive genotype context",
+      "line": 3066,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3066,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3153
+    },
+    {
+      "kind": "text",
+      "text": "Add known state ID forced to 0...",
+      "line": 3080,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3080,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3167
+    },
+    {
+      "kind": "placeholder",
+      "text": "{}",
+      "line": 3090,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3090,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3177
+    },
+    {
+      "kind": "text",
+      "text": "Example:",
+      "line": 3093,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3093,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3180
+    },
+    {
+      "kind": "text",
+      "text": "means the inactive state depends on that RNA being forced to zero.",
+      "line": 3093,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3093,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3180
+    },
+    {
+      "kind": "label",
+      "text": "TF rule class",
+      "line": 3099,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3099,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3186
+    },
+    {
+      "kind": "tooltip",
+      "text": "0CS = no sensor chemistry; 1CS = one-component sensor; 2CS = two-component phosphorelay.",
+      "line": 3100,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3100,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3187
+    },
+    {
+      "kind": "text",
+      "text": "- current draft value",
+      "line": 3108,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3108,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3195
+    },
+    {
+      "kind": "text",
+      "text": "0CS - no sensor chemistry",
+      "line": 3110,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3110,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3197
+    },
+    {
+      "kind": "text",
+      "text": "1CS - one-component sensor",
+      "line": 3111,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3111,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3198
+    },
+    {
+      "kind": "text",
+      "text": "2CS - two-component phosphorelay",
+      "line": 3112,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3112,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3199
+    },
+    {
+      "kind": "text",
+      "text": "Use the class that matches the TF mechanism encoded by the reconstruction.",
+      "line": 3114,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3114,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3201
+    },
+    {
+      "kind": "text",
+      "text": "Remove",
+      "line": 3121,
+      "owner": "renderTfConditionSection",
+      "checkpointOwner": "renderTfConditionSection",
+      "checkpointLine": 3121,
+      "workbenchOwner": "renderTfConditionSection",
+      "workbenchLine": 3208
+    },
+    {
+      "kind": "title",
+      "text": "5. Does the environment stay constant or shift over time?",
+      "line": 3141,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3141,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3228
+    },
+    {
+      "kind": "text",
+      "text": "Compatible protocols",
+      "line": 3153,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3153,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3240
+    },
+    {
+      "kind": "label",
+      "text": "Starts with selected recipe",
+      "line": 3162,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3162,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3249
+    },
+    {
+      "kind": "label",
+      "text": "Shifts into or otherwise involves selected recipe",
+      "line": 3169,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3169,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3256
+    },
+    {
+      "kind": "text",
+      "text": "Protocols are grouped by whether they start with the current recipe or shift into it later.",
+      "line": 3183,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3183,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3270
+    },
+    {
+      "kind": "text",
+      "text": "Protocol summary",
+      "line": 3187,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3187,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3274
+    },
+    {
+      "kind": "label",
+      "text": "Protocol ID",
+      "line": 3207,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3207,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3294
+    },
+    {
+      "kind": "tooltip",
+      "text": "Protocol IDs usually start with a numeric prefix and then a short snake_case name, for example 000028_add_aa_long.",
+      "line": 3208,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3208,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3295
+    },
+    {
+      "kind": "label",
+      "text": "Protocol view range (hr)",
+      "line": 3219,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3219,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3306
+    },
+    {
+      "kind": "tooltip",
+      "text": "Controls the editable timeline horizon shown in this composer. The published catalog row stores event times in seconds, but users should set the range in hours.",
+      "line": 3220,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3220,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3307
+    },
+    {
+      "kind": "text",
+      "text": "This is only the composer horizon. It is not the simulation division timeout from Design Experiment.",
+      "line": 3230,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3230,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3317
+    },
+    {
+      "kind": "text",
+      "text": "Recommended first event",
+      "line": 3235,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3235,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3322
+    },
+    {
+      "kind": "text",
+      "text": "0 min:",
+      "line": 3236,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3236,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3323
+    },
+    {
+      "kind": "text",
+      "text": "encoded as",
+      "line": 3237,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3237,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3324
+    },
+    {
+      "kind": "text",
+      "text": "Reset composer",
+      "line": 3243,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3243,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3330
+    },
+    {
+      "kind": "text",
+      "text": "Current protocol",
+      "line": 3262,
+      "owner": "renderTimelineSection",
+      "checkpointOwner": "renderTimelineSection",
+      "checkpointLine": 3262,
+      "workbenchOwner": "renderTimelineSection",
+      "workbenchLine": 3349
+    },
+    {
+      "kind": "text",
+      "text": "Simulate",
+      "line": 3281,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3281,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3376
+    },
+    {
+      "kind": "text",
+      "text": "Conditions Builder",
+      "line": 3282,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3282,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3377
+    },
+    {
+      "kind": "text",
+      "text": "Build reusable experiment environments by answering five connected questions: starting stock, named media recipe, growth condition, TF state rules, and media protocol. Published records appear as selectable options when designing simulations.",
+      "line": 3284,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3284,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3381
+    },
+    {
+      "kind": "text",
+      "text": "Open experiments",
+      "line": 3293,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3293,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3389
+    },
+    {
+      "kind": "text",
+      "text": "drafts saved in backend",
+      "line": 3296,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3296,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3393
+    },
+    {
+      "kind": "text",
+      "text": "Publish review",
+      "line": 3323,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3323,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3420
+    },
+    {
+      "kind": "text",
+      "text": "Review the reconstruction rows that will be written for draft",
+      "line": 3327,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3327,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3424
+    },
+    {
+      "kind": "text",
+      "text": ".",
+      "line": 3327,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3327,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3424
+    },
+    {
+      "kind": "text",
+      "text": "Cancel",
+      "line": 3337,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3337,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3434
+    },
+    {
+      "kind": "text",
+      "text": "Warnings",
+      "line": 3351,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3351,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3448
+    },
+    {
+      "kind": "text",
+      "text": "row",
+      "line": 3367,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3367,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3464
+    },
+    {
+      "kind": "text",
+      "text": "staged for publish",
+      "line": 3367,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3367,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3464
+    },
+    {
+      "kind": "text",
+      "text": "Cancel",
+      "line": 3397,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3397,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3494
+    },
+    {
+      "kind": "text",
+      "text": "Five-question dependency map",
+      "line": 3421,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3421,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3516
+    },
+    {
+      "kind": "text",
+      "text": "Move from raw medium to experiment-ready environment. Use the exchange registry only when you need a new molecule ID.",
+      "line": 3422,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3422,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3517
+    },
+    {
+      "kind": "text",
+      "text": "How to read this flow",
+      "line": 3456,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3456,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3546
+    },
+    {
+      "kind": "text",
+      "text": "Key handoff: recipe ID to growth-condition nutrients to TF nutrient fields to protocol start.",
+      "line": 3458,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3458,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3548
+    },
+    {
+      "kind": "text",
+      "text": "Open section",
+      "line": 3485,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3485,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3577
+    },
+    {
+      "kind": "text",
+      "text": "Needs:",
+      "line": 3492,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3492,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3584
+    },
+    {
+      "kind": "text",
+      "text": "Creates:",
+      "line": 3493,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3493,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3585
+    },
+    {
+      "kind": "text",
+      "text": "Next:",
+      "line": 3494,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3494,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3586
+    },
+    {
+      "kind": "text",
+      "text": "Open section",
+      "line": 3522,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3522,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3614
+    },
+    {
+      "kind": "text",
+      "text": "Use:",
+      "line": 3529,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3529,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3621
+    },
+    {
+      "kind": "text",
+      "text": "Creates:",
+      "line": 3530,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3530,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3622
+    },
+    {
+      "kind": "text",
+      "text": "Next:",
+      "line": 3531,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3531,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3623
+    },
+    {
+      "kind": "text",
+      "text": "Catalog status",
+      "line": 3561,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3561,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3658
+    },
+    {
+      "kind": "text",
+      "text": "Collapsed by default, with current data availability across the condition catalog.",
+      "line": 3562,
+      "owner": "EnvironmentBuilderPage",
+      "checkpointOwner": "EnvironmentBuilderPage",
+      "checkpointLine": 3562,
+      "workbenchOwner": "EnvironmentBuilderPage",
+      "workbenchLine": 3659
+    }
+  ]
+}
