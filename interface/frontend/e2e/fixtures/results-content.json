@@ -1,0 +1,405 @@
+{
+  "checkpoint": "1694d7b7d",
+  "entries": [
+    {
+      "text": "%",
+      "count": 1
+    },
+    {
+      "text": "experiment #",
+      "count": 1
+    },
+    {
+      "text": "Variant index",
+      "count": 1
+    },
+    {
+      "text": "Batch",
+      "count": 1
+    },
+    {
+      "text": "Gene:",
+      "count": 2
+    },
+    {
+      "text": "seed",
+      "count": 1
+    },
+    {
+      "text": "Latest job",
+      "count": 1
+    },
+    {
+      "text": "#",
+      "count": 2
+    },
+    {
+      "text": "Protocol",
+      "count": 1
+    },
+    {
+      "text": "Open result",
+      "count": 2
+    },
+    {
+      "text": "More actions",
+      "count": 2
+    },
+    {
+      "text": "More experiment actions",
+      "count": 2
+    },
+    {
+      "text": "...",
+      "count": 3
+    },
+    {
+      "text": "Delete experiment",
+      "count": 4
+    },
+    {
+      "text": "Division rate",
+      "count": 1
+    },
+    {
+      "text": "Division time",
+      "count": 3
+    },
+    {
+      "text": "Final mass",
+      "count": 3
+    },
+    {
+      "text": "Growth rate",
+      "count": 3
+    },
+    {
+      "text": "Doubling time",
+      "count": 2
+    },
+    {
+      "text": "Division:",
+      "count": 1
+    },
+    {
+      "text": "Mass:",
+      "count": 1
+    },
+    {
+      "text": "Growth:",
+      "count": 1
+    },
+    {
+      "text": "Doubling:",
+      "count": 1
+    },
+    {
+      "text": "vs wildtype:",
+      "count": 1
+    },
+    {
+      "text": "Seed",
+      "count": 3
+    },
+    {
+      "text": "Status",
+      "count": 3
+    },
+    {
+      "text": "Doubling",
+      "count": 1
+    },
+    {
+      "text": "View",
+      "count": 1
+    },
+    {
+      "text": "Results",
+      "count": 1
+    },
+    {
+      "text": "Compare experiments",
+      "count": 1
+    },
+    {
+      "text": "Experiment outcomes",
+      "count": 1
+    },
+    {
+      "text": "Batches",
+      "count": 1
+    },
+    {
+      "text": "Job diagnostics",
+      "count": 2
+    },
+    {
+      "text": "Experiments",
+      "count": 1
+    },
+    {
+      "text": "Completed jobs",
+      "count": 1
+    },
+    {
+      "text": "Active",
+      "count": 1
+    },
+    {
+      "text": "Failed",
+      "count": 1
+    },
+    {
+      "text": "Filter by seed",
+      "count": 1
+    },
+    {
+      "text": "All seeds",
+      "count": 1
+    },
+    {
+      "text": "Filter by timeline",
+      "count": 1
+    },
+    {
+      "text": "All protocols",
+      "count": 1
+    },
+    {
+      "text": "Filter by experiment type",
+      "count": 1
+    },
+    {
+      "text": "All types",
+      "count": 1
+    },
+    {
+      "text": "Filter by job status",
+      "count": 1
+    },
+    {
+      "text": "All statuses",
+      "count": 1
+    },
+    {
+      "text": "Filter by date",
+      "count": 1
+    },
+    {
+      "text": "Any date",
+      "count": 1
+    },
+    {
+      "text": "Today",
+      "count": 1
+    },
+    {
+      "text": "Last 7 days",
+      "count": 1
+    },
+    {
+      "text": "Last 30 days",
+      "count": 1
+    },
+    {
+      "text": "Custom",
+      "count": 1
+    },
+    {
+      "text": "Custom result date",
+      "count": 1
+    },
+    {
+      "text": "Clear filters",
+      "count": 3
+    },
+    {
+      "text": "Loading results...",
+      "count": 1
+    },
+    {
+      "text": "No simulation jobs yet",
+      "count": 1
+    },
+    {
+      "text": "Run a simulation from the Experiments page to see results here.",
+      "count": 1
+    },
+    {
+      "text": "Go to Experiments",
+      "count": 1
+    },
+    {
+      "text": "No matching experiments",
+      "count": 1
+    },
+    {
+      "text": "Adjust target, seed, protocol, type, status, or date filters.",
+      "count": 1
+    },
+    {
+      "text": "No matching jobs",
+      "count": 1
+    },
+    {
+      "text": "Adjust job search, seed, protocol, type, status, or date filters.",
+      "count": 1
+    },
+    {
+      "text": "Raw execution records for checking provenance, failures, and runtime state.",
+      "count": 1
+    },
+    {
+      "text": "Job",
+      "count": 1
+    },
+    {
+      "text": "Experiment",
+      "count": 1
+    },
+    {
+      "text": "Type",
+      "count": 1
+    },
+    {
+      "text": "Gen",
+      "count": 1
+    },
+    {
+      "text": "Started",
+      "count": 1
+    },
+    {
+      "text": "Duration",
+      "count": 1
+    },
+    {
+      "text": "Error",
+      "count": 1
+    },
+    {
+      "text": "Loading batches...",
+      "count": 1
+    },
+    {
+      "text": "No batches yet",
+      "count": 1
+    },
+    {
+      "text": "Create a batch of typed experiments to get started.",
+      "count": 1
+    },
+    {
+      "text": "+ Create your first batch",
+      "count": 1
+    },
+    {
+      "text": "Find a batch",
+      "count": 1
+    },
+    {
+      "text": "No matching batches",
+      "count": 1
+    },
+    {
+      "text": "Adjust batch, gene, condition, protocol, or type search.",
+      "count": 1
+    },
+    {
+      "text": "Delete batch",
+      "count": 2
+    },
+    {
+      "text": "▶",
+      "count": 1
+    },
+    {
+      "text": "Running",
+      "count": 1
+    },
+    {
+      "text": "Complete",
+      "count": 1
+    },
+    {
+      "text": "Stopped",
+      "count": 1
+    },
+    {
+      "text": "·",
+      "count": 3
+    },
+    {
+      "text": "experiment",
+      "count": 1
+    },
+    {
+      "text": "Compare",
+      "count": 1
+    },
+    {
+      "text": "Submitting...",
+      "count": 1
+    },
+    {
+      "text": "More batch actions",
+      "count": 2
+    },
+    {
+      "text": "done",
+      "count": 1
+    },
+    {
+      "text": "failed",
+      "count": 1
+    },
+    {
+      "text": "cancelled",
+      "count": 1
+    },
+    {
+      "text": "running",
+      "count": 1
+    },
+    {
+      "text": "queued",
+      "count": 1
+    },
+    {
+      "text": "draft",
+      "count": 1
+    },
+    {
+      "text": "Finished",
+      "count": 1
+    },
+    {
+      "text": "of",
+      "count": 1
+    },
+    {
+      "text": "Batch details unavailable. Use Retry above.",
+      "count": 1
+    },
+    {
+      "text": "Loading experiments...",
+      "count": 1
+    },
+    {
+      "text": "Gene",
+      "count": 1
+    },
+    {
+      "text": "Condition",
+      "count": 1
+    },
+    {
+      "text": "Created",
+      "count": 1
+    },
+    {
+      "text": "Open",
+      "count": 1
+    }
+  ]
+}

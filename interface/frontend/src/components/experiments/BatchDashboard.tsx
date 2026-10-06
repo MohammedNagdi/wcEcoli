@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { cancelBatch, deleteBatch, deleteExperiment, getBatches, getBatchDetail, resumeBatch, runBatch } from '../../api/client'
 import { statusLabel, variantLabel } from '../../utils/labels'
+import { ResultsActionPopup, ResultsChevron } from '../results/ResultsPresentation'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import '../../styles/experiments.css'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
@@ -47,7 +48,8 @@ function summarizeExperiment(exp: Experiment) {
   }
 }
 
-export function BatchDashboard({ initialExpandedId, active = true, selectedExperiment: externalSelection = null, selectedExperimentDetailSnapshot: externalSnapshot = null, onOpenExperiment: externalOpen, onDeletedExperiment: externalDelete, onExpandedChange, onAssistantSnapshot }: {
+export function BatchDashboard({ presentation = 'default', initialExpandedId, active = true, selectedExperiment: externalSelection = null, selectedExperimentDetailSnapshot: externalSnapshot = null, onOpenExperiment: externalOpen, onDeletedExperiment: externalDelete, onExpandedChange, onAssistantSnapshot }: {
+  presentation?: 'default' | 'results'
   initialExpandedId?: string
   active?: boolean
   selectedExperiment?: Experiment | null
@@ -346,6 +348,7 @@ export function BatchDashboard({ initialExpandedId, active = true, selectedExper
         <BatchCard
           key={batch.batch_id}
           batch={batch}
+          presentation={presentation}
           onRun={handleRun}
           onCancel={handleCancel}
           onResume={handleResume}
@@ -395,6 +398,7 @@ export function BatchDashboard({ initialExpandedId, active = true, selectedExper
 
 function BatchCard({
   batch,
+  presentation,
   onRun,
   onCancel,
   onResume,
@@ -412,6 +416,7 @@ function BatchCard({
   selectedId,
 }: {
   batch: BatchSummary
+  presentation: 'default' | 'results'
   onRun: (id: string) => void
   onCancel: (id: string) => void
   onResume: (id: string) => void
@@ -428,6 +433,7 @@ function BatchCard({
   selectedId: number | null
   detail: BatchDetail | null
 }) {
+  const Heading = presentation === 'results' ? 'h2' : 'h3'
   const { total, done, failed, running, queued, draft, cancelled } = batch
 
 
@@ -436,6 +442,8 @@ function BatchCard({
   const hasDraft = draft > 0
   const hasStopped = cancelled > 0
   const actionBusy = isRunning || isCancelling || isResuming || isDeleting
+  const batchMenuRef = useRef<HTMLDivElement>(null)
+  const experimentMenuRef = useRef<HTMLDivElement>(null)
   const [ascending, setAscending] = useState(false)
   const [batchMenuOpen, setBatchMenuOpen] = useState(false)
   const [openExperimentMenuId, setOpenExperimentMenuId] = useState<number | null>(null)
@@ -444,7 +452,7 @@ function BatchCard({
   const conditionSummary = batch.conditions.length > 0 ? batch.conditions.join(', ') : 'No condition'
 
   useEffect(() => {
-    if (openExperimentMenuId == null && !batchMenuOpen) return
+    if (presentation === 'results' || (openExperimentMenuId == null && !batchMenuOpen)) return
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as HTMLElement
       if (!target.closest('[data-batch-card-menu]')) setBatchMenuOpen(false)
@@ -452,7 +460,7 @@ function BatchCard({
     }
     document.addEventListener('mousedown', handlePointerDown)
     return () => document.removeEventListener('mousedown', handlePointerDown)
-  }, [batchMenuOpen, openExperimentMenuId])
+  }, [batchMenuOpen, openExperimentMenuId, presentation])
 
   const formatDate = (iso: string) => {
     if (!iso) return '-'
@@ -463,7 +471,7 @@ function BatchCard({
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+    <div className={`bg-white border border-gray-200 rounded-lg overflow-hidden ${presentation === 'results' ? 'results-batch-card' : ''}`}>
       {/* Header: clickable to expand */}
       <div
         className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
@@ -472,10 +480,8 @@ function BatchCard({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className={`text-gray-400 text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
-                ▶
-              </span>
-              <h3 className="font-medium text-gray-900"><button aria-expanded={isExpanded} className="text-left" onClick={(event) => { event.stopPropagation(); onToggleExpand(batch.batch_id) }}>{batch.name}</button></h3>
+              {presentation === 'results' ? <ResultsChevron expanded={isExpanded} /> : <span className={`text-gray-400 text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>▶</span>}
+              <Heading className="font-medium text-gray-900"><button aria-expanded={isExpanded} aria-controls={presentation === 'results' ? `results-batch-detail-${batch.batch_id}` : undefined} className="text-left" onClick={(event) => { event.stopPropagation(); onToggleExpand(batch.batch_id) }}>{batch.name}</button></Heading>
               {isActive && (
                 <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-500 " />
@@ -553,7 +559,7 @@ function BatchCard({
                 {isResuming ? 'Resuming...' : `Resume (${cancelled})`}
               </button>
             )}
-            <div className="relative" data-batch-card-menu>
+            <div className="relative" ref={batchMenuRef} data-batch-card-menu>
               <button
                 type="button"
                 onClick={() => setBatchMenuOpen((current) => !current)}
@@ -570,7 +576,7 @@ function BatchCard({
                 ...
               </button>
               {batchMenuOpen && (
-                <div className="absolute right-0 top-full z-20 mt-1 w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                <ResultsActionPopup enabled={presentation === 'results'} anchor={batchMenuRef} onClose={() => setBatchMenuOpen(false)} label={`Actions for ${batch.name}`} fallbackClassName="absolute right-0 top-full z-20 mt-1 w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                   <button
                     type="button"
                     onClick={() => {
@@ -581,7 +587,7 @@ function BatchCard({
                   >
                     Delete batch
                   </button>
-                </div>
+                </ResultsActionPopup>
               )}
             </div>
           </div>
@@ -665,15 +671,15 @@ function BatchCard({
       </div>
 
       {/* Expanded: experiment list */}
-      {isExpanded && (
-        <div className="border-t border-gray-200">
+      {(isExpanded || presentation === 'results') && (
+        <div id={`results-batch-detail-${batch.batch_id}`} hidden={!isExpanded} className="border-t border-gray-200">
           {detailError && !detail ? <p role="alert" className="p-4 text-sm text-red-700">Batch details unavailable. Use Retry above.</p> : !detail ? (
             <div className="text-center py-4 text-gray-400 text-sm">
               <div className="inline-block w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mr-1.5" />
               Loading experiments...
             </div>
           ) : (
-            <div className="max-h-[400px] overflow-y-auto">
+            <div className="max-h-[400px] overflow-y-auto" role={presentation === 'results' ? 'region' : undefined} aria-label={presentation === 'results' ? `Experiments in ${batch.name}` : undefined} tabIndex={presentation === 'results' ? 0 : undefined}>
               <table className="experiment-table">
                 <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
                   <tr>
@@ -681,7 +687,7 @@ function BatchCard({
                     <th className="text-left px-4 py-2 font-medium text-gray-500 w-28">Condition</th>
                     <th className="text-left px-4 py-2 font-medium text-gray-500 w-24">Status</th>
                     <th aria-sort={ascending ? 'ascending' : 'descending'} className="text-left px-4 py-2 font-medium text-gray-500 w-36"><button onClick={() => setAscending((value) => !value)}>Created {ascending ? '↑' : '↓'}</button></th>
-                    <th className="w-28"></th>
+                    <th className="w-28">{presentation === 'results' && <span className="sr-only">Actions</span>}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -718,7 +724,7 @@ function BatchCard({
                           >
                             Open
                           </button>
-                          <div className="relative" data-batch-experiment-menu>
+                          <div className="relative" ref={openExperimentMenuId === exp.id ? experimentMenuRef : undefined} data-batch-experiment-menu>
                             <button
                               type="button"
                               onClick={() => setOpenExperimentMenuId((current) => (current === exp.id ? null : exp.id))}
@@ -730,7 +736,7 @@ function BatchCard({
                               ...
                             </button>
                             {openExperimentMenuId === exp.id && (
-                              <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                              <ResultsActionPopup enabled={presentation === 'results'} anchor={experimentMenuRef} onClose={() => setOpenExperimentMenuId(null)} label={`Actions for ${exp.name}`} fallbackClassName="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -741,7 +747,7 @@ function BatchCard({
                                 >
                                   Delete experiment
                                 </button>
-                              </div>
+                              </ResultsActionPopup>
                             )}
                           </div>
                         </div>

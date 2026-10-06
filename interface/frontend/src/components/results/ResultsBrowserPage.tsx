@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useId } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getJobs, getExperiments, getExperimentResults, compareExperiments, deleteExperiment } from '../../api/client'
@@ -7,6 +7,8 @@ import { makeAssistantContextKey } from '../../utils/assistantContext'
 import { SearchInput } from '../common/SearchInput'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { BatchDashboard } from '../experiments/BatchDashboard'
+import { ResultsActionPopup, ResultsChevron, ResultsTabs } from './ResultsPresentation'
+import './results-browser.css'
 import type { SimulationJob, Experiment, ExperimentAggregation, ComparisonDelta } from '../../types'
 
 const JOB_STATUS_COLORS: Record<string, string> = {
@@ -252,6 +254,7 @@ function ExperimentCard({
   onDelete: (experiment: Experiment) => void
   onAssistantSnapshot?: (experimentId: number, snapshot: Record<string, unknown> | null) => void
 }) {
+  const seedRegionId = useId()
   const [agg, setAgg] = useState<ExperimentAggregation | null>(null)
   const [wtDelta, setWtDelta] = useState<ComparisonDelta | null>(null)
   const [expanded, setExpanded] = useState(false)
@@ -352,20 +355,12 @@ function ExperimentCard({
     }
   }, [exp.id, doneJobs.length, exp.variant_type])
 
-  useEffect(() => {
-    if (!menuOpen) return
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false)
-    }
-    document.addEventListener('mousedown', handlePointerDown)
-    return () => document.removeEventListener('mousedown', handlePointerDown)
-  }, [menuOpen])
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="px-5 py-4 flex items-start justify-between">
+    <article className="results-experiment-card bg-white rounded-lg border border-gray-200">
+      <div className="results-card-header px-5 py-4 flex items-start justify-between">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="results-card-identity flex items-center gap-2 mb-1">
             <h3 className="font-medium text-gray-900 truncate">{identity}</h3>
             {showExperimentId && (
               <span className="text-xs text-gray-400 font-mono">experiment #{exp.id}</span>
@@ -397,7 +392,7 @@ function ExperimentCard({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="results-card-actions flex items-center gap-2">
           {!hasMultipleSeeds && doneJobs.length === 1 && (
             <Link
               to={'/results/' + doneJobs[0].id}
@@ -408,11 +403,12 @@ function ExperimentCard({
           )}
           {hasMultipleSeeds && (
             <button
+              aria-expanded={expanded} aria-controls={seedRegionId}
               onClick={() => setExpanded(!expanded)}
               className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded transition-colors"
             >
               {expanded ? 'Hide seeds' : 'Show seeds'}
-              <span className="ml-1">{expanded ? '^' : 'v'}</span>
+              <ResultsChevron expanded={expanded} />
             </button>
           )}
           <div ref={menuRef} className="relative">
@@ -427,7 +423,7 @@ function ExperimentCard({
               ...
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+              <ResultsActionPopup anchor={menuRef} label={`Actions for ${identity}`} onClose={() => setMenuOpen(false)}>
                 <button
                   type="button"
                   onClick={() => {
@@ -438,7 +434,7 @@ function ExperimentCard({
                 >
                   Delete experiment
                 </button>
-              </div>
+              </ResultsActionPopup>
             )}
           </div>
         </div>
@@ -446,7 +442,7 @@ function ExperimentCard({
 
       {hasMultipleSeeds && agg && !loading && (
         <div className="px-5 pb-3 border-t border-gray-100 pt-3">
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="results-metrics grid gap-3">
             <div>
               <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-0.5">Division rate</p>
               <p className="text-sm font-semibold text-gray-800">{agg.division_rate}</p>
@@ -473,7 +469,7 @@ function ExperimentCard({
 
       {!hasMultipleSeeds && agg && agg.seeds.length === 1 && doneJobs.length > 0 && (
         <div className="px-5 pb-3 border-t border-gray-100 pt-3">
-          <div className="grid grid-cols-4 gap-3 text-xs">
+          <div className="results-metrics grid gap-3 text-xs">
             <div>
               <span className="text-gray-400">Division: </span>
               <span className="font-mono">{agg.seeds[0].division_time_sec != null ? (agg.seeds[0].division_time_sec / 60).toFixed(1) + ' min' : '-'}</span>
@@ -495,7 +491,7 @@ function ExperimentCard({
       )}
 
       {wtDelta && agg && (
-        <div className="px-5 pb-2 pt-2 border-t border-gray-100 flex items-center gap-4 text-xs">
+        <div className="results-deltas px-5 pb-2 pt-2 border-t border-gray-100 flex items-center gap-4 text-xs">
           <span className="text-gray-400 font-medium">vs wildtype:</span>
           <DeltaIndicator pct={wtDelta.division_time_pct} label="Division time" />
           <DeltaIndicator pct={wtDelta.final_mass_pct} label="Final mass" />
@@ -510,8 +506,8 @@ function ExperimentCard({
         </div>
       )}
 
-      {expanded && hasMultipleSeeds && (
-        <div className="border-t border-gray-200 overflow-x-auto">
+      {hasMultipleSeeds && (
+        <div id={seedRegionId} hidden={!expanded} role="region" aria-label={`Seeds for ${identity}`} tabIndex={0} className="results-seed-table border-t border-gray-200 overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-gray-50">
               <tr>
@@ -521,7 +517,7 @@ function ExperimentCard({
                 <th className="text-right px-4 py-2 font-medium text-gray-500">Final mass</th>
                 <th className="text-right px-4 py-2 font-medium text-gray-500">Growth rate</th>
                 <th className="text-right px-4 py-2 font-medium text-gray-500">Doubling</th>
-                <th className="w-24"></th>
+                <th className="w-24"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -555,12 +551,13 @@ function ExperimentCard({
           </table>
         </div>
       )}
-    </div>
+    </article>
   )
 }
 
 export function ResultsBrowserPage() {
   const location = useLocation()
+  const searchId = useId()
   const [searchParams, setSearchParams] = useSearchParams()
   const [jobs, setJobs] = useState<SimulationJob[]>([])
   const [experiments, setExperiments] = useState<Map<number, Experiment>>(new Map())
@@ -915,51 +912,21 @@ export function ResultsBrowserPage() {
   })
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="flex flex-col gap-4 mb-5 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Results</p>
-          <h1 className="text-xl font-semibold text-gray-900">{viewLabel(viewMode)}</h1>
-          <p className="mt-1 text-sm text-gray-500">{viewDescription(viewMode)}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to="/results/compare"
-            className="px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
-          >
-            Compare experiments
-          </Link>
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
-            <button
-              onClick={() => setView('experiments')}
-              className={'px-3 py-1.5 text-xs font-medium rounded-md transition-colors ' + (
-                viewMode === 'experiments' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              )}
-            >
-              Experiment outcomes
-            </button>
-            <button
-              onClick={() => setView('batches')}
-              className={'px-3 py-1.5 text-xs font-medium rounded-md transition-colors ' + (
-                viewMode === 'batches' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              )}
-            >
-              Batches
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('jobs')}
-              className={'px-3 py-1.5 text-xs font-medium rounded-md transition-colors ' + (
-                viewMode === 'jobs' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              )}
-            >
-              Job diagnostics
-            </button>
+    <div className="results-browser mx-auto">
+      <header className="results-header">
+        <div className="results-heading">
+          <span className="results-heading-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4v16h16M7 15l4-5 4 3 5-7" /></svg></span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Results</p>
+            <h1 className="text-xl font-semibold text-gray-900">{viewLabel(viewMode)}</h1>
+            <p className="mt-1 text-sm text-gray-500">{viewDescription(viewMode)}</p>
           </div>
         </div>
-      </div>
+        <Link to="/results/compare" className="results-compare px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors">Compare experiments</Link>
+      </header>
+      <ResultsTabs active={viewMode} onChange={setView} />
 
-      <div className="mb-5 flex flex-wrap gap-2">
+      <div className="results-coverage mb-5">
         <div className="rounded-full border border-gray-200 bg-white px-3 py-1.5">
           <span className="text-xs text-gray-400">Experiments</span>
           <span className="ml-2 text-sm font-semibold text-gray-700">{experimentGroups.size}</span>
@@ -978,6 +945,7 @@ export function ResultsBrowserPage() {
         </div>
       </div>
 
+      <div role="tabpanel" id="results-view-panel" aria-labelledby={`results-tab-${viewMode}`} tabIndex={0}>
       {deleteError && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
           {deleteError}
@@ -985,7 +953,7 @@ export function ResultsBrowserPage() {
       )}
 
       {viewMode !== 'batches' && jobs.length > 0 && (
-        <section className="mb-6 rounded-lg border border-gray-200 bg-white px-4 py-4">
+        <section className="results-filter-panel mb-6 rounded-lg border border-gray-200 bg-white px-4 py-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-semibold text-gray-900">
@@ -998,30 +966,41 @@ export function ResultsBrowserPage() {
               </p>
             </div>
           </div>
-          <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr),120px,170px,170px,150px,150px,150px]">
-            <SearchInput
+          <div className="results-filters">
+            <div className="results-search"><label htmlFor={searchId}>Search</label><SearchInput
+              id={searchId}
+              label="Search results"
               value={query}
               onChange={setQuery}
               placeholder={viewMode === 'jobs' ? 'Search job ID, target, protocol...' : 'Search gene, batch, condition...'}
-            />
+            /></div>
+            <label><span>Seed</span>
             <select value={seedFilter} onChange={(event) => setSeedFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by seed">
               <option value="all">All seeds</option>
               {seedOptions.map((seed) => <option key={seed} value={String(seed)}>Seed {seed}</option>)}
             </select>
+            </label>
+            <label><span>Media protocol</span>
             <select value={timelineFilter} onChange={(event) => setTimelineFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by timeline">
               <option value="all">All protocols</option>
               {timelineOptions.map((timeline) => (
                 <option key={timeline} value={timeline}>{timeline === NO_TIMELINE ? 'No time-varying protocol' : timeline}</option>
               ))}
             </select>
+            </label>
+            <label><span>Experiment type</span>
             <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by experiment type">
               <option value="all">All types</option>
               {typeOptions.map((type) => <option key={type} value={type}>{variantLabel(type)}</option>)}
             </select>
+            </label>
+            <label><span>Status</span>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by job status">
               <option value="all">All statuses</option>
               {statusOptions.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
             </select>
+            </label>
+            <label><span>Run date</span>
             <select value={datePreset} onChange={(event) => handleDatePresetChange(event.target.value as DatePreset)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Filter by date">
               <option value="any">Any date</option>
               <option value="today">Today</option>
@@ -1029,10 +1008,11 @@ export function ResultsBrowserPage() {
               <option value="30d">Last 30 days</option>
               <option value="custom">Custom</option>
             </select>
+            </label>
             {datePreset === 'custom' ? (
-              <input type="date" value={customDate} onChange={(event) => setCustomDate(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Custom result date" />
+              <label><span>Custom result date</span><input type="date" value={customDate} onChange={(event) => setCustomDate(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30" aria-label="Custom result date" /></label>
             ) : (
-              <div className="hidden lg:block" />
+              null
             )}
           </div>
           <div className="mt-3 flex items-center justify-between gap-3 text-xs text-gray-400">
@@ -1057,7 +1037,7 @@ export function ResultsBrowserPage() {
           Loading results...
         </div>
       ) : viewMode === 'batches' ? (
-        <BatchDashboard onAssistantSnapshot={setBatchAssistantSnapshot} />
+        <BatchDashboard presentation="results" onAssistantSnapshot={setBatchAssistantSnapshot} />
       ) : jobs.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-500 font-medium mb-1">No simulation jobs yet</p>
@@ -1111,11 +1091,12 @@ export function ResultsBrowserPage() {
               )}
             </div>
           ) : (
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="results-diagnostics-card bg-white rounded-lg border border-gray-200 overflow-hidden">
               <div className="border-b border-gray-100 px-4 py-3">
                 <h2 className="text-sm font-semibold text-gray-900">Job diagnostics</h2>
                 <p className="text-xs text-gray-400">Raw execution records for checking provenance, failures, and runtime state.</p>
               </div>
+              <div role="region" aria-label="Job diagnostics table" tabIndex={0} className="results-diagnostics-table">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
@@ -1127,7 +1108,7 @@ export function ResultsBrowserPage() {
                     <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-28">Status</th>
                     <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-36">Started</th>
                     <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-24">Duration</th>
-                    <th className="w-20"></th>
+                    <th className="w-20"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1177,6 +1158,7 @@ export function ResultsBrowserPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </>
@@ -1193,6 +1175,7 @@ export function ResultsBrowserPage() {
           if (deletingId == null) setDeleteTarget(null)
         }}
       />
+      </div>
     </div>
   )
 }

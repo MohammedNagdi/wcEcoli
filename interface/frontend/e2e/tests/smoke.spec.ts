@@ -887,7 +887,7 @@ test.describe('Assistant smoke', () => {
     })
     await page.keyboard.press('Escape')
 
-    await page.getByRole('button', { name: 'Job diagnostics' }).click()
+    await page.getByRole('tab', { name: 'Job diagnostics' }).click()
     await page.getByTestId('assistant-dock-toggle').click()
     requestPromise = page.waitForRequest('**/api/assistant/conversations/*/messages/stream')
     await page.getByTestId('assistant-input').fill('review jobs')
