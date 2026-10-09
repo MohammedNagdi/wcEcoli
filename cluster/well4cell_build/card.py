@@ -177,8 +177,12 @@ def _configs_table(summary: dict) -> list[str]:
         if info is None:
             rows.append("| `{}` | {} s | {} | not in this release | | |".format(name, config.stride, matrices))
             continue
+        trajectories = _n(info.get("trajectories"))
+        present = _present(summary, name)
+        if present and len(present) < len(FAMILIES):
+            trajectories += " ({} only)".format(", ".join(present))
         rows.append("| `{}` | {} s | {} | {} | {} | {} |".format(
-            name, config.stride, matrices, _n(info.get("trajectories")), _n(info.get("rows")), _bytes(info.get("bytes"))))
+            name, config.stride, matrices, trajectories, _n(info.get("rows")), _bytes(info.get("bytes"))))
     return rows
 
 
@@ -187,8 +191,89 @@ def _held_back(summary: dict) -> list[str]:
     if not held:
         return []
     return ["", "**Not yet in this repo:** {} {} been exported and will follow in a later upload; the "
-            "tables above and the index locators (`<config>_file`) cover only the data present here."
+            "tables below and the index locators (`<config>_file`) cover only the data present here."
             .format(", ".join("`data/{}/`".format(h) for h in held), "has" if len(held) == 1 else "have")]
+
+
+def _present(summary: dict, config: str) -> list[str]:
+    """Families of ``config`` on disk in this repo (held-back ones are already removed), tier order."""
+    families = summary.get("configs", {}).get(config, {}).get("families", {})
+    return [f for f in FAMILIES if f in families]
+
+
+def _codes(names) -> str:
+    """`a`, `a` and `b`, `a`, `b` and `c`."""
+    names = ["`{}`".format(n) for n in names]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _estimate_bytes(summary: dict, config: str) -> float | None:
+    """Size of an absent config: core's row count (every config has the same rows at 1 s; stride
+    10 keeps about a tenth) times the config's bytes_per_row. Only when core is complete."""
+    core = summary.get("configs", {}).get("core")
+    if not core or len(_present(summary, "core")) < len(FAMILIES) or not core.get("rows"):
+        return None
+    spec = CONFIGS[config]
+    return core["rows"] / spec.stride * spec.bytes_per_row
+
+
+def _coverage(summary: dict) -> list[str]:
+    configs = summary.get("configs", {})
+    held = set(summary.get("held_back") or [])
+    counts = summary.get("families", {})
+    rows = ["| family | trajectories | " + " | ".join("`{}`".format(c) for c in CONFIGS) + " |",
+            "|---|---:|" + "---|" * len(CONFIGS)]
+    for family in FAMILIES:
+        cells = []
+        for config in CONFIGS:
+            info = configs.get(config, {}).get("families", {}).get(family)
+            if info is not None:
+                cells.append("yes ({})".format(_bytes(info.get("bytes"))))
+            elif config in configs or "{}/{}".format(config, family) in held:
+                cells.append("not yet")
+            else:
+                cells.append("not in this release")
+        rows.append("| `{}` | {} | {} |".format(
+            family, _n(counts.get(family, {}).get("trajectories", 0) if counts else None), " | ".join(cells)))
+
+    sentences = []
+    partial: dict[tuple, list[str]] = {}
+    for config in CONFIGS:
+        present = _present(summary, config)
+        if present and len(present) < len(FAMILIES):
+            partial.setdefault(tuple(present), []).append(config)
+    for present, names in partial.items():
+        missing = [f for f in FAMILIES if f not in present]
+        sentences.append("{} {} currently available for {} only; {} will be added in a later upload.".format(
+            _codes(names), "is" if len(names) == 1 else "are", _codes(present), _codes(missing)))
+    absent = [c for c in CONFIGS if not _present(summary, c)]
+    if absent:
+        estimates = [_estimate_bytes(summary, c) for c in absent]
+        what = "1 s matrices" if all(CONFIGS[c].stride == 1 and CONFIGS[c].matrices for c in absent) else ""
+        size = "~{} estimated".format(_bytes(sum(estimates))) if None not in estimates else "planned"
+        sentences.append("{} ({}) {} not in this release.".format(
+            _codes(absent), ", ".join(x for x in (what, size) if x), "is" if len(absent) == 1 else "are"))
+    if not sentences:
+        sentences.append("Every config is complete: all five families are in this repo.")
+
+    return [
+        "## What is in this repo",
+        "",
+        "Which families of each config are uploaded here (size on the Hub):",
+        "",
+    ] + rows + [
+        "",
+        " ".join(sentences),
+    ] + _held_back(summary) + [
+        "",
+        "`index.parquet` lists every trajectory, uploaded or not. Its locator columns (`<config>_file`, "
+        "`<config>_row_offset`, `<config>_n_rows`) are null for data not in this repo, so "
+        "`index[\"<config>_file\"].notnull()` (e.g. `index.expression_file.notnull()`) is the authoritative "
+        "availability check. `load_dataset(..., \"<config>\", split=\"<family>\")` fails for a family that has not been uploaded "
+        "(e.g. `load_dataset(..., \"expression\", split=\"single_knockout\")` until that "
+        "family is uploaded).",
+        "",
+    ]
 
 
 def _index_schema(summary: dict) -> list[str]:
@@ -247,8 +332,7 @@ def render(settings: Settings, summary: dict) -> str:
         "lineages of {} distinct cells (design x condition), grouped into five families by campaign tier."
         .format(_n(summary.get("trajectories")), _n(summary.get("lineages")), _n(summary.get("cells"))),
         "",
-    ] + _families_table(summary) + [
-        "",
+    ] + _families_table(summary) + [""] + _coverage(summary) + [
         "## Configs",
         "",
         "Each config is one data product. Every config carries `sample_id`, `t`, `t_abs` and the 18 scalar "
@@ -256,7 +340,7 @@ def render(settings: Settings, summary: dict) -> str:
         "the rows with `t % 10 == 0` plus each trajectory's last row (point samples, not averages); "
         "`expression_1s` and `metabolism_1s` keep every row. The split of every config is the family.",
         "",
-    ] + _configs_table(summary) + _held_back(summary) + [
+    ] + _configs_table(summary) + [
         "",
         "Matrix columns are pruned to the columns that are non-zero at least once anywhere in the campaign "
         "(active columns: {}). The full column lists, with an `active` mask and each active column's position "
