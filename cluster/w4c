@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# well4cell build controller, runnable without sourcing anything first (runbook:
+# cluster/RUN_SLURM.md section 9; `cluster/w4c <stage> --help` for every option):
+#
+#     cluster/w4c scan plan && cluster/w4c scan dispatch     # read every run once (array)
+#     cluster/w4c scan reduce                                 # runs.jsonl, masks, reference/
+#     cluster/w4c index build && cluster/w4c index check      # index.parquet from DB + scan
+#     cluster/w4c index reference                             # genes, conditions, TF tables
+#     cluster/w4c export plan --configs core,expression,metabolism && cluster/w4c export dispatch
+#     cluster/w4c export reconcile                            # sentinels -> ledger, lost parts
+#     cluster/w4c finalize                                    # locators, qc, stats, card
+#     cluster/w4c hub create                                  # private repo on the Hub
+#     cluster/w4c hub upload --include index,provenance,stats,manifest
+set -euo pipefail
+REPO_ROOT="${WCECOLI_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/cluster/well4cell_env.sh" >/dev/null
+export PYTHONPATH="${REPO_ROOT}/cluster${PYTHONPATH:+:${PYTHONPATH}}"
+exec "${W4C_PYTHON}" -m well4cell_build "$@"

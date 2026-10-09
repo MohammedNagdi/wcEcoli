@@ -397,6 +397,176 @@ that shard re-lists and uploads only what is missing. After more campaign output
 `cluster/hfx plan && cluster/hfx dispatch` moves only the new directories plus a refreshed
 `logs/`, `state/` and `transfer/`.
 
+## 9. Build and publish the well4cell dataset
+
+`cluster/w4c` builds the well4cell dataset from the pruned campaign and publishes it as one
+Hugging Face **dataset repo**, `datasets/cSynBioSys/well4cell` (private until paper
+submission). This replaces the bucket of section 8 as the published artifact: `cluster/hfx`
+is no longer run, and the pilot bucket is deleted later by hand (ADR 0007). The design is in
+`docs/well4cell/DESIGN.md`, the stage contracts in `cluster/well4cell_build/SPEC.md`.
+
+The array stages follow the same ledger pattern as the campaign and the transfer: a frozen
+manifest per dispatch, an atomic sentinel per task, an append-only ledger, and
+`cluster/well4cell.sbatch` **always exits 0**. Nothing under `out/` or `state/` is read for
+writing; everything is written under `$W4C_ROOT` (default `<campaign>/well4cell/`). All
+knobs live in `cluster/well4cell_env.sh`; `cluster/w4c` sources it and runs the builder
+under the `wcecoli-api` environment, using `wcecoli-hf` (section 8) for the `hf` CLI. The
+token is the same `HF_TOKEN_PATH` file, with write access to the organisation's datasets.
+
+### Scan
+
+```bash
+cluster/w4c scan plan              # one shard per W4C_SCAN_SHARD_SIZE runs (default 200)
+cluster/w4c scan dispatch          # one array, %W4C_CONCURRENCY
+cluster/w4c scan status
+cluster/w4c scan reduce            # once every shard is ok
+```
+
+The scan reads every run's `channels.h5` exactly once: generations present, step counts,
+attributes, the reference-id hash, and which matrix columns are ever non-zero. `reduce`
+folds the shard sentinels into `build/scan/runs.jsonl`, the global active-column union
+(`build/scan/active_union.npz`) and the four matrix tables
+`provenance/reference/{mrna_counts,protein_counts,reaction_flux,exchange_flux}.parquet`.
+A re-dispatched shard skips the runs whose per-run sentinel is `ok`; `scan plan` skips runs
+already in `runs.jsonl` (`--force` re-scans). A failed job whose `channels.h5` is partial
+(no `reference` group) is recorded as scan status `failed` and only reaches
+`provenance/failed_jobs.parquet`.
+
+### Index
+
+```bash
+cluster/w4c index build            # repo/index.parquet + provenance/sim_options/ from DB, metadata.json, scan
+cluster/w4c index check            # counts per family, id uniqueness, nulls, outcomes, splits, build report
+cluster/w4c index reference        # provenance/reference/{genes,conditions,timelines,media_recipes,tf_edges,tf_activity}.parquet
+```
+
+`index build` **fails** if the database, a run's `metadata.json` and the scan disagree on
+seed or variant, if a done job is missing from `runs.jsonl` (the scan is incomplete), or if
+two experiments slugify to the same `cell_id`; fix the cause, do not work around it.
+Non-fatal disagreements and runs the scan marked missing/failed are in
+`build/index_report.json`, which `index check` prints. T4 TF cells are named after the TF
+that actually ran, not the database's name (DESIGN.md, Known defects). Outcome labels are
+rebuilt from termination, not taken from the database's `divided` (ADR 0005). Locator columns stay null until `finalize`.
+
+### Export
+
+```bash
+cluster/w4c export plan --configs core,expression,metabolism --families all
+cluster/w4c export dispatch
+cluster/w4c export status
+cluster/w4c export reconcile       # sentinels -> ledger; reports failed, lost, never-dispatched parts
+```
+
+`--families` takes a comma-separated list of families or `all` (the default). `plan` packs
+trajectories, families in tier order and within a family by cell, seed, generation, into parts of about
+`W4C_FILE_TARGET_BYTES` (2 GB) per config and family, and writes one manifest line per part;
+each array task writes one `data/<config>/<family>/part-NNNNN.parquet`. A part is written to
+a temporary name and renamed, so a killed task leaves nothing half-written; re-running
+`dispatch` skips parts whose sentinel is `ok`. Trajectories failing a QC gate are skipped
+and reported in the sentinel (they land in `provenance/export_qc.parquet` at finalize).
+`reconcile` appends each new sentinel outcome (ok or failed: rows, bytes, QC failures) to
+`build/ledger.jsonl` exactly once, and lists failed parts, lost parts (dispatched, no
+sentinel, no longer live in SLURM) with the `export dispatch --manifest ... --parts ...`
+command that re-runs them, and parts never dispatched. A later `plan` skips trajectories
+already written by an ok sentinel and never reuses a part number.
+
+A part task can be run in the foreground, e.g. to time one part:
+`cluster/w4c export run --manifest <build/manifests/export_....jsonl> --index 0`.
+
+Part sizes are estimated from `bytes_per_row` in `well4cell_build/settings.py` (`CONFIGS`),
+measured on a 12-run reference only: after the first parts of each config are ok, compare
+`bytes / rows` from `export status` or the sentinels and update `CONFIGS` before planning
+the rest.
+
+Plan `expression_1s` and `metabolism_1s` **last**, and only after the storage question below
+is settled:
+
+```bash
+cluster/w4c export plan --configs expression_1s,metabolism_1s --families all
+```
+
+### Finalize
+
+```bash
+cluster/w4c finalize
+```
+
+Folds every ok export sentinel into the index locators, writes `export_qc.parquet`,
+`failed_jobs.parquet` and `scan_runs.parquet`, merges per-part stats into
+`stats/<family>.parquet`, copies the Parca caches the index names into `provenance/`
+(plain byte copies, never hard links into `out/`), renders `README.md` (the dataset card,
+with configs and family splits in its front matter) and writes `manifest.json`. It refuses
+while any part planned for the configs being finalized lacks an `ok` sentinel, and only
+warns about the other configs, so `cluster/w4c finalize --configs core` works while the
+matrix configs are still exporting (`--allow-incomplete` overrides the refusal; those
+trajectories then have null locators). It also refuses if a parquet under `data/` has no ok
+sentinel, or one trajectory is in two files of one config. Re-run it after any further
+export; `--skip-parca` skips the cache copy. `--hold-back core/single_knockout[,...]` leaves
+exported `<config>/<family>` data out of the locators, stats, `manifest.json` and the card (which
+then says that data follows), for a staged upload; re-run finalize without it once that data is
+on the Hub, and upload `index`, `manifest`, `stats` and `readme` again.
+
+### Upload
+
+```bash
+cluster/w4c hub create             # creates W4C_REPO_ID, private (exist_ok); refuses a public repo
+cluster/w4c hub upload --include index,manifest,provenance,stats --dry-run   # print the hf command
+cluster/w4c hub upload --include index,manifest,provenance,stats
+cluster/w4c hub upload --include core
+cluster/w4c hub upload --include expression,metabolism
+cluster/w4c hub upload --include readme
+cluster/w4c hub status             # remote files grouped by top-level dir (and data/<config>), sizes, private flag
+cluster/w4c hub status --files     # every remote file
+```
+
+`--include` takes one comma-separated list of parts: `readme`, `index`, `manifest`,
+`stats`, `provenance`, `data`, or a config name (`core`, `expression`, ...); each part maps
+to a glob of `repo/` (`data/<config>/**`, `provenance/**`, ...). `--families` narrows the
+config parts to `data/<config>/<family>/**` (e.g. `--include core --families
+wildtype_media,regulation`); the fixed parts are unaffected. Without `--include` every
+fixed part plus every config present under `repo/data/` is uploaded. `hub upload` checks the
+repo is private before pushing (`--allow-public` overrides) and runs `hf upload` on `repo/`; huggingface_hub 2.1 has no `upload-large-folder`,
+so a large push is split with `--include` and **resumed by re-running the same command**
+(files already on the Hub are skipped). The tool never deletes anything remotely; removing a
+file from the repo is a manual Hub action. Upload the card last so the viewer never sees
+configs whose files are missing.
+
+**Storage.** Before uploading `data/expression_1s/**` and `data/metabolism_1s/**`, confirm
+the organisation's plan covers them, or email Hugging Face for an academic storage grant.
+
+Release (paper submission): make the repo public, tag `v1.0`, mint the DOI on the Hub.
+
+### Build tree
+
+| Path under `$W4C_ROOT` | Written by | Contents |
+|---|---|---|
+| `build/manifests/<stage>_<ts>_<id>.jsonl` | `plan` | one shard (scan) or one part (export) per line |
+| `build/manifests/<...>.sentinels/` | the task | per-task outcome: status, rows, bytes, seconds, per-sample offsets and QC, error tail |
+| `build/dispatch_log.jsonl` | `dispatch` | array id, manifest, indices, account, concurrency |
+| `build/ledger.jsonl` | `scan reduce`, `index build`, `export reconcile`, `finalize`, `hub create` / `upload` | append-only, fsync'd outcome record |
+| `build/index_report.json` | `index build` | excluded runs, fatal and non-fatal disagreements |
+| `build/scan/` | `scan reduce` | `runs.jsonl`, `active_union.npz` |
+| `build/logs/w4c-*_<A>_<a>.out` | SLURM | task stdout |
+| `repo/` | `scan reduce`, `index`, `export`, `finalize` | exactly the tree that is uploaded |
+
+### Knobs (`cluster/well4cell_env.sh`)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `W4C_ROOT` | `<campaign>/well4cell` | build and repo root |
+| `W4C_REPO_ID` | `cSynBioSys/well4cell` | Hub dataset repo |
+| `W4C_VERSION` | `1.0.0-rc1` | version in the card, manifest and file metadata |
+| `HF_TOKEN_PATH` | `~/.config/huggingface/well4cell.token` | token file, mode 600 |
+| `W4C_ROW_GROUP_ROWS` | `2048` | parquet row-group cap; keep small for the viewer |
+| `W4C_FILE_TARGET_BYTES` | `2000000000` | target part size |
+| `W4C_COMPRESSION` | `zstd` | parquet codec |
+| `W4C_SPLIT_SEED` | `20261008` | seed of `split_by_lineage` / `split_by_gene` |
+| `W4C_PARTITION`, `W4C_ACCOUNTS` | `cpu-g2`, `cpu-g2-amath,cpu-g2-stf` | the group's nodes, no preemption |
+| `W4C_CPUS`, `W4C_MEM`, `W4C_TIME` | `2`, `4G`, `04:00:00` | per array task |
+| `W4C_CONCURRENCY` | `32` | array throttle (`%N`) |
+| `W4C_SCAN_SHARD_SIZE` | `200` | runs per scan task |
+| `W4C_JOB_PREFIX` | `w4c` | array job names; must not start with `wce` |
+
 ## Troubleshooting
 
 | Symptom | Cause |
