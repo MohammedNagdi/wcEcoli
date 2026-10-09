@@ -275,6 +275,128 @@ micromamba run -n wcecoli-api python -m hf_export.run_export --out "$WCECOLI_CAM
 `run_export` reads both the database (`status == "done"`) and the filesystem, which is why
 the platform's SQLite database remains the source of truth on this path.
 
+## 8. Push the campaign to Hugging Face
+
+`cluster/transfer.py` mirrors the campaign root into a Hugging Face **bucket** with
+`hf sync`, one SLURM array task per shard of ~100 experiment directories. It follows the
+campaign's own ledger pattern -- manifest JSONL, atomic fsync'd per-unit sentinels, an
+append-only ledger -- so a preempted, killed or re-run task never repeats finished work,
+and nothing under the campaign root is ever deleted or modified. All knobs live in
+`cluster/transfer_env.sh`; `cluster/hfx` runs the controller from anywhere.
+
+### One-time setup
+
+```bash
+cluster/setup_hf_env.sh            # builds wcecoli-hf (Python 3.11 + huggingface_hub>=2.1)
+```
+
+A third environment: `hf sync` and `hf://buckets/...` URIs need `huggingface_hub>=2.1`,
+which needs Python 3.10+, and its transfer engine (`hf-xet`) has no business in the pinned
+API environment.
+
+Create a **fine-grained** token at https://huggingface.co/settings/tokens with write
+access to the organisation's buckets, and store it under `$HOME`, mode 600:
+
+```bash
+mkdir -p ~/.config/huggingface && chmod 700 ~/.config/huggingface
+cat > ~/.config/huggingface/well4cell.token      # paste the token, one line
+chmod 600 ~/.config/huggingface/well4cell.token
+```
+
+`HF_TOKEN_PATH` names the file (that is huggingface_hub's own variable, so `hf` reads it
+natively). `dispatch` refuses a token file that is not mode 600, not under `$HOME`, or
+anywhere under the repo or the campaign root -- `state/` is transferred, so a token there
+would be published.
+
+The bucket must already exist (`hf buckets create` is an org-level act and stays manual)
+and must be **private**; `dispatch` refuses a public bucket unless `--allow-public`, because
+every byte is world-readable the moment it lands and `state/` holds the campaign database.
+Flip it afterwards with `hf buckets settings <ns>/<bucket> --public`.
+
+### Pilot first
+
+```bash
+cluster/hfx pilot                  # plans ONE shard and submits it at concurrency 1
+squeue -u "$USER" -n hfx-*         # wait for it
+cluster/hfx reconcile && cluster/hfx report
+```
+
+The first shard is the two `parca_cache_*` directories plus the first experiment
+directories, so the number it prints is representative. `report` gives bytes, files,
+seconds and MB/s per shard, and an estimate for the remainder at the configured
+concurrency. Measured on cpu-g2 while designing this: one process is overhead-bound on
+10-file directories (~20-30 MB/s, ~2 s of start-up and remote listing per unit), and 8
+processes on one node reached ~130 MB/s with no per-process loss. Concurrency across
+array tasks is the throughput knob; klone's measured ceiling is ~348 MB/s.
+
+### Fan out
+
+```bash
+export WCECOLI_TRANSFER_CONCURRENCY=16     # from the pilot number
+cluster/hfx plan                           # snapshots every unit not yet done
+cluster/hfx dispatch                       # one array, %16
+cluster/hfx status
+```
+
+`plan` snapshots the directory list and each `kb` symlink target into
+`transfer/manifests/<plan>.jsonl`, skipping units whose latest ledger entry is `ok`, so
+re-planning after more campaign output arrives transfers only what is new. `--verify`
+ignores the ledger and re-plans everything; `hf sync` then skips every file whose size and
+mtime already match, so a verify pass costs listings, not uploads. Order is parca caches,
+experiments by name, `logs/`, `state/`, then the `transfer/` metadata.
+
+Both `plan` and `dispatch` **refuse while campaign jobs (`wce-*`) are in `squeue`**, and
+`dispatch` refuses while another `hfx-*` array is queued; `--force` overrides either.
+
+### Ledger
+
+Everything lives under `$WCECOLI_TRANSFER_ROOT` (default `<campaign>/transfer/`, a sibling
+of `out/`, never inside `state/`):
+
+| File | Written by | Contents |
+|---|---|---|
+| `manifests/<plan>.jsonl` | `plan` | one shard per line: its unit records, each with source, destination, exclusions and symlink targets |
+| `manifests/<plan>.sentinels/<shard>/<unit>.json` | the task | per-unit outcome: status, files, bytes, seconds, `hf` exit code, uploads/skips, error tail |
+| `manifests/<plan>.sentinels/<shard>.json` | the task | per-shard summary, written last |
+| `dispatch_log.jsonl` | `dispatch` | array id, manifest, shard indices, account, concurrency |
+| `transfer_ledger.jsonl` | `reconcile` | append-only, fsync'd; one line per unit outcome. "Done" = latest line is `ok` |
+| `logs/hfx-*_<A>_<a>.out` | SLURM | task stdout |
+| `bucket_meta/` | `plan` | staging for `<bucket>/transfer/README.md` and `symlinks.jsonl` |
+
+`cluster/transfer.sbatch` **always exits 0**; the sentinels carry the outcome. A re-run of a
+shard (requeue, or `dispatch --manifest M --shards 3,7` after `reconcile` reports a shard
+lost) skips every unit that already has an `ok` sentinel. Each unit gets
+`WCECOLI_TRANSFER_RETRIES` attempts with back-off before it is recorded as `failed`; a failed
+unit is simply pending again at the next `plan`.
+
+### What is and is not transferred
+
+- Run directories of jobs whose `simulation_jobs.status` is in `WCECOLI_TRANSFER_STATUSES`
+  (default `done`, which includes lineage-terminated runs), read from the campaign database.
+  A failed attempt leaves a ~255 MB run directory too, so the database decides what is
+  finished, not the filesystem. `plan --status failed` adds them later; `--status all`
+  disables the filter. The two parca caches, `logs/` and `state/` are always included, at
+  the same relative paths as on disk.
+- Excluded everywhere: `*.tmp`. Excluded from `state/`: `assistant_secret.key` (a secret),
+  `wcecoli.db.bak-*`, `wcecoli.db.lock`, `wcecoli.db-journal`. The `state/` unit is synced
+  via `hf sync --plan` / `--apply`, and the task refuses to apply a plan that contains an
+  excluded path or any delete.
+- **Symlinks.** Object storage has none, and `hf sync` silently drops directory symlinks
+  (file symlinks are dereferenced). The per-run `kb -> ../parca_cache_<hash>/kb` link is the
+  only record of which Parca cache a run used, so each one is uploaded as a tiny
+  `out/<run>/kb.symlink` object holding the target, and `transfer/symlinks.jsonl` at bucket
+  root indexes all of them. Nothing is duplicated.
+- `--delete` is never passed to `hf sync`, and nothing in the source tree is ever removed.
+  A run directory later purged locally (`wce requeue --purge-output`) stays in the bucket.
+
+### Resuming and incremental runs
+
+`hf sync` compares size and mtime per file (uploads carry the local mtime), so a task
+killed mid-shard loses at most the files of the batch it was committing; the next run of
+that shard re-lists and uploads only what is missing. After more campaign output lands,
+`cluster/hfx plan && cluster/hfx dispatch` moves only the new directories plus a refreshed
+`logs/`, `state/` and `transfer/`.
+
 ## Troubleshooting
 
 | Symptom | Cause |
@@ -285,3 +407,7 @@ the platform's SQLite database remains the source of truth on this path.
 | `unknown to SLURM` in reconcile | Task vanished with no sentinel and no `sacct` record — inspect `logs/` |
 | `sbatch` `DenyOnLimit` | `WCECOLI_MAX_IN_FLIGHT` too close to `MaxSubmitJobsPU` (2000 on ckpt) |
 | `database is locked` | Another writer holds the flock; it will clear (600s timeout) |
+| `campaign jobs are in squeue` from `hfx` | The campaign is still running; wait, or `--force` if you know the output is quiescent |
+| `bucket ... is PUBLIC` | `hf buckets settings <ns>/<bucket> --private`, or `--allow-public` deliberately |
+| `HF token file ... must be 600` | `chmod 600` it; it must also live under `$HOME`, outside the repo and campaign root |
+| `hfx reconcile` reports `lost` shards | The task died before writing its shard sentinel; `hfx dispatch --manifest <m> --shards <idx>` re-runs only its unfinished units |
