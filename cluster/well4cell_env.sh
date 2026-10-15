@@ -25,6 +25,9 @@ export WCECOLI_HF_ENV="${WCECOLI_HF_ENV:-wcecoli-hf}"
 export WCECOLI_HF_BIN="${WCECOLI_HF_BIN:-${MAMBA_ROOT_PREFIX}/envs/${WCECOLI_HF_ENV}/bin/hf}"
 # The builder runs under wcecoli-api (h5py, pyarrow, numpy).
 export W4C_PYTHON="${W4C_PYTHON:-${WCECOLI_API_PYTHON}}"
+# `w4c deg-rates` unpickles each Parca cache's sim_data, which needs the simulation
+# environment (wcecoli-sim, as cluster/parca.sbatch runs it). A command line, not a path.
+export W4C_SIM_PYTHON="${W4C_SIM_PYTHON:-${MICROMAMBA_BIN} run -n ${WCECOLI_SIM_ENV} python}"
 
 # ── Shape of the data ────────────────────────────────────────────────────────
 # Strides are fixed per config in well4cell_build/settings.py (CONFIGS): core and *_1s are
