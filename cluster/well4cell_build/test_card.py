@@ -105,6 +105,7 @@ def test_provenance_and_licence_name_the_caches_by_hash_only(tmp_path, monkeypat
     assert "CC BY 4.0 for everything in this repo." in licence
     assert "Stanford Academic Software License; it is not included here." in licence
     assert "identified only by `kb_sha256` / `parca_cache`" in licence
+    assert "per-unit degradation-rate classification, of which only the counts are published" in licence
     assert "—" not in text
     assert ("| `kb_sha256` | string | sha256 of the fitted parameter set (simData.cPickle) used; the set itself is "
             "not distributed |") in text

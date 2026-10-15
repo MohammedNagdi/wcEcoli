@@ -599,7 +599,9 @@ def render(settings: Settings, summary: dict) -> str:
         "",
         "CC BY 4.0 for everything in this repo. The wcEcoli model is by the Covert lab (Stanford) and is licensed "
         "separately under the Stanford Academic Software License; it is not included here. The fitted parameter "
-        "sets (Parca caches) are not distributed either and are identified only by `kb_sha256` / `parca_cache`; "
+        "sets (Parca caches) are not distributed either and are identified only by `kb_sha256` / `parca_cache`, "
+        "and the same applies to anything derived from them, such as the per-unit degradation-rate "
+        "classification, of which only the counts are published (see Provenance); "
         "reproducing these simulations requires obtaining wcEcoli under its own licence.",
         "",
         "## Citation",
