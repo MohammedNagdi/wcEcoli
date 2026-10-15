@@ -501,7 +501,9 @@ dataset names each one by `parca_cache` and the sha256 of its `kb/simData.cPickl
 (`kb_sha256`, computed by `index build`). An index built before that column existed is
 refused: re-run `cluster/w4c index build`, then finalize. A
 `repo/provenance/parca_cache_*` left by an older finalize gets a warning; delete it (`hub
-upload` excludes it and every `*.cPickle` regardless). It refuses
+upload` excludes it and every `*.cPickle` regardless). A `repo/provenance/deg_rates_*.json`
+left by an older finalize is refused: delete it (the original stays in `build/provenance/`)
+and finalize again. It refuses
 while any part planned for the configs being finalized lacks an `ok` sentinel, and only
 warns about the other configs, so `cluster/w4c finalize --configs core` works while the
 matrix configs are still exporting (`--allow-incomplete` overrides the refusal; those
@@ -561,8 +563,8 @@ so keep the flag on every re-run once expression is complete.
 ```bash
 cluster/w4c deg-rates              # build/provenance/deg_rates_<parca_cache>.json, every cache the index names
 cluster/w4c deg-rates --cache <hash>
-cluster/w4c finalize               # copies them to repo/provenance/; the card gets a Degradation rates paragraph
-cluster/w4c hub upload --include provenance,manifest
+cluster/w4c finalize               # counts per class into the card and manifest.json; the files stay in build/
+cluster/w4c hub upload --include manifest
 cluster/w4c hub upload --include readme
 ```
 
@@ -577,8 +579,16 @@ their fit). It refuses a cache whose `simData.cPickle` no longer hashes to the i
 `kb_sha256`. Expect about a minute and a few GB per cache (two unpickles); run it on a compute
 node (`srun --mem=8G ...` or `sbatch --wrap`) if the login node objects. The loader has not
 yet run on a real cache: check the first output (counts near Cellarium's, every unit in
-exactly one class, `cellarium_rule` close to the main counts) before publishing. Whether the
-files may be published at all is an open question (DESIGN.md section 9, ADR 0009).
+exactly one class, `cellarium_rule` close to the main counts) before the finalize that puts
+its counts in the card.
+
+The files are never published. They are a derived summary of the fitted parameters (per-unit
+classes, expression shares, the bounds and the imputation constant), which `docs/adr/0009`
+rules out shipping, so they stay in `build/provenance/` on klone. `finalize` reads them and
+puts only aggregates in the card's Provenance section and `manifest.json` (`deg_rates`): per
+cache, the number of mRNA units in each class and in all, and the percent of basal mRNA
+expression the not-a-fit classes carry. `hub upload` excludes `**/deg_rates_*.json` in any
+case.
 
 ### Upload
 
@@ -619,7 +629,7 @@ Release (paper submission): make the repo public, tag `v1.0`, mint the DOI on th
 | `build/dispatch_log.jsonl` | `dispatch` | array id, manifest, indices, account, concurrency |
 | `build/ledger.jsonl` | `scan reduce`, `index build`, `export reconcile`, `finalize`, `summarize`, `deg-rates`, `hub create` / `upload` | append-only, fsync'd outcome record |
 | `build/index_report.json` | `index build` | excluded runs, fatal and non-fatal disagreements |
-| `build/provenance/deg_rates_<parca_cache>.json` | `deg-rates` | mRNA degradation-rate classes of that cache; finalize copies it to `repo/provenance/` |
+| `build/provenance/deg_rates_<parca_cache>.json` | `deg-rates` | mRNA degradation-rate classes of that cache; never published, finalize puts only its counts in the card and `manifest.json` |
 | `build/scan/` | `scan reduce` | `runs.jsonl`, `active_union.npz` |
 | `build/logs/w4c-*_<A>_<a>.out` | SLURM | task stdout |
 | `repo/` | `scan reduce`, `index`, `export`, `finalize`, `summarize` | exactly the tree that is uploaded |

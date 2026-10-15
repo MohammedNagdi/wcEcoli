@@ -471,10 +471,7 @@ def test_finalize_summarize_finalize_puts_the_summary_in_card_and_manifest(tmp_p
         collapse["trajectories"], collapse["divided"]) in text
 
 
-def test_deg_rates_files_are_copied_and_summarised(tmp_path, monkeypatch, capsys):
-    from fnmatch import fnmatch
-
-    from well4cell_build import hub
+def test_deg_rates_files_are_summarised_but_never_copied(tmp_path, monkeypatch, capsys):
     settings = make_settings(tmp_path, monkeypatch)
     build_tree(settings)
     write_campaign_db(settings)
@@ -486,28 +483,54 @@ def test_deg_rates_files_are_copied_and_summarised(tmp_path, monkeypatch, capsys
                 "rate_floor_as_half_life_min": 91.2, "rate_ceiling_as_half_life_min": 0.4,
                 "imputation_constant_min": 5.190693, "on_floor": {**figures, "n_units": 245},
                 "on_ceiling": {**figures, "n_units": 7}, "imputed_average": {**figures, "n_units": 602},
-                "not_a_fit": figures, "units_not_a_fit": {"floor": {"TU0-1[c]": 0.1}}}
+                "not_a_fit": figures, "determined": {**figures, "n_units": 2279},
+                "most_expressed_not_a_fit": [{"id": "TU0-1[c]", "class": "floor", "pct_of_mrna_expression": 0.1}],
+                "units_not_a_fit": {"floor": {"TU0-1[c]": 0.1}}}
     source = settings.build_dir / "provenance" / "deg_rates_{}.json".format(PARCA_CACHE)
     source.parent.mkdir(parents=True)
     source.write_text(json.dumps(document))
     (settings.build_dir / "provenance" / "deg_rates_other.json").write_text(
         json.dumps({**document, "parca_cache": "other"}))
     finalize.cmd_finalize(settings, finalize_args())
-    copied = settings.repo_dir / "provenance" / source.name
-    assert json.loads(copied.read_text()) == document
-    assert not (settings.repo_dir / "provenance" / "deg_rates_other.json").exists()
+    assert list((settings.repo_dir / "provenance").glob("deg_rates_*")) == []
     assert "the index does not name" in capsys.readouterr().err
-    headline = json.loads((settings.repo_dir / "manifest.json").read_text())["deg_rates"][PARCA_CACHE]
-    assert headline["not_a_fit"]["n_units"] == 854 and headline["path"] == "provenance/" + source.name
-    assert "units_not_a_fit" not in headline
+    manifest = json.loads((settings.repo_dir / "manifest.json").read_text())
+    assert manifest["deg_rates"] == {PARCA_CACHE: {
+        "kb_sha256": KB_SHA256,
+        "mrna_units": {"floor": 245, "ceiling": 7, "imputed": 602, "determined": 2279, "total": 3133},
+        "not_a_fit_pct_basal_mrna_expression": 12.087}}
     card_text = (settings.repo_dir / "README.md").read_text()
     provenance = card_text[card_text.index("## Provenance"):card_text.index("## Licence")]
-    assert ("- `{}`: 854 of 3,133 mRNA transcription units, carrying 12.1% of basal mRNA expression, are not a "
-            "fit: 245 on the floor (91.2 min), 7 on the ceiling (0.4 min) and 602 imputed (5.2 min).".format(
-                PARCA_CACHE)) in provenance
-    globs = hub.include_globs(settings, ["provenance"])
-    name = "provenance/" + source.name
-    assert any(fnmatch(name, g) for g in globs) and not any(fnmatch(name, e) for e in hub.EXCLUDES)
+    assert ("- `{}`: of 3,133 mRNA transcription units, 2,279 have a fitted rate and 854, carrying 12.1% of basal "
+            "mRNA expression, do not: 245 on the floor, 7 on the ceiling and 602 imputed.".format(PARCA_CACHE)
+            ) in provenance
+    for withheld in ("TU0-1", "91.2", "5.19", "0.4 min", "deg_rates_"):
+        assert withheld not in card_text and withheld not in json.dumps(manifest)
     source.write_text(json.dumps({**document, "kb_sha256": "0" * 64}))
     with pytest.raises(SystemExit, match="re-run `w4c deg-rates`"):
         finalize.cmd_finalize(settings, finalize_args())
+
+
+def test_finalize_refuses_a_deg_rates_copy_left_in_repo(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    copy = settings.repo_dir / "provenance" / "deg_rates_{}.json".format(PARCA_CACHE)
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    copy.write_text("{}")
+    with pytest.raises(SystemExit, match="copied by an older finalize.*Delete them"):
+        finalize.cmd_finalize(settings, finalize_args())
+    assert copy.exists()
+
+
+def test_hub_upload_excludes_deg_rates_files(tmp_path, monkeypatch):
+    from fnmatch import fnmatch
+
+    from well4cell_build import hub
+    settings = make_settings(tmp_path, monkeypatch)
+    argv = hub.upload_argv(settings, hub.include_globs(settings, ["provenance"]), "m")
+    excludes = [argv[i + 1] for i, a in enumerate(argv) if a == "--exclude"]
+    assert "**/deg_rates_*.json" in excludes
+    name = "provenance/deg_rates_{}.json".format(PARCA_CACHE)
+    assert any(fnmatch(name, g) for g in hub.include_globs(settings, ["provenance"]))
+    assert any(fnmatch(name, e) for e in excludes)
+    assert not any(fnmatch("provenance/export_qc.parquet", e) for e in excludes)

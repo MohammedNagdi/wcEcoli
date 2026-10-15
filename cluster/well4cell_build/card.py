@@ -353,8 +353,10 @@ def _translation_collapse(summary: dict) -> list[str]:
 
 
 def _deg_rates(summary: dict) -> list[str]:
-    """Which mRNA degradation rates of each Parca cache are not fits (finalize.publish_deg_rates,
-    from ``w4c deg-rates``); nothing when no cache has been classified."""
+    """How many mRNA degradation rates of each Parca cache are not fits (finalize.deg_rate_aggregates,
+    from ``w4c deg-rates``): counts per class and the not-a-fit share of basal mRNA expression
+    only, since the per-unit classification is not distributed (ADR 0009); nothing when no cache
+    has been classified."""
     caches = summary.get("deg_rates") or {}
     if not caches:
         return []
@@ -363,23 +365,23 @@ def _deg_rates(summary: dict) -> list[str]:
         "rates are bounded below by the slowest measured mRNA decay (the longest measured half-life), and a unit "
         "whose rate sits on that bound is on the floor. Rates faster than the fastest measured decay (the shortest "
         "measured half-life) are clipped to it, and those units are on the ceiling. A unit none of whose genes "
-        "has a measured half-life is imputed: it carries the mean measured half-life. Any claim about the stability of these transcripts, or that depends on it, rests on "
-        "a bound or a population mean, not on a measurement of that transcript. "
-        "`provenance/deg_rates_<parca_cache>.json` lists the units of each class with their share of expression.",
+        "has a measured half-life is imputed: it carries the mean measured half-life. Any claim about the stability "
+        "of these transcripts, or that depends on it, rests on a bound or a population mean, not on a measurement "
+        "of that transcript. Which units are in each class is derived from the fitted parameters, so like them it "
+        "is kept with the campaign and not distributed (see Licence). This repo has the counts only.",
         "",
     ]
     for cache, figures in caches.items():
-        def count(key: str) -> str:
-            return _n((figures.get(key) or {}).get("n_units"))
+        units = figures.get("mrna_units") or {}
+        classes = [units.get(k) for k in ("floor", "ceiling", "imputed")]
+        not_a_fit = sum(classes) if all(isinstance(n, int) for n in classes) else None
         lines.append(
-            "- `{cache}`: {n} of {total} mRNA transcription units, carrying {pct}% of basal mRNA expression, are not "
-            "a fit: {floor} on the floor ({floor_min} min), {ceiling} on the ceiling ({ceiling_min} min) and "
-            "{imputed} imputed ({imputed_min} min).".format(
-                cache=cache, n=count("not_a_fit"), total=_n(figures.get("n_mrna_units")),
-                pct=_n((figures.get("not_a_fit") or {}).get("pct_expression"), "{:.1f}"),
-                floor=count("on_floor"), floor_min=_n(figures.get("rate_floor_as_half_life_min"), "{:g}"),
-                ceiling=count("on_ceiling"), ceiling_min=_n(figures.get("rate_ceiling_as_half_life_min"), "{:g}"),
-                imputed=count("imputed_average"), imputed_min=_n(figures.get("imputation_constant_min"), "{:.1f}")))
+            "- `{cache}`: of {total} mRNA transcription units, {determined} have a fitted rate and {n}, carrying "
+            "{pct}% of basal mRNA expression, do not: {floor} on the floor, {ceiling} on the ceiling and {imputed} "
+            "imputed.".format(
+                cache=cache, total=_n(units.get("total")), determined=_n(units.get("determined")), n=_n(not_a_fit),
+                pct=_n(figures.get("not_a_fit_pct_basal_mrna_expression"), "{:.1f}"), floor=_n(units.get("floor")),
+                ceiling=_n(units.get("ceiling")), imputed=_n(units.get("imputed"))))
     return lines + [""]
 
 

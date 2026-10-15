@@ -62,34 +62,25 @@ the job to finish before the second `finalize`.
 `expression` and `metabolism` are on the Hub for `wildtype_media` only. Export the other
 four families, finalize, and upload. Confirm the storage plan before the 1 s configs.
 
-## 5. Degradation-rate provenance, before the last finalize
+## 5. Degradation-rate counts, before the last finalize
 
-New code, `cluster/well4cell_build/deg_rates.py` (`cluster/w4c deg-rates`). For each Parca
-cache it unpickles `kb/simData.cPickle` and `kb/rawData.cPickle` under the simulation
-environment and classifies every mRNA transcription unit's degradation rate as floor (the
-NNLS lower bound), ceiling (clipped at the fastest measured rate), imputed (no cistron
-measured, so the mean measured half-life) or determined, weighted by basal expression. It
-writes `build/provenance/deg_rates_<parca_cache>.json` with the keys of Cellarium's
-`deg_rate_baseline.json`; the next `finalize` copies the files to `repo/provenance/` and adds
-a Degradation rates paragraph to the card's Provenance section. It needs only the index (step
-2), so run it any time before the finalize in step 6, once per cache, for both
-`out/parca_cache_*`:
+New code, `cluster/w4c deg-rates`. For each Parca cache it classifies every mRNA
+transcription unit's degradation rate as floor, ceiling, imputed or determined and writes
+`build/provenance/deg_rates_<parca_cache>.json`. Those files stay on klone (ADR 0009
+addendum); finalize puts only the counts per class into the card and `manifest.json`. It
+needs only the index (step 2), so run it any time before the finalize in step 6:
 
 ```
 source cluster/well4cell_env.sh
-ls -d $WCECOLI_CAMPAIGN_ROOT/out/parca_cache_*      # the two caches
 cluster/w4c deg-rates                                # one JSON per cache the index names
 ls $W4C_ROOT/build/provenance/                      # expect two deg_rates_<hash>.json
 ```
 
-If the index names only one of the two caches, run `cluster/w4c deg-rates --cache <hash>` for
-the other (finalize only publishes a cache the index names). Each run is two unpickles, about
-a minute and a few GB; if the login node kills it, use
-`srun --account=cpu-g2-amath --partition=cpu-g2 --mem=8G --time=00:30:00 cluster/w4c deg-rates`.
+If the index names only one of the two caches, add `--cache <hash>` for the other. Each run is
+about a minute and a few GB; if the login node kills it, prefix
+`srun --account=cpu-g2-amath --partition=cpu-g2 --mem=8G --time=00:30:00`.
 
-**Untested against a real cache.** The classification is unit-tested on synthetic arrays; the
-loader (attribute names from this repo's `transcription.py`) has never read a cache. Check
-the first output before going further:
+The loader has never read a real cache, so check each file:
 
 ```
 for f in $W4C_ROOT/build/provenance/deg_rates_*.json; do
@@ -101,22 +92,11 @@ print("  cellarium rule:", d["cellarium_rule"], "warnings:", d.get("warnings"))'
 done
 ```
 
-- Counts in the same ballpark as Cellarium's 854 of 3,133 units (floor 245, ceiling 7,
-  imputed 602) and about 12% of basal mRNA expression. Our caches are a different fit, so
-  not identical, but a factor of two off means something is wrong.
-- Every unit classified exactly once: floor + ceiling + imputed + determined equals
-  `n_mrna_units` (the script refuses otherwise, so a written file passes this).
-- `cellarium_rule` (Cellarium's value-only rule, computed alongside) close to the main counts.
-- No `warnings` (one means the imputation constant is not the mean of the measured
-  half-lives read from `rawData`).
-
-**Licence, before uploading.** These files are derived from the fitted parameters, and ADR
-0009 rejected shipping a derived summary of the parameters. Decide whether they may be
-published (DESIGN.md section 9). Until then, do not upload `provenance` or `readme` after a
-finalize that saw them. To publish without them, delete `build/provenance/deg_rates_*` and
-`repo/provenance/deg_rates_*` and finalize again. If they are cleared for publication, step
-6's finalize picks them up; add `provenance` to its first upload:
-`cluster/w4c hub upload --include summary,provenance,manifest`.
+Expect counts near Cellarium's 854 of 3,133 units (floor 245, ceiling 7, imputed 602) and
+about 12% of basal mRNA expression (a factor of two off means something is wrong),
+`cellarium_rule` close to the main counts, and no `warnings`. Then continue to step 6, which
+finalizes and uploads as usual. If an earlier finalize left `repo/provenance/deg_rates_*.json`,
+finalize refuses until you delete it.
 
 ## 6. Pathway fractions, after steps 4 and 5
 

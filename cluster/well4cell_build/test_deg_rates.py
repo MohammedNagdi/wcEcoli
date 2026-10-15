@@ -143,7 +143,9 @@ def test_cmd_writes_one_file_per_indexed_cache_and_checks_kb_sha256(tmp_path, mo
     reports = deg_rates.cmd_deg_rates(settings, argparse.Namespace(cache=None))
     out = settings.build_dir / "provenance" / "deg_rates_abc.json"
     assert out.exists() and [r["parca_cache"] for r in reports] == ["abc"]
-    assert reports[0]["not_a_fit"]["n_units"] == 6
+    units = reports[0]["mrna_units"]
+    assert units["floor"] + units["ceiling"] + units["imputed"] == 6
+    assert units["floor"] + units["ceiling"] + units["imputed"] + units["determined"] == units["total"]
     monkeypatch.setattr(deg_rates, "run_child", fake_child("0" * 64))
     with pytest.raises(SystemExit, match="the index records"):
         deg_rates.cmd_deg_rates(settings, argparse.Namespace(cache=None))

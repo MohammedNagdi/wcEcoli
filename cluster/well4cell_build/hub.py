@@ -7,7 +7,8 @@
 
 This module can only add or overwrite remote files. It never passes ``--delete`` to
 ``hf upload`` and never calls a delete API: removing anything remote is done by hand.
-Every upload excludes the Parca caches (``provenance/parca_cache_*``, ``*.cPickle``).
+Every upload excludes the Parca caches (``provenance/parca_cache_*``, ``*.cPickle``) and the
+per-cache degradation-rate classifications (``deg_rates_*.json``), neither of which is published.
 
 huggingface_hub lives in the wcecoli-hf environment (next to WCECOLI_HF_BIN), not in the
 builder's; the API calls run there as a short child script that reads HF_TOKEN_PATH itself.
@@ -34,15 +35,16 @@ FIXED_PARTS = {
     "index": ["index.parquet"],
     "manifest": ["manifest.json"],
     "stats": ["stats/**"],
-    "provenance": ["provenance/**"],  # includes deg_rates_<cache>.json (finalize copies them from build/)
+    "provenance": ["provenance/**"],
 }
 ALIASES = {"README.md": "readme", "card": "readme", "index.parquet": "index", "manifest.json": "manifest"}
 DEFAULT_PARTS = ["readme", "index", "manifest", "stats", "provenance"]
 # Data parts: the exported configs plus the summary config (written by summarize).
 DATA_CONFIGS = list(CONFIGS) + [SUMMARY_CONFIG]
-# Parca caches (wcEcoli's fitted parameters) are never published (ADR 0009); an older finalize
-# copied them into repo/provenance/, so they are excluded even when present locally.
-EXCLUDES = ["**/*.tmp", "**/.*", "provenance/parca_cache_*/**", "**/*.cPickle"]
+# Parca caches (wcEcoli's fitted parameters) and the degradation-rate classification derived from
+# them are never published (ADR 0009); an older finalize copied both into repo/provenance/, so
+# they are excluded even when present locally.
+EXCLUDES = ["**/*.tmp", "**/.*", "provenance/parca_cache_*/**", "**/*.cPickle", "**/deg_rates_*.json"]
 
 # Read-only and create-only Hub calls, run in the wcecoli-hf environment. No delete call
 # appears here, by design.

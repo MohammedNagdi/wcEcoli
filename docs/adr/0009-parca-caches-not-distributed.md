@@ -35,3 +35,14 @@ obtains wcEcoli under its own licence and runs the Parca at the recorded `git_ha
 their `simData.cPickle` against `kb_sha256`. The caches already pushed to the Hub repo were
 deleted and its history squashed so no revision still holds them. This amends the consequence
 of ADR 0007 that moved the Parca caches into `provenance/`.
+
+## Addendum, 2026-10-15: the degradation-rate classification
+
+`cluster/w4c deg-rates` classifies each cache's mRNA degradation rates as floor, ceiling,
+imputed or determined into `build/provenance/deg_rates_<parca_cache>.json`: per-unit classes,
+expression shares, the floor and ceiling half-lives and the imputation constant. That is the
+derived summary of the parameters rejected above, so it follows the same rule. The files stay
+on klone with the campaign and are never copied into the repo or uploaded; `hub upload`
+excludes `**/deg_rates_*.json` as well. The card and `manifest.json` carry aggregates only:
+per cache, the number of mRNA units in each class and in all, and the percent of basal mRNA
+expression the not-a-fit classes carry.

@@ -18,7 +18,7 @@ Stages, each a subcommand of ``python -m well4cell_build`` (run via ``cluster/w4
               the expression parts (once expression is exported)
     deg-rates classify each Parca cache's mRNA degradation rates (floor, ceiling, imputed,
               determined) under wcecoli-sim into build/provenance/deg_rates_<cache>.json;
-              finalize publishes them under provenance/
+              never published; finalize puts only the counts per class in the card
     hub create|upload|status
               the private Hub dataset repo; ``hf upload`` of repo/ (never deletes)
 

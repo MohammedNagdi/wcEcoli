@@ -10,7 +10,6 @@ $W4C_ROOT/ (default $WCECOLI_CAMPAIGN_ROOT/well4cell)
   build/   manifests/ <stage>_<ts>_<id>.jsonl + .sentinels/   logs/   scan/runs.jsonl   scan/active_union.npz   index_report.json   ledger.jsonl   dispatch_log.jsonl
            provenance/deg_rates_<parca_cache>.json
   repo/    README.md  manifest.json  index.parquet  stats/<family>.parquet  provenance/...  data/<config>/<family>/part-NNNNN.parquet
-           provenance/deg_rates_<parca_cache>.json
            data/summary/<family>/part-00000.parquet
 ```
 
@@ -112,7 +111,7 @@ not copy them; the repo identifies them by index `parca_cache` + `kb_sha256` and
 manifest.json `kb_sha256` ({parca_cache: sha256}). finalize refuses an index without
 kb_sha256 or with a cache that has other than one hash, and warns about a stale
 repo/provenance/parca_cache_* left by an older finalize. hub upload always excludes
-`provenance/parca_cache_*/**` and `**/*.cPickle`.
+`provenance/parca_cache_*/**`, `**/*.cPickle` and `**/deg_rates_*.json`.
 
 ## Degradation-rate provenance (deg_rates.py)
 `deg-rates [--cache h1,h2]` runs, per Parca cache the index names (default) or given, `W4C_SIM_PYTHON -m
@@ -130,7 +129,11 @@ pct_of_mrna_expression}] (8), units_not_a_fit {floor|ceiling|imputed: {id: pct},
 adjusted_units {id: {factor, class}}, not_a_fit_across_conditions, cellarium_rule {floor, ceiling, imputed,
 not_a_fit, rule}, rtol, rules, note, warnings (only when the imputation constant is not the mean of the
 measured half-lives). The parent refuses (renaming the file to .mismatch) when kb_sha256 differs from the
-index's. finalize copies every build/provenance/deg_rates_*.json whose cache the index names into
-repo/provenance/ (refuses a kb_sha256 mismatch, warns and skips an unnamed cache, warns about a repo copy no
-build file backs), and records `deg_rates` {parca_cache: headline + path} in the summary and manifest.json;
-the card's Provenance section gets a paragraph only when it is non-empty. hub `provenance` uploads them.
+index's. The file is a derived summary of the fitted parameters and is never published (ADR 0009, addendum
+2026-10-15): it stays in build/provenance/. finalize reads every build/provenance/deg_rates_*.json whose cache
+the index names (refuses a kb_sha256 mismatch, warns and skips an unnamed cache) and records `deg_rates`
+{parca_cache: {kb_sha256, mrna_units {floor, ceiling, imputed, determined, total},
+not_a_fit_pct_basal_mrna_expression}} (deg_rates.aggregates) in the summary and manifest.json; nothing else
+from the file. It refuses, before writing anything, while repo/provenance/ holds a deg_rates_*.json (a copy
+from an earlier finalize) and tells the user to delete it. The card's Provenance section gets a paragraph
+with those counts only when `deg_rates` is non-empty.

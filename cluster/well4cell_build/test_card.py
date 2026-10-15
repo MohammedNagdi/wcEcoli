@@ -206,13 +206,20 @@ def test_deg_rates_paragraph_only_when_classified(tmp_path, monkeypatch):
     settings = make_settings(tmp_path, monkeypatch)
     summary = summary_for({"core": list(FAMILIES)})
     assert "Degradation rates." not in card.render(settings, summary)
-    summary["deg_rates"] = {"abc": {"n_mrna_units": 3133, "not_a_fit": {"n_units": 854, "pct_expression": 12.087},
-                                    "on_floor": {"n_units": 245}, "rate_floor_as_half_life_min": 91.2}}
+    summary["deg_rates"] = {"abc": {"kb_sha256": "f" * 64, "not_a_fit_pct_basal_mrna_expression": 12.087,
+                                    "mrna_units": {"floor": 245, "ceiling": 7, "imputed": 602, "determined": 2279,
+                                                   "total": 3133}},
+                            "def": {"mrna_units": {"floor": 245, "total": 3133}}}
     text = card.render(settings, summary)
     provenance = text[text.index("## Provenance"):text.index("## Licence")]
     assert "Degradation rates. Not every mRNA half-life" in provenance
     assert "rests on a bound or a population mean, not on a measurement" in provenance
-    assert ("- `abc`: 854 of 3,133 mRNA transcription units, carrying 12.1% of basal mRNA expression, are not a "
-            "fit: 245 on the floor (91.2 min), {{TODO}} on the ceiling ({{TODO}} min) and {{TODO}} imputed "
-            "({{TODO}} min).") in provenance
+    assert ("Which units are in each class is derived from the fitted parameters, so like them it is kept with the "
+            "campaign and not distributed (see Licence). This repo has the counts only.") in provenance
+    assert ("- `abc`: of 3,133 mRNA transcription units, 2,279 have a fitted rate and 854, carrying 12.1% of basal "
+            "mRNA expression, do not: 245 on the floor, 7 on the ceiling and 602 imputed.") in provenance
+    assert ("- `def`: of 3,133 mRNA transcription units, {{TODO}} have a fitted rate and {{TODO}}, carrying "
+            "{{TODO}}% of basal mRNA expression, do not: 245 on the floor, {{TODO}} on the ceiling and {{TODO}} "
+            "imputed.") in provenance
+    assert "deg_rates_" not in text and " min)" not in provenance
     assert "—" not in provenance and "–" not in provenance

@@ -10,9 +10,10 @@
 5. card             README.md from card.render
 6. manifest         manifest.json: version, commit, row/byte totals, counts, and the
                     kb_sha256 of each Parca cache the index names
-7. deg rates        build/provenance/deg_rates_<cache>.json (written by ``deg-rates``)
-                    copied to provenance/, with their headline figures in the card and
-                    manifest; absent files are not an error
+7. deg rates        build/provenance/deg_rates_<cache>.json (written by ``deg-rates``) read
+                    for their aggregate figures (units per class, not-a-fit share of basal
+                    mRNA expression) in the card and manifest; the files themselves are
+                    never copied into repo/ (ADR 0009); absent files are not an error
 
 The ``summary`` config (data/summary/<family>/part-00000.parquet, written by ``summarize``
 from core, not by export) has no sentinels and no index locators. When present it is counted
@@ -448,37 +449,40 @@ def check_kb_sha256(settings: Settings, index: pa.Table) -> None:
               "delete them. hub upload excludes them.".format(stale, settings.repo_dir / "provenance"), file=sys.stderr)
 
 
+def check_no_deg_rate_copies(settings: Settings) -> None:
+    """Refuse while repo/provenance/ holds a deg_rates_<cache>.json an older finalize copied there:
+    the per-unit classification is derived from the fitted parameters and is not distributed
+    (ADR 0009). The user deletes it; finalize does not."""
+    provenance = settings.repo_dir / "provenance"
+    copies = sorted(p.name for p in provenance.glob(deg_rate_provenance.FILE_PREFIX + "*.json"))
+    if copies:
+        raise SystemExit("{} under {} were copied by an older finalize; the degradation-rate classification is not "
+                         "distributed (ADR 0009). Delete them (the originals stay in {}), then finalize again".format(
+                             copies, provenance, settings.build_dir / "provenance"))
+
+
 # -- 6. manifest and summary -----------------------------------------------------------------
-def publish_deg_rates(settings: Settings, index: pa.Table) -> dict[str, dict]:
-    """Copy each build/provenance/deg_rates_<cache>.json (``w4c deg-rates``) into repo/provenance/
-    and return {parca_cache: headline figures + path}. Refuses a file whose kb_sha256 is not the
-    index's for that cache (the fit changed since it was classified); skips, with a warning, a
-    cache the index does not name; warns about a repo copy no build file backs any more."""
+def deg_rate_aggregates(settings: Settings, index: pa.Table) -> dict[str, dict]:
+    """{parca_cache: aggregates} from each build/provenance/deg_rates_<cache>.json (``w4c
+    deg-rates``): units per class and the not-a-fit share of basal mRNA expression, with the
+    cache's kb_sha256 (deg_rates.aggregates). The files stay in build/. Refuses a file whose
+    kb_sha256 is not the index's for that cache (the fit changed since it was classified); skips,
+    with a warning, a cache the index does not name."""
     expected = kb_sha256_by_cache(index)
     prefix = deg_rate_provenance.FILE_PREFIX
-    published: dict[str, dict] = {}
+    figures: dict[str, dict] = {}
     for path in sorted((settings.build_dir / "provenance").glob(prefix + "*.json")):
         document = read_json(path)
         cache = document.get("parca_cache") or path.stem[len(prefix):]
         if cache not in expected:
-            print("WARNING: {} is for parca cache {}, which the index does not name; not published".format(
+            print("WARNING: {} is for parca cache {}, which the index does not name; not summarised".format(
                 path, cache), file=sys.stderr)
             continue
         if document.get("kb_sha256") != expected[cache]:
             raise SystemExit("{}: kb_sha256 {} but the index records {} for {}; re-run `w4c deg-rates`".format(
                 path, document.get("kb_sha256"), expected[cache], cache))
-        target = settings.repo_dir / "provenance" / path.name
-        temporary = temp_path_for(target)
-        temporary.write_bytes(path.read_bytes())
-        rename_into_place(temporary, target)
-        published[cache] = {**deg_rate_provenance.headline(document), "path": "provenance/" + path.name}
-    stale = sorted(p.name for p in (settings.repo_dir / "provenance").glob(prefix + "*.json")
-                   if p.name not in {Path(v["path"]).name for v in published.values()})
-    if stale:
-        print("WARNING: {} in {} no longer match a build/provenance file the index names; `hub upload "
-              "--include provenance` would publish them: delete them".format(stale, settings.repo_dir / "provenance"),
-              file=sys.stderr)
-    return published
+        figures[cache] = deg_rate_provenance.aggregates(document)
+    return figures
 
 
 def git_commit(settings: Settings) -> tuple[str | None, bool]:
@@ -753,6 +757,7 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
     for config in configs:
         settings.config(config)
     check_kb_sha256(settings, pq.read_table(settings.index_path))
+    check_no_deg_rate_copies(settings)
     incomplete = check_complete(settings, configs, args.allow_incomplete)
     sentinels = export_sentinels(settings)
     parts = current_parts(sentinels)
@@ -776,7 +781,7 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
     report["failed_jobs"] = write_failed_jobs(settings, runs)
     report["scan_runs"] = write_scan_runs(settings, runs)
     index = pq.read_table(settings.index_path)
-    report["deg_rates"] = publish_deg_rates(settings, index)
+    report["deg_rates"] = deg_rate_aggregates(settings, index)
     summary = summarize(settings, index, parts, report, held)
     _write_text(settings.repo_dir / "README.md", card.render(settings, summary))
     write_atomic_json(settings.repo_dir / "manifest.json", manifest_payload(summary))

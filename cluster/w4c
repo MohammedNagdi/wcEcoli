@@ -10,7 +10,7 @@
 #     cluster/w4c export reconcile                            # sentinels -> ledger, lost parts
 #     cluster/w4c finalize                                    # locators, qc, stats, card
 #     cluster/w4c summarize && cluster/w4c finalize           # summary config from core; card again
-#     cluster/w4c deg-rates && cluster/w4c finalize           # degradation-rate provenance per Parca cache
+#     cluster/w4c deg-rates && cluster/w4c finalize           # degradation-rate counts per Parca cache (files stay in build/)
 #     cluster/w4c hub create                                  # private repo on the Hub
 #     cluster/w4c hub upload --include index,provenance,stats,manifest
 set -euo pipefail

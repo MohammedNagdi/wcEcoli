@@ -40,7 +40,10 @@ this module once per Parca cache the index names, as::
     W4C_SIM_PYTHON -m well4cell_build.deg_rates <out>/parca_cache_<hash> --out <json> --parca-cache <hash>
 
 writes ``build/provenance/deg_rates_<hash>.json`` and checks its ``kb_sha256`` against the
-index. ``finalize`` copies those files into ``repo/provenance/`` and the card summarises them.
+index. The file is a derived summary of the Stanford-licensed fitted parameters, so it stays in
+the build directory and is never published (ADR 0009): ``finalize`` reads it for ``aggregates``
+(the unit count of each class and the not-a-fit share of basal mRNA expression), which are all
+that reaches the card and ``manifest.json``.
 
 This module imports only numpy and the standard library at the top, so the simulation
 environment can run it; the build-side helpers import the rest lazily.
@@ -360,25 +363,33 @@ def cmd_deg_rates(settings, args: argparse.Namespace) -> list[dict]:
             raise SystemExit("{}: simData.cPickle hashes to {} but the index records {}; the cache changed since "
                              "`index build`".format(cache, document.get("kb_sha256"), want))
         if not want:
-            print("WARNING: the index does not name parca cache {}; finalize will not publish {}".format(cache, out),
+            print("WARNING: the index does not name parca cache {}; finalize will not summarise {}".format(cache, out),
                   file=sys.stderr)
-        report = {"parca_cache": cache, "path": str(out), **headline(document)}
+        report = {"parca_cache": cache, "path": str(out), **aggregates(document)}
         reports.append(report)
         print("wrote {}".format(out))
     append_jsonl(settings.ledger, {"at": now(), "stage": "deg-rates", "caches": reports})
     return reports
 
 
-def headline(document: dict) -> dict:
-    """The figures finalize records in the summary and the card prints."""
-    keys = ("kb_sha256", "n_mrna_units", "rate_floor_as_half_life_min", "rate_ceiling_as_half_life_min",
-            "imputation_constant_min", "on_floor", "on_ceiling", "imputed_average", "not_a_fit")
-    return {k: document[k] for k in keys if k in document}
+def aggregates(document: dict) -> dict:
+    """The only figures of a classification that are published (card and manifest.json): the
+    count of mRNA units in each class and in all, and the percent of basal mRNA expression the
+    not-a-fit classes carry. No unit ids, no bounds, no imputation constant (ADR 0009). A figure
+    the document lacks is None."""
+    def count(key: str):
+        return (document.get(key) or {}).get("n_units")
+    return {"kb_sha256": document.get("kb_sha256"),
+            "mrna_units": {"floor": count("on_floor"), "ceiling": count("on_ceiling"),
+                           "imputed": count("imputed_average"), "determined": count("determined"),
+                           "total": document.get("n_mrna_units")},
+            "not_a_fit_pct_basal_mrna_expression": (document.get("not_a_fit") or {}).get("pct_expression")}
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
     parser = sub.add_parser("deg-rates", help="classify each Parca cache's mRNA degradation rates (floor, ceiling, "
-                                              "imputed, determined) into build/provenance/deg_rates_<cache>.json")
+                                              "imputed, determined) into build/provenance/deg_rates_<cache>.json "
+                                              "(kept on the build side; only counts are published)")
     parser.add_argument("--cache", help="comma-separated parca cache hashes (default: every cache the index names)")
     parser.set_defaults(func=cmd_deg_rates)
 

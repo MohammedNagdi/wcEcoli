@@ -196,7 +196,6 @@ provenance/
   failed_jobs.parquet             the 971 failed jobs, provenance only
   export_qc.parquet               QC verdict of every trajectory in every config attempt, with reasons
   scan_runs.parquet               the scan record of every run
-  deg_rates_<parca_cache>.json    which mRNA degradation rates of that Parca cache are not fits
 data/<config>/<family>/part-NNNNN.parquet
 data/summary/<family>/part-00000.parquet   one row per trajectory (summarize, from core)
 ```
@@ -206,17 +205,22 @@ parameters, licensed with the model under the Stanford Academic Software License
 simulation output (ADR 0009). Each sample names its cache in `parca_cache` and the sha256 of
 that cache's `kb/simData.cPickle` in `kb_sha256`; `manifest.json` and the card list the pairs.
 
-`provenance/deg_rates_<parca_cache>.json` says, for each mRNA transcription unit of that
-cache, whether its degradation rate is a fit. The Parca bounds the fitted rates below by the
-slowest measured mRNA cistron (**floor**), clips them above at the fastest (**ceiling**), and
-gives a unit none of whose cistrons was measured the mean measured half-life (**imputed**);
-every other unit is **determined**. sim_data stores all four as the same kind of float, so a
-claim about a floor, ceiling or imputed transcript rests on a bound or a population mean. The
-file has the counts and the share of basal mRNA expression per class, the floor, ceiling and
-imputation constant as half-lives, the units of the three not-a-fit classes, and the eight
-most expressed of them, under the keys of Cellarium's `data/parca/deg_rate_baseline.json`
-(854 of 3,133 units, 12.087% of basal mRNA expression on Cellarium's fit) so the two compare.
-Its `kb_sha256` must equal the index's for that cache. The card summarises each file.
+Nor is the degradation-rate classification of each cache. `cluster/w4c deg-rates` writes
+`build/provenance/deg_rates_<parca_cache>.json`, which says, for each mRNA transcription unit
+of that cache, whether its degradation rate is a fit. The Parca bounds the fitted rates below
+by the slowest measured mRNA cistron (**floor**), clips them above at the fastest
+(**ceiling**), and gives a unit none of whose cistrons was measured the mean measured
+half-life (**imputed**); every other unit is **determined**. sim_data stores all four as the
+same kind of float, so a claim about a floor, ceiling or imputed transcript rests on a bound
+or a population mean. The file has the counts and the share of basal mRNA expression per
+class, the floor, ceiling and imputation constant as half-lives, the units of the three
+not-a-fit classes, and the eight most expressed of them, under the keys of Cellarium's
+`data/parca/deg_rate_baseline.json` (854 of 3,133 units, 12.087% of basal mRNA expression on
+Cellarium's fit) so the two compare. It is a derived summary of the fitted parameters, which
+ADR 0009 rejects shipping, so it stays with the campaign on klone. The repo carries only
+aggregates, in the card's Provenance section and `manifest.json` (`deg_rates`): per cache, its
+`kb_sha256`, the number of mRNA units in each class and in all, and the percent of basal mRNA
+expression the three not-a-fit classes carry. No unit ids, bounds or imputation constant.
 
 ### index.parquet
 
@@ -338,13 +342,15 @@ sentinel per task, an append-only ledger, and `cluster/well4cell.sbatch` always 
    unpickle `simData.cPickle` and `rawData.cPickle`), classify every mRNA transcription unit
    as floor, ceiling, imputed or determined, and write
    `build/provenance/deg_rates_<parca_cache>.json`, refusing one whose `kb_sha256` differs
-   from the index. The next finalize copies the files into `provenance/` and puts their
-   headline figures in the card and `manifest.json` (`deg_rates`); without them nothing
+   from the index. The next finalize reads the files from `build/provenance/` and puts only
+   their aggregates (units per class, not-a-fit share of basal mRNA expression) in the card
+   and `manifest.json` (`deg_rates`); it never copies them into the repo and refuses while a
+   copy from an earlier finalize is still in `repo/provenance/`. Without the files nothing
    refuses and the card has no paragraph.
 5. **hub**: `hub create` creates the repo private; `hub upload` pushes `repo/` with
    `hf upload`, resumable by re-running. huggingface_hub 2.1 has no `upload-large-folder`,
    the tool never deletes anything remotely, and every upload excludes
-   `provenance/parca_cache_*` and `*.cPickle`.
+   `provenance/parca_cache_*`, `*.cPickle` and `deg_rates_*.json`.
 
 Storage: confirm the organisation's plan, or email Hugging Face for an academic storage
 grant, before uploading the 1 s matrix configs.
@@ -401,11 +407,11 @@ seconds).
   Cellarium's 854 of 3,133 units and 12% of basal mRNA expression, each unit in exactly one
   class, and `cellarium_rule` (Cellarium's value-only rule, computed alongside) close to the
   main counts.
-- **Degradation-rate provenance, licence**: the files are derived from the fitted parameters,
-  and ADR 0009 rejected shipping "a derived summary of the parameters" as still a derivative
-  of the Stanford-licensed Software. Decide whether these files (counts, bounds, and per-unit
-  classes with expression shares) may be published before uploading `provenance` with them
-  in it.
+- **Degradation-rate provenance, licence**: decided 2026-10-15, not distributed. The
+  per-cache files (per-unit classes, expression shares, bounds, imputation constant) are a
+  derived summary of the fitted parameters, which ADR 0009 rejects shipping; they stay on
+  klone. The card and `manifest.json` carry aggregates only: units per class and the
+  not-a-fit share of basal mRNA expression, per cache.
 - **Card numbers**: the final counts, sizes and active-column totals are filled into the card
   from the finalize manifest; the figures in this document marked as sampled or measured on
   one run are estimates until then.
