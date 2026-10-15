@@ -188,3 +188,28 @@ def test_families_are_in_tier_order():
     from well4cell_build.settings import FAMILIES, FAMILY_BY_TIER
     assert FAMILIES == [FAMILY_BY_TIER["T{}".format(k)] for k in range(1, 6)]
     assert FAMILIES == ["wildtype_media", "single_knockout", "dynamic_media", "regulation", "double_knockout"]
+
+
+def test_kb_sha256_sits_next_to_parca_cache():
+    names = index.schema().names
+    assert names.index("kb_sha256") == names.index("parca_cache") + 1
+    assert index.schema().field("kb_sha256").type == "string"
+
+
+def test_kb_sha256_hashes_simdata_once_per_cache(tmp_path, monkeypatch):
+    import hashlib
+    payload = {"aaa": b"fitted parameters a" * 1000, "bbb": b"fitted parameters b"}
+    for cache, data in payload.items():
+        kb = tmp_path / ("parca_cache_" + cache) / "kb"
+        kb.mkdir(parents=True)
+        (kb / "simData.cPickle").write_bytes(data)
+        (kb / "rawData.cPickle").write_bytes(b"not hashed")
+    assert index.kb_sha256(tmp_path, "aaa") == hashlib.sha256(payload["aaa"]).hexdigest()
+    calls = []
+    real = index.kb_sha256
+    monkeypatch.setattr(index, "kb_sha256", lambda out, cache: calls.append(cache) or real(out, cache))
+    hashes, errors = index.kb_hashes(tmp_path, ["bbb", "aaa", "aaa", "bbb", "aaa"])
+    assert hashes == {c: hashlib.sha256(d).hexdigest() for c, d in payload.items()} and errors == []
+    assert sorted(calls) == ["aaa", "bbb"]
+    hashes, errors = index.kb_hashes(tmp_path, ["aaa", "missing"])
+    assert list(hashes) == ["aaa"] and len(errors) == 1 and "parca cache missing" in errors[0]

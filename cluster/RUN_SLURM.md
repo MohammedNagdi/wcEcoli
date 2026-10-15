@@ -441,8 +441,9 @@ cluster/w4c index reference        # provenance/reference/{genes,conditions,time
 ```
 
 `index build` **fails** if the database, a run's `metadata.json` and the scan disagree on
-seed or variant, if a done job is missing from `runs.jsonl` (the scan is incomplete), or if
-two experiments slugify to the same `cell_id`; fix the cause, do not work around it.
+seed or variant, if a done job is missing from `runs.jsonl` (the scan is incomplete), if
+two experiments slugify to the same `cell_id`, or if a Parca cache's `kb/simData.cPickle`
+cannot be read (it is hashed once per cache into `kb_sha256`); fix the cause, do not work around it.
 Non-fatal disagreements and runs the scan marked missing/failed are in
 `build/index_report.json`, which `index check` prints. T4 TF cells are named after the TF
 that actually ran, not the database's name (DESIGN.md, Known defects). Outcome labels are
@@ -493,18 +494,91 @@ cluster/w4c finalize
 
 Folds every ok export sentinel into the index locators, writes `export_qc.parquet`,
 `failed_jobs.parquet` and `scan_runs.parquet`, merges per-part stats into
-`stats/<family>.parquet`, copies the Parca caches the index names into `provenance/`
-(plain byte copies, never hard links into `out/`), renders `README.md` (the dataset card,
-with configs and family splits in its front matter) and writes `manifest.json`. It refuses
+`stats/<family>.parquet`, renders `README.md` (the dataset card, with configs and family
+splits in its front matter) and writes `manifest.json`. It does not copy the Parca caches:
+they are wcEcoli's fitted parameters under the Stanford licence (`docs/adr/0009`), so the
+dataset names each one by `parca_cache` and the sha256 of its `kb/simData.cPickle`
+(`kb_sha256`, computed by `index build`). An index built before that column existed is
+refused: re-run `cluster/w4c index build`, then finalize. A
+`repo/provenance/parca_cache_*` left by an older finalize gets a warning; delete it (`hub
+upload` excludes it and every `*.cPickle` regardless). It refuses
 while any part planned for the configs being finalized lacks an `ok` sentinel, and only
 warns about the other configs, so `cluster/w4c finalize --configs core` works while the
 matrix configs are still exporting (`--allow-incomplete` overrides the refusal; those
 trajectories then have null locators). It also refuses if a parquet under `data/` has no ok
 sentinel, or one trajectory is in two files of one config. Re-run it after any further
-export; `--skip-parca` skips the cache copy. `--hold-back core/single_knockout[,...]` leaves
+export. `--hold-back core/single_knockout[,...]` leaves
 exported `<config>/<family>` data out of the locators, stats, `manifest.json` and the card (which
 then says that data follows), for a staged upload; re-run finalize without it once that data is
 on the Hub, and upload `index`, `manifest`, `stats` and `readme` again.
+
+### Summarize
+
+```bash
+cluster/w4c finalize               # fills the core locators summarize checks against
+cluster/w4c summarize              # repo/data/summary/<family>/part-00000.parquet, every family with core parts
+cluster/w4c finalize               # again: the card and manifest.json now list the summary config
+cluster/w4c hub upload --include summary,manifest
+cluster/w4c hub upload --include readme
+```
+
+`summarize` writes the `summary` config (`docs/adr/0010`): one row per trajectory with
+`n_steps` and the mean, min, max, first and last of each of the 18 scalars, computed from the
+core parts at 1 s (`growth_rate` skips its null row 0). It streams each core file in record
+batches with pyarrow's read-ahead off (`pre_buffer=False`), so memory stays near 1 GB whatever
+the part size (0.66 GB peak on a 1 GB synthetic part, 1.67 GB with the read-ahead). It is one
+process, not an array, but it reads all of core (and with `--pathways` all of expression), so
+submit it as a batch job rather than running it on the login node:
+`sbatch --account=cpu-g2-amath --partition=cpu-g2 --mem=8G --time=04:00:00 --output=summarize-%j.out
+--wrap "cluster/w4c summarize"` from the repo root. It refuses,
+writing nothing, unless each family's rows are exactly the index's trajectories with a
+`core_file`, each with `n_steps == core_n_rows` at its `core_row_offset`: run it after a
+`finalize` that has seen every core part. `--families` limits it to some families (leave out
+a family held back with `--hold-back core/<family>`). Re-run it, and finalize, after any new
+core export; finalize warns when a summary's row count no longer matches the index. To
+build the summary elsewhere from downloaded core parts and the published index, point it at
+them: `summarize --core-dir <dir>/data/core --index <dir>/index.parquet --out-dir
+<dir>/data/summary` (nothing is appended to the ledger then).
+
+Pathway fractions are added once the `expression` export is complete for every family:
+
+```bash
+cluster/w4c summarize --pathways   # summary parts again, plus 13 pathway_<name> columns from data/expression
+cluster/w4c finalize
+cluster/w4c hub upload --include summary,manifest
+cluster/w4c hub upload --include readme
+```
+
+`--pathways` appends one `pathway_<name>` column (proteome fraction, Cellarium's definition and
+gene lists, `data/pathways.json`) per pathway, from the 10 s `protein_counts_matrix`. It
+refuses, writing nothing, if a family has no expression parts (narrow `--families` to try it
+on some), logs every gene symbol that does not resolve and every pruned monomer, and fails if
+a pathway resolves to no column. A later `summarize` without `--pathways` drops the columns,
+so keep the flag on every re-run once expression is complete.
+
+### Degradation-rate provenance
+
+```bash
+cluster/w4c deg-rates              # build/provenance/deg_rates_<parca_cache>.json, every cache the index names
+cluster/w4c deg-rates --cache <hash>
+cluster/w4c finalize               # copies them to repo/provenance/; the card gets a Degradation rates paragraph
+cluster/w4c hub upload --include provenance,manifest
+cluster/w4c hub upload --include readme
+```
+
+For each Parca cache, `deg-rates` runs `well4cell_build/deg_rates.py` under the simulation
+environment (`W4C_SIM_PYTHON`, default `micromamba run -n wcecoli-sim python`, since only it
+can unpickle `kb/simData.cPickle` and `kb/rawData.cPickle`) and classifies every mRNA
+transcription unit's degradation rate as floor (the NNLS lower bound, the slowest measured
+mRNA cistron), ceiling (clipped at the fastest), imputed (no cistron measured, so the mean
+measured half-life) or determined, weighted by basal expression. The JSON uses the keys of
+Cellarium's `deg_rate_baseline.json` (854 of 3,133 units, 12.087% of basal mRNA expression on
+their fit). It refuses a cache whose `simData.cPickle` no longer hashes to the index's
+`kb_sha256`. Expect about a minute and a few GB per cache (two unpickles); run it on a compute
+node (`srun --mem=8G ...` or `sbatch --wrap`) if the login node objects. The loader has not
+yet run on a real cache: check the first output (counts near Cellarium's, every unit in
+exactly one class, `cellarium_rule` close to the main counts) before publishing. Whether the
+files may be published at all is an open question (DESIGN.md section 9, ADR 0009).
 
 ### Upload
 
@@ -520,7 +594,7 @@ cluster/w4c hub status --files     # every remote file
 ```
 
 `--include` takes one comma-separated list of parts: `readme`, `index`, `manifest`,
-`stats`, `provenance`, `data`, or a config name (`core`, `expression`, ...); each part maps
+`stats`, `provenance`, `data`, or a config name (`core`, `expression`, ..., `summary`); each part maps
 to a glob of `repo/` (`data/<config>/**`, `provenance/**`, ...). `--families` narrows the
 config parts to `data/<config>/<family>/**` (e.g. `--include core --families
 wildtype_media,regulation`); the fixed parts are unaffected. Without `--include` every
@@ -543,11 +617,12 @@ Release (paper submission): make the repo public, tag `v1.0`, mint the DOI on th
 | `build/manifests/<stage>_<ts>_<id>.jsonl` | `plan` | one shard (scan) or one part (export) per line |
 | `build/manifests/<...>.sentinels/` | the task | per-task outcome: status, rows, bytes, seconds, per-sample offsets and QC, error tail |
 | `build/dispatch_log.jsonl` | `dispatch` | array id, manifest, indices, account, concurrency |
-| `build/ledger.jsonl` | `scan reduce`, `index build`, `export reconcile`, `finalize`, `hub create` / `upload` | append-only, fsync'd outcome record |
+| `build/ledger.jsonl` | `scan reduce`, `index build`, `export reconcile`, `finalize`, `summarize`, `deg-rates`, `hub create` / `upload` | append-only, fsync'd outcome record |
 | `build/index_report.json` | `index build` | excluded runs, fatal and non-fatal disagreements |
+| `build/provenance/deg_rates_<parca_cache>.json` | `deg-rates` | mRNA degradation-rate classes of that cache; finalize copies it to `repo/provenance/` |
 | `build/scan/` | `scan reduce` | `runs.jsonl`, `active_union.npz` |
 | `build/logs/w4c-*_<A>_<a>.out` | SLURM | task stdout |
-| `repo/` | `scan reduce`, `index`, `export`, `finalize` | exactly the tree that is uploaded |
+| `repo/` | `scan reduce`, `index`, `export`, `finalize`, `summarize` | exactly the tree that is uploaded |
 
 ### Knobs (`cluster/well4cell_env.sh`)
 
@@ -566,6 +641,7 @@ Release (paper submission): make the repo public, tag `v1.0`, mint the DOI on th
 | `W4C_CONCURRENCY` | `32` | array throttle (`%N`) |
 | `W4C_SCAN_SHARD_SIZE` | `200` | runs per scan task |
 | `W4C_JOB_PREFIX` | `w4c` | array job names; must not start with `wce` |
+| `W4C_SIM_PYTHON` | `${MICROMAMBA_BIN} run -n ${WCECOLI_SIM_ENV} python` | command line of a python that can unpickle sim_data (`deg-rates` only) |
 
 ## Troubleshooting
 

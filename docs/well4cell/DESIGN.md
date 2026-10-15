@@ -2,7 +2,7 @@
 
 The complete reference for the well4cell dataset: what is published, how it is shaped, how
 it is built from the pruned wcEcoli campaign, and what is still open. The decisions here are
-final; the reasoning behind the larger ones is recorded in `docs/adr/0002`-`0008`. The stage
+final; the reasoning behind the larger ones is recorded in `docs/adr/0002`-`0009`. The stage
 contracts the code is written against are in `cluster/well4cell_build/SPEC.md`; the runbook
 is section 9 of `cluster/RUN_SLURM.md`; the vocabulary is in `CONTEXT.md`.
 
@@ -11,7 +11,8 @@ is section 9 of `cluster/RUN_SLURM.md`; the vocabulary is in `CONTEXT.md`.
 Publish every finished whole-cell E. coli simulation of the campaign as one machine-learning
 dataset that loads with `datasets.load_dataset`, browses in the Hub viewer, queries with
 DuckDB, and carries enough provenance to trace any row back to the run directory, code
-revision and Parca cache it came from.
+revision and Parca cache it came from (by name and hash: the caches themselves are not
+distributed, ADR 0009).
 
 - **One artifact**: the Hugging Face dataset repo `datasets/cSynBioSys/well4cell`, private
   until paper submission, then public. Release `v1.0` is a git tag on that repo, licensed
@@ -87,12 +88,14 @@ should be treated as such by any viability task.
 
 ## 3. Products (configs)
 
-Every config is one row per time step, with `sample_id`, `t`, `t_abs` and the 18 scalar
-channels; the matrix configs add matrix columns.
+Every config but `summary` is one row per time step, with `sample_id`, `t`, `t_abs` and the
+18 scalar channels; the matrix configs add matrix columns. `summary` is one row per
+trajectory.
 
 | Config | Stride | Columns beyond core | Notes |
 |---|---|---|---|
-| `core` | 1 s | none (18 scalars) | ~10 GB |
+| `summary` | one row per trajectory | `n_steps`; mean, min, max, first, last of each scalar; 13 pathway fractions once `expression` is complete | from `core` (pathways from `expression`); ADR 0010 |
+| `core` | 1 s | none (18 scalars) | ~19 GB |
 | `expression` | 10 s | mRNA counts (3,133 mRNA transcription units), protein counts (4,310 monomers) | default |
 | `metabolism` | 10 s | reaction flux (9,612), exchange flux (87) | default |
 | `expression_1s` | 1 s | as `expression` | uploaded last, after a storage grant |
@@ -103,6 +106,38 @@ The 18 scalars, in column order: `cell_mass`, `dry_mass`, `protein_mass`, `rna_m
 `aa_supply_total`, `aa_synthesis_total`, `mrna_counts`, `n_oric`, `fba_objective`,
 `exchange_flux_total`, `reaction_flux_total`, `ribosome_elongation_rate`,
 `ribosome_actual_elongations`.
+
+**Summary** (ADR 0010). `data/summary/<family>/part-00000.parquet` has one row per
+trajectory, in index order, joining to `index.parquet` on `sample_id`: `sample_id`,
+`n_steps` (int32), then for each of the 18 scalars in the order above `<channel>_mean`,
+`_min`, `_max`, `_first`, `_last` over the trajectory's 1 s `core` rows. Statistics are
+float32 for float channels; for the int channels (`mrna_counts`, `n_oric`) min, max, first
+and last are int32 and the mean is float32. Nulls are skipped: `growth_rate` is null at row
+0, so `growth_rate_first` is the value at t = 1 (and every `growth_rate` statistic of a
+one-row trajectory is null). The `summarize` stage computes it from the core parts alone, so
+it is independent of the 10 s matrix configs. It is not in `settings.CONFIGS` and has no
+index locator: it is not exported from `channels.h5`. Field units and file metadata are as
+for the other products (`config` = `summary`, `stride` = 1); `sample_id` is a plain string
+(one row per trajectory, nothing to dictionary-encode).
+
+**Pathway fractions in the summary.** `summarize --pathways` appends 13 float32 columns
+`pathway_<name>` (unit `fraction`), one per pathway of the Cellarium pathway panel (gene
+symbols copied into `cluster/well4cell_build/data/pathways.json` from Cellarium's
+`pathway_panel.py`, MIT). The definition is Cellarium's, so the two datasets agree: at each
+10 s `expression` row, the pathway's `protein_counts_matrix` counts over the row's total
+(the pruned matrix sums to the total over all monomers), then the mean over the trajectory.
+Symbols map through `genes.parquet` (`symbol` to `monomer_id`) to the `protein_counts`
+reference (ids carry a `[c]`-style compartment suffix); all 13 pathways resolve fully on this
+campaign. The columns live in the same summary parts and exist only for a family whose
+`expression` parts exist, so they are added when the expression export is complete: the
+stage refuses `--pathways` for a family without them rather than writing null columns, and
+the published summary has no pathway columns until then.
+
+**Translation collapse.** A generation can divide while its ribosomes have stopped. Cellarium
+flags `translation_collapse` when the mean ribosome elongation rate is below 1 aa/s; here
+that is `ribosome_elongation_rate_mean < 1` in `summary` (`settings.COLLAPSE_RATE`), counted
+by finalize into the card's Outcomes and `manifest.json` (6,273 trajectories in 1.0.0-rc1,
+4,188 of them with `termination_class` none). It is not yet an index column.
 
 **Stride.** The 10 s products are point samples, not averages: keep rows with `t % 10 == 0`
 plus the last row of the sample, so the division state is always present. A 10 s product is
@@ -151,7 +186,6 @@ index.parquet                     one row per sample
 stats/<family>.parquet            per channel and per active matrix column: n, mean, std, min, max
 provenance/
   sim_options/<hash>.json         each distinct sim options set, keyed by sim_options_hash
-  parca_cache_<hash>/             the two Parca caches the campaign used
   reference/
     mrna_counts.parquet           id list + active mask + product_column
     protein_counts.parquet
@@ -162,8 +196,27 @@ provenance/
   failed_jobs.parquet             the 971 failed jobs, provenance only
   export_qc.parquet               QC verdict of every trajectory in every config attempt, with reasons
   scan_runs.parquet               the scan record of every run
+  deg_rates_<parca_cache>.json    which mRNA degradation rates of that Parca cache are not fits
 data/<config>/<family>/part-NNNNN.parquet
+data/summary/<family>/part-00000.parquet   one row per trajectory (summarize, from core)
 ```
+
+The two Parca caches the campaign used are not in the repo. They are wcEcoli's fitted
+parameters, licensed with the model under the Stanford Academic Software License, not
+simulation output (ADR 0009). Each sample names its cache in `parca_cache` and the sha256 of
+that cache's `kb/simData.cPickle` in `kb_sha256`; `manifest.json` and the card list the pairs.
+
+`provenance/deg_rates_<parca_cache>.json` says, for each mRNA transcription unit of that
+cache, whether its degradation rate is a fit. The Parca bounds the fitted rates below by the
+slowest measured mRNA cistron (**floor**), clips them above at the fastest (**ceiling**), and
+gives a unit none of whose cistrons was measured the mean measured half-life (**imputed**);
+every other unit is **determined**. sim_data stores all four as the same kind of float, so a
+claim about a floor, ceiling or imputed transcript rests on a bound or a population mean. The
+file has the counts and the share of basal mRNA expression per class, the floor, ceiling and
+imputation constant as half-lives, the units of the three not-a-fit classes, and the eight
+most expressed of them, under the keys of Cellarium's `data/parca/deg_rate_baseline.json`
+(854 of 3,133 units, 12.087% of basal mRNA expression on Cellarium's fit) so the two compare.
+Its `kb_sha256` must equal the index's for that cache. The card summarises each file.
 
 ### index.parquet
 
@@ -221,7 +274,8 @@ One row per sample, sorted by `family` in tier order (T1..T5), then `cell_id`, `
 | | `run_dir` | string | run directory under `out/` |
 | | `h5_group` | string | group in the run's `export/channels.h5`, `seed<S>/gen<G>` with S the run's seed, e.g. `seed0/gen0`; export reads through it |
 | | `git_hash` | string | code revision of the attempt |
-| | `parca_cache` | string | Parca cache directory |
+| | `parca_cache` | string | Parca cache directory (`<hash>` of `out/parca_cache_<hash>`); the cache is not distributed |
+| | `kb_sha256` | string | sha256 of that cache's `kb/simData.cPickle`, the fitted parameter set the run used; the set itself is not distributed |
 | | `sim_options_hash` | string | sha256 of `metadata.json` minus the per-run keys and the keys carried as columns (`git_hash`, `timeline`, `multi_ko_indices`); key into `provenance/sim_options/` |
 | locators | `<config>_file` | string | part file holding the sample in that config |
 | | `<config>_row_offset` | int64 | first row in that file |
@@ -260,21 +314,37 @@ sentinel per task, an append-only ledger, and `cluster/well4cell.sbatch` always 
    masks. `scan reduce` folds the shards into `build/scan/runs.jsonl`, the global active
    union and the reference tables.
 2. **index**: `index build` writes `index.parquet` and `provenance/sim_options/` from the
-   campaign database, each run's `metadata.json` and the scan; it fails if the sources
-   disagree on seed or variant. `index reference` writes the database reference tables
+   campaign database, each run's `metadata.json` and the scan, and hashes each Parca cache's
+   `kb/simData.cPickle` once for `kb_sha256`; it fails if the sources disagree on seed or
+   variant, or a cache cannot be read. `index reference` writes the database reference tables
    (genes, conditions, timelines, media recipes, TF edges, TF activity).
 3. **export** (SLURM array): one task per output part (one config, one family, ~2 GB).
    Resumable: a re-run skips parts whose success sentinel exists. Each sentinel reports
    rows, bytes, per-sample offsets, QC results and a stats file.
 4. **finalize**: fold the export sentinels into the index locators, write
    `export_qc.parquet`, merge the stats into `stats/<family>.parquet`, write
-   `failed_jobs.parquet` and `scan_runs.parquet`, copy the two Parca caches (plain byte
-   copies, never hard links into `out/`), render the dataset card, and write
-   `manifest.json`. It refuses while any planned part of the configs being finalized lacks
-   an `ok` sentinel (`--allow-incomplete` overrides) and only warns about other configs.
+   `failed_jobs.parquet` and `scan_runs.parquet`, render the dataset card, and write
+   `manifest.json` (with the `kb_sha256` of each Parca cache). It does not copy the Parca
+   caches (ADR 0009) and refuses an index without `kb_sha256`. It refuses while any planned
+   part of the configs being finalized lacks an `ok` sentinel (`--allow-incomplete`
+   overrides) and only warns about other configs.
+   **summarize** (after finalize): stream the core parts into `data/summary/<family>/`,
+   one row per trajectory, refusing unless the rows match the index's core locators one for
+   one (`n_steps == core_n_rows`); then finalize again so the card and `manifest.json` list
+   the summary (ADR 0010). Once the `expression` export is complete, `summarize --pathways`
+   adds the 13 pathway fractions to the same parts; then finalize and upload the summary again.
+   **deg-rates** (any time after `index build`): for each Parca cache the index names, run
+   `well4cell_build.deg_rates` under the simulation environment (`W4C_SIM_PYTHON`, which can
+   unpickle `simData.cPickle` and `rawData.cPickle`), classify every mRNA transcription unit
+   as floor, ceiling, imputed or determined, and write
+   `build/provenance/deg_rates_<parca_cache>.json`, refusing one whose `kb_sha256` differs
+   from the index. The next finalize copies the files into `provenance/` and puts their
+   headline figures in the card and `manifest.json` (`deg_rates`); without them nothing
+   refuses and the card has no paragraph.
 5. **hub**: `hub create` creates the repo private; `hub upload` pushes `repo/` with
    `hf upload`, resumable by re-running. huggingface_hub 2.1 has no `upload-large-folder`,
-   and the tool never deletes anything remotely.
+   the tool never deletes anything remotely, and every upload excludes
+   `provenance/parca_cache_*` and `*.cPickle`.
 
 Storage: confirm the organisation's plan, or email Hugging Face for an academic storage
 grant, before uploading the 1 s matrix configs.
@@ -323,6 +393,19 @@ seconds).
   `expression_1s` and `metabolism_1s` uploads.
 - **Package**: the `well4cell` repository, PyPI release and baselines.
 - **DOI**: mint at release, after the repo goes public with the `v1.0` tag.
+- **`translation_collapse` index column**: a boolean next to `termination_class`
+  (`ribosome_elongation_rate` mean below 1 aa/s), set by `index build`; not implemented yet.
+  The card states the predicate on `summary` meanwhile.
+- **Degradation-rate provenance, first run**: `deg_rates.py` is tested on synthetic arrays
+  only; its loader has never read a real cache. Check the first output: counts near
+  Cellarium's 854 of 3,133 units and 12% of basal mRNA expression, each unit in exactly one
+  class, and `cellarium_rule` (Cellarium's value-only rule, computed alongside) close to the
+  main counts.
+- **Degradation-rate provenance, licence**: the files are derived from the fitted parameters,
+  and ADR 0009 rejected shipping "a derived summary of the parameters" as still a derivative
+  of the Stanford-licensed Software. Decide whether these files (counts, bounds, and per-unit
+  classes with expression shares) may be published before uploading `provenance` with them
+  in it.
 - **Card numbers**: the final counts, sizes and active-column totals are filled into the card
   from the finalize manifest; the figures in this document marked as sampled or measured on
   one run are estimates until then.

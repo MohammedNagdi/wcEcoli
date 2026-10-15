@@ -53,7 +53,10 @@ present in the scan.
 Provenance. job_id, attempt, started_at from simulation_jobs; run_dir = sim_dir; h5_group
 "seed<S>/gen<G>" with S the scan's seed group (seed0..seed7, equal to the job's seed, which
 is checked above); export reads trajectories through this column; git_hash from metadata.json; parca_cache = readlink(<run>/kb) ->
-"../parca_cache_<hash>/kb" -> "<hash>"; sim_options_hash = sha256 of metadata.json minus
+"../parca_cache_<hash>/kb" -> "<hash>"; kb_sha256 = sha256 of
+out/parca_cache_<hash>/kb/simData.cPickle, hashed once per distinct cache (a missing or
+unreadable cache is fatal). The fitted parameter set identifies the run's model but is not
+distributed (it is part of wcEcoli, under the Stanford licence; ADR 0009); sim_options_hash = sha256 of metadata.json minus
 the per-run keys (description, time, seed, variant) and the keys carried as their own
 columns (git_hash, timeline, multi_ko_indices), json-dumped with sorted keys; every
 distinct option set is written to provenance/sim_options/<hash>.json.
@@ -127,7 +130,7 @@ def schema() -> pa.Schema:
         ("split_by_lineage", pa.string()), ("split_by_gene", pa.string()),
         ("job_id", pa.int32()), ("attempt", pa.int8()), ("started_at", pa.string()), ("run_dir", pa.string()),
         ("h5_group", pa.string()), ("git_hash", pa.string()), ("parca_cache", pa.string()),
-        ("sim_options_hash", pa.string()),
+        ("kb_sha256", pa.string()), ("sim_options_hash", pa.string()),
     ]
     for name in CONFIGS:
         fields += [(name + "_file", pa.string()), (name + "_row_offset", pa.int64()), (name + "_n_rows", pa.int32())]
@@ -159,6 +162,26 @@ def read_run_files(out_dir: Path, run_dir: str) -> dict:
     except Exception as error:  # noqa: BLE001 - reported as a fatal disagreement
         record["error"] = "{}: {}".format(type(error).__name__, error)
     return record
+
+
+def kb_sha256(out_dir: Path, parca_cache: str) -> str:
+    """sha256 of the fitted parameter set (kb/simData.cPickle) of ``parca_cache_<parca_cache>``."""
+    digest = hashlib.sha256()
+    with (out_dir / ("parca_cache_" + parca_cache) / "kb" / "simData.cPickle").open("rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def kb_hashes(out_dir: Path, caches) -> tuple[dict[str, str], list[str]]:
+    """``kb_sha256`` of each distinct cache, read once each, and the caches that could not be read."""
+    hashes, errors = {}, []
+    for cache in sorted(set(caches)):
+        try:
+            hashes[cache] = kb_sha256(out_dir, cache)
+        except OSError as error:
+            errors.append("parca cache {}: cannot hash kb/simData.cPickle: {}".format(cache, error))
+    return hashes, errors
 
 
 def sim_options(metadata: dict) -> tuple[str, dict]:
@@ -348,6 +371,11 @@ def cmd_build(settings: Settings, args: argparse.Namespace) -> dict:
                 "sim_options_hash": options_hash,
             })
 
+    hashes, unreadable = kb_hashes(settings.out_dir, (r["parca_cache"] for r in rows))
+    fatal += unreadable
+    for r in rows:
+        r["kb_sha256"] = hashes.get(r["parca_cache"])
+
     seen = Counter(r["sample_id"] for r in rows)
     fatal += ["duplicate sample_id {} ({}x)".format(s, n) for s, n in seen.items() if n > 1]
     cells = defaultdict(set)
@@ -358,7 +386,7 @@ def cmd_build(settings: Settings, args: argparse.Namespace) -> dict:
     report = {"at": now(), "runs_jsonl": str(runs_path), "done_jobs": len(jobs), "indexed_jobs": len({r["job_id"] for r in rows}),
               "rows": len(rows), "excluded": excluded, "fatal": fatal[:500], "n_fatal": len(fatal),
               "notes": {k: {"count": len(v), "examples": v[:20]} for k, v in notes.items()},
-              "sim_option_sets": len(option_sets), "partial": bool(args.partial)}
+              "sim_option_sets": len(option_sets), "kb_sha256": hashes, "partial": bool(args.partial)}
     write_atomic_json(settings.build_dir / "index_report.json", report)
     if fatal:
         for line in fatal[:30]:

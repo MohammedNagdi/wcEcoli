@@ -8,7 +8,10 @@ file is the build manager). This file is the interface contract the stage owners
 ```
 $W4C_ROOT/ (default $WCECOLI_CAMPAIGN_ROOT/well4cell)
   build/   manifests/ <stage>_<ts>_<id>.jsonl + .sentinels/   logs/   scan/runs.jsonl   scan/active_union.npz   index_report.json   ledger.jsonl   dispatch_log.jsonl
+           provenance/deg_rates_<parca_cache>.json
   repo/    README.md  manifest.json  index.parquet  stats/<family>.parquet  provenance/...  data/<config>/<family>/part-NNNNN.parquet
+           provenance/deg_rates_<parca_cache>.json
+           data/summary/<family>/part-00000.parquet
 ```
 
 ## Families (by tier parsed from experiments.name prefix `[T1]`..`[T5]`; `[T2_CORE]` is T2)
@@ -27,6 +30,36 @@ Every config repeats the 18 scalars plus sample_id, t, t_abs.
 run_dir, job_id, job_status (done|failed), status (ok|failed|missing), seed, reference_hash,
 reference_sizes{matrix: N}, generations[{generation, n_steps, t0, t_end, uniform_1s, channels[], matrices[], attrs{}}].
 
+## Summary config (settings.SUMMARY_CONFIG = "summary"; summarize.py; docs/adr/0010)
+Not in settings.CONFIGS: not exported, no export sentinels, no index locator columns.
+`summarize` (after finalize has filled the core locators) streams repo/data/core/<family>/part-*.parquet
+and writes repo/data/summary/<family>/part-00000.parquet, one row per trajectory in index order:
+sample_id (string), n_steps (int32), then for each scalar in SCALAR_CHANNELS order
+<channel>_mean, _min, _max, _first, _last over the 1 s core rows. float32 for float channels; for
+INT_SCALARS min/max/first/last are int32 and mean float32. Nulls are skipped (growth_rate row 0, so
+growth_rate_first is the value at t = 1); a statistic with no non-null value is null. Field metadata
+`unit` from the core field; file metadata as below with config "summary", stride 1. Refuses (writes
+nothing) unless, per family, the rows are exactly the index rows with a non-null core_file, each with
+n_steps == core_n_rows and starting at core_row_offset of core_file. --core-dir, --index, --out-dir
+override the repo/ paths (to run on downloaded core parts). finalize counts summary parts from the
+files (rows = trajectories), skips them in the orphan-file check, warns when a family's rows differ
+from its located core trajectories, never refuses for a missing summary, and drops a summary family
+whose core family is held back. hub upload accepts `summary` as a part.
+`summarize --pathways` (pathways.py) appends, after the statistics, one float32 column `pathway_<name>`
+(unit `fraction`) per pathway of data/pathways.json (Cellarium's PATHWAY_PANEL, MIT, copied): per
+expression row, sum of the pathway's protein_counts_matrix columns over the row sum (a row summing to 0 is
+skipped), mean over the trajectory's 10 s rows. Symbols resolve via provenance/reference/genes.parquet
+symbol -> monomer_id -> protein_counts.parquet id minus its `[c]` compartment suffix -> product_column;
+unresolved symbols and pruned (active false) monomers are logged to stderr, a pathway with no column is
+fatal. It refuses, writing nothing, if a family being summarized has no repo/data/expression/<family>
+parts (--expression-dir, --reference-dir override the paths), and when the index has expression locators
+the expression trajectories and row counts must equal them; a summary row without expression rows gets
+nulls. Without --pathways there are no pathway columns. Run it once the expression export is complete.
+finalize lists the pathway columns of the summary parts (config entry `pathways`, per family
+`pathway_columns`) and the card describes them; finalize also counts `translation_collapse`
+(ribosome_elongation_rate_mean < settings.COLLAPSE_RATE = 1 aa/s, and how many have termination_class
+none) from the summary parts into the card's Outcomes and manifest.json `translation_collapse`.
+
 ## index.parquet (one row per trajectory, sorted by family in tier order T1..T5, then cell_id, seed, generation)
 Column order and types: index.schema(). Column provenance: index.py and perturbation.py docstrings.
 identity: sample_id (= lineage_id + "/g{gen}"), lineage_id (= cell_id + "/s{seed}"), cell_id
@@ -38,7 +71,7 @@ design: family, tier ("T1".."T5"), variant_type, variant_index (int32), variant 
 perturbation: knockout_genes list<string>, knockout_gene_ids list<string>, knockout_tu_ids list<string> (a knockout zeroes a whole TU), media_schedule list<struct<t_abs_sec:int32, medium:string>> (lineage-absolute seconds), medium_at_birth, medium_at_division, media_a, media_b, period_sec (int32, sinusoidal only), tf_target (true TF symbol), tf_target_id (TF EcoCyc id), tf_state, ppgpp_setpoint_um (float32), ppgpp_factor (float32), aa_shift (string), perturbation_text
 outcome: n_steps int32, divided bool (= not terminated), terminated bool (lineage ended in THIS generation), termination_class string (none|time_limit|negative_counts|fba_infeasible|equilibrium_unstable|other), termination_reason, division_time_sec float32 (= n_steps-1 when divided else null), final_mass_fg float32, growth_rate float32 (mean of non-null growth_rate), lineage_terminated bool, lineage_generations int8 (generations present)
 splits: split_by_lineage, split_by_gene (string train|val|test; fixed seed W4C_SPLIT_SEED; 80/10/10; lineage split stratified by cell within family; gene split holds out whole genes, non-knockout rows go to train)
-provenance: job_id int32, attempt int8, started_at, run_dir, h5_group ("seed0/gen0": the scan's seed group, seed<S> with S = the job's seed), git_hash, parca_cache, sim_options_hash (sha256 of metadata.json minus description/time/seed/variant and minus the keys carried as columns: git_hash, timeline, multi_ko_indices)
+provenance: job_id int32, attempt int8, started_at, run_dir, h5_group ("seed0/gen0": the scan's seed group, seed<S> with S = the job's seed), git_hash, parca_cache (the <hash> of out/parca_cache_<hash>), kb_sha256 (sha256 of out/parca_cache_<hash>/kb/simData.cPickle, hashed once per distinct cache at index build; an unreadable cache is fatal), sim_options_hash (sha256 of metadata.json minus description/time/seed/variant and minus the keys carried as columns: git_hash, timeline, multi_ko_indices)
 locators (filled by finalize, null before): <config>_file, <config>_row_offset (int64), <config>_n_rows (int32) for each config name.
 
 ## export manifest line
@@ -60,16 +93,44 @@ scalar channel, k = active columns in product_column order for a matrix. NaN is 
 (growth_rate row 0); a column with no finite value has n 0, min +inf, max -inf. finalize sums
 n/sum/sumsq and reduces min/max over the parts of a family into stats/<family>.parquet.
 
-## parquet
+## parquet (summary: see above; one row per trajectory, sample_id plain string)
 compression zstd, row_group_size W4C_ROW_GROUP_ROWS (2048), sample_id dictionary-encoded, units in field metadata (b"unit"), file metadata: {"well4cell_version", "config", "family", "stride"}.
 Column order: sample_id, t, t_abs, 18 scalars in settings.SCALAR_CHANNELS order, then matrices as fixed_size_list<int32|float32>.
 
 ## Ownership
 scan.py / h5io.py / settings.py / ledger.py: manager (done). index.py + perturbation.py: agent "index".
-export.py + stats.py: agent "export". finalize.py + card.py + hub.py: agent "publish". docs/: agent "docs".
+export.py + stats.py: agent "export". summarize.py, deg_rates.py, finalize.py + card.py + hub.py: agent "publish". docs/: agent "docs".
 
 ## finalize completeness rule
 finalize refuses while any part planned (in any export manifest) for the configs being
 finalized (`--configs`, default all) has no sentinel or a failed one; incomplete parts of other
-configs only warn. `--allow-incomplete` overrides. Parca caches are copied byte-for-byte
-(shutil.copyfile), never hard-linked.
+configs only warn. `--allow-incomplete` overrides.
+
+## Parca caches are never published (docs/adr/0009)
+They are wcEcoli's fitted parameters (Stanford licence), not simulation output. finalize does
+not copy them; the repo identifies them by index `parca_cache` + `kb_sha256` and by
+manifest.json `kb_sha256` ({parca_cache: sha256}). finalize refuses an index without
+kb_sha256 or with a cache that has other than one hash, and warns about a stale
+repo/provenance/parca_cache_* left by an older finalize. hub upload always excludes
+`provenance/parca_cache_*/**` and `**/*.cPickle`.
+
+## Degradation-rate provenance (deg_rates.py)
+`deg-rates [--cache h1,h2]` runs, per Parca cache the index names (default) or given, `W4C_SIM_PYTHON -m
+well4cell_build.deg_rates <out>/parca_cache_<h> --out build/provenance/deg_rates_<h>.json --parca-cache <h>`
+(W4C_SIM_PYTHON: a command line for wcecoli-sim; PYTHONPATH = repo/cluster:repo, cwd repo root). The child
+unpickles kb/simData.cPickle and kb/rawData.cPickle and classifies every mRNA TU (rna_data is_mRNA) as floor,
+ceiling, imputed or determined (module docstring; rate divided by its rna_deg_rates_adjustments factor first;
+relative tolerance RTOL), weighted by rna_expression['basal'] over mRNA. The pure part, `provenance(...)`
+(numpy in, dict out), is what the tests cover; `load_inputs` is untested here. JSON keys (Cellarium's
+deg_rate_baseline.json where the meaning is the same): parca_cache, kb_sha256 (of simData.cPickle),
+generated_by, n_mrna_units, rate_floor_as_half_life_min, rate_ceiling_as_half_life_min,
+imputation_constant_min, n_measured_mrna_cistrons, on_floor / on_ceiling / imputed_average / not_a_fit /
+determined {n_units, pct_units, pct_expression}, most_expressed_not_a_fit [{id, class,
+pct_of_mrna_expression}] (8), units_not_a_fit {floor|ceiling|imputed: {id: pct}, determined_is_the_complement},
+adjusted_units {id: {factor, class}}, not_a_fit_across_conditions, cellarium_rule {floor, ceiling, imputed,
+not_a_fit, rule}, rtol, rules, note, warnings (only when the imputation constant is not the mean of the
+measured half-lives). The parent refuses (renaming the file to .mismatch) when kb_sha256 differs from the
+index's. finalize copies every build/provenance/deg_rates_*.json whose cache the index names into
+repo/provenance/ (refuses a kb_sha256 mismatch, warns and skips an unnamed cache, warns about a repo copy no
+build file backs), and records `deg_rates` {parca_cache: headline + path} in the summary and manifest.json;
+the card's Provenance section gets a paragraph only when it is non-empty. hub `provenance` uploads them.

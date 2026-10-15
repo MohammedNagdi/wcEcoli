@@ -68,6 +68,18 @@ CONFIGS = {
     "metabolism_1s": Config("metabolism_1s", 1, ("reaction_flux_matrix", "exchange_flux_matrix"), 2800),
 }
 
+# The per-trajectory summary (summarize.py, ADR 0010): one row per trajectory, computed from
+# core. Deliberately not in CONFIGS: CONFIGS drives export planning and the index locator
+# columns, and the summary is neither exported from channels.h5 nor located in the index.
+SUMMARY_CONFIG = "summary"
+# Statistics per scalar channel, in column order: <channel>_<stat>.
+SUMMARY_STATS = ("mean", "min", "max", "first", "last")
+# Cellarium's `translation_collapse`: mean ribosome elongation rate over the generation below
+# this many aa/s, an order of magnitude below the slowest rate measured in E. coli (Dai et al.
+# 2016). finalize counts `ribosome_elongation_rate_mean < COLLAPSE_RATE` in the summary config.
+COLLAPSE_RATE = 1.0
+
+
 @dataclass
 class Settings:
     campaign_root: Path
@@ -90,6 +102,8 @@ class Settings:
     scan_shard_size: int
     job_prefix: str
     repo_root: Path
+    # Command line of a python that can unpickle sim_data (wcecoli-sim); only deg-rates uses it.
+    sim_python: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -119,6 +133,7 @@ class Settings:
             scan_shard_size=int(_env("W4C_SCAN_SHARD_SIZE", "200")),
             job_prefix=_env("W4C_JOB_PREFIX", "w4c"),
             repo_root=repo_root,
+            sim_python=_env("W4C_SIM_PYTHON", ""),
         )
 
     # -- layout ---------------------------------------------------------------

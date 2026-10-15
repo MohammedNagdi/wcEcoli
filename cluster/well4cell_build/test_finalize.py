@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +19,8 @@ from well4cell_build.settings import CONFIGS, MATRIX_CHANNELS, SCALAR_CHANNELS, 
 
 REFERENCE_COLUMNS = 6
 ACTIVE = {m: np.array([True, False, True, True, False, True]) for m in MATRIX_CHANNELS}
+PARCA_CACHE = "5558948af4ad806f21d7c80c"
+KB_SHA256 = "8ff93a58" * 8
 CELLS = {"wildtype_media": ["T1/wildtype/basal", "T1/wildtype/acetate"],
          "single_knockout": ["T2/argG_KO/basal"]}
 
@@ -57,7 +58,8 @@ def samples(n_generations: int = 2) -> list[dict]:
                             "family": family, "generation": generation, "seed": 0,
                             "termination_class": "none" if generation == 0 else "time_limit",
                             "split_by_lineage": "train", "split_by_gene": "train",
-                            "git_hash": "abc123", "sim_options_hash": "opt1", "parca_cache": None})
+                            "git_hash": "abc123", "sim_options_hash": "opt1",
+                            "parca_cache": PARCA_CACHE, "kb_sha256": KB_SHA256})
     return out
 
 
@@ -328,20 +330,77 @@ def test_completeness_refuses_only_for_the_configs_being_finalized(tmp_path, mon
     assert len(finalize.check_complete(settings, ["expression"], allow_incomplete=True)) == 1
 
 
-def test_parca_caches_are_copied_never_linked(tmp_path, monkeypatch):
+def write_campaign_db(settings: Settings) -> None:
+    """The two campaign tables write_failed_jobs reads, with one failed job."""
+    import sqlite3
+    settings.database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(settings.database)
+    connection.executescript(
+        "create table experiments (id integer primary key, name text);"
+        "create table simulation_jobs (id integer primary key, experiment_id integer, variant_type text, "
+        "variant_index integer, condition text, seed integer, attempt integer, error_message text, sim_dir text, "
+        "status text);"
+        "insert into experiments values (1, '[T1] wildtype/basal');"
+        "insert into simulation_jobs values (7, 1, 'wildtype', 0, 'basal', 3, 1, 'boom', '/out/run_7', 'failed');")
+    connection.commit()
+    connection.close()
+    (settings.scan_dir / "runs.jsonl").write_text(json.dumps(
+        {"run_dir": "run_7", "job_id": 7, "job_status": "failed", "status": "missing", "seed": 3}) + "\n")
+
+
+def finalize_args(**overrides):
+    import argparse
+    return argparse.Namespace(**{"configs": None, "hold_back": None, "allow_incomplete": False, **overrides})
+
+
+def test_parca_caches_are_identified_by_hash_never_copied(tmp_path, monkeypatch):
     settings = make_settings(tmp_path, monkeypatch)
-    source = settings.out_dir / "parca_cache_abc" / "kb"
-    source.mkdir(parents=True)
-    pickle = source / "simData.cPickle"
-    pickle.write_bytes(b"x" * 1000)
-    before = os.stat(pickle)
-    copied = finalize.copy_parca_caches(settings, ["parca_cache_abc"])
-    target = settings.repo_dir / "provenance" / "parca_cache_abc" / "kb" / "simData.cPickle"
-    after = os.stat(pickle)
-    assert copied == {"parca_cache_abc": 1000}
-    assert target.read_bytes() == pickle.read_bytes()
-    assert after.st_nlink == 1 and before.st_ino == after.st_ino
-    assert os.stat(target).st_ino != after.st_ino
+    build_tree(settings)
+    write_campaign_db(settings)
+    cache = settings.out_dir / ("parca_cache_" + PARCA_CACHE) / "kb"
+    cache.mkdir(parents=True)
+    (cache / "simData.cPickle").write_bytes(b"x" * 1000)
+    finalize.cmd_finalize(settings, finalize_args())
+    assert not any(settings.repo_dir.rglob("*.cPickle"))
+    assert not list((settings.repo_dir / "provenance").glob("parca_cache_*"))
+    assert not hasattr(finalize, "copy_parca_caches")
+    manifest = json.loads((settings.repo_dir / "manifest.json").read_text())
+    assert manifest["kb_sha256"] == {PARCA_CACHE: KB_SHA256} and "parca_caches" not in manifest
+    index = pq.read_table(settings.index_path)
+    assert index.column("kb_sha256").to_pylist() == [KB_SHA256] * index.num_rows
+    card_text = (settings.repo_dir / "README.md").read_text()
+    provenance = card_text[card_text.index("## Provenance"):card_text.index("## Licence")]
+    assert "`{}` (sha256 `{}`)".format(PARCA_CACHE, KB_SHA256) in provenance
+    assert "The Parca caches themselves are not included in this repo" in provenance
+    assert "cPickle`:" not in provenance and "MB)" not in provenance
+    assert "| `kb_sha256` | string | sha256 of the fitted parameter set (simData.cPickle) used;" in card_text
+
+
+def test_finalize_refuses_an_index_without_kb_sha256(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    index = pq.read_table(settings.index_path)
+    pq.write_table(index.drop_columns(["kb_sha256"]), settings.index_path)
+    with pytest.raises(SystemExit, match="no kb_sha256 column"):
+        finalize.cmd_finalize(settings, finalize_args())
+    column = index.schema.get_field_index("kb_sha256")
+    nulled = index.set_column(column, "kb_sha256", pa.array([None] + [KB_SHA256] * (index.num_rows - 1), pa.string()))
+    pq.write_table(nulled, settings.index_path)
+    with pytest.raises(SystemExit, match="without exactly one kb_sha256"):
+        finalize.cmd_finalize(settings, finalize_args())
+
+
+def test_stale_parca_copy_warns_and_is_never_uploaded(tmp_path, monkeypatch, capsys):
+    from well4cell_build import hub
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    stale = settings.repo_dir / "provenance" / ("parca_cache_" + PARCA_CACHE) / "kb"
+    stale.mkdir(parents=True)
+    finalize.check_kb_sha256(settings, pq.read_table(settings.index_path))
+    assert "must not be published" in capsys.readouterr().err
+    argv = hub.upload_argv(settings, hub.include_globs(settings, ["provenance"]), "m")
+    excludes = [argv[i + 1] for i, a in enumerate(argv) if a == "--exclude"]
+    assert "provenance/parca_cache_*/**" in excludes and "**/*.cPickle" in excludes
 
 
 def test_hold_back_leaves_a_family_out_of_locators_and_card(tmp_path, monkeypatch):
@@ -381,3 +440,74 @@ def test_hub_include_globs_narrow_configs_to_families(tmp_path, monkeypatch):
         "index.parquet", "data/core/wildtype_media/**", "data/core/regulation/**"]
     with pytest.raises(SystemExit, match="unknown families"):
         hub.include_globs(settings, ["core"], ["nope"])
+
+
+def test_finalize_summarize_finalize_puts_the_summary_in_card_and_manifest(tmp_path, monkeypatch):
+    import argparse
+    import yaml
+    from well4cell_build import summarize
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    write_campaign_db(settings)
+    finalize.cmd_finalize(settings, finalize_args())
+    assert "summary" not in json.loads((settings.repo_dir / "manifest.json").read_text())["configs"]
+    assert json.loads((settings.repo_dir / "manifest.json").read_text())["translation_collapse"] == {}
+    assert "It flags {{TODO}} trajectories" in (settings.repo_dir / "README.md").read_text()
+    summarize.cmd_summarize(settings, argparse.Namespace(families=None, core_dir=None, index=None, out_dir=None))
+    finalize.cmd_finalize(settings, finalize_args())
+    index = pq.read_table(settings.index_path)
+    assert "summary_file" not in index.column_names
+    manifest = json.loads((settings.repo_dir / "manifest.json").read_text())
+    located = sum(1 for f in index.column("core_file").to_pylist() if f)
+    assert manifest["configs"]["summary"]["trajectories"] == manifest["configs"]["summary"]["rows"] == located
+    assert set(manifest["configs"]["summary"]["families"]) == set(CELLS)
+    text = (settings.repo_dir / "README.md").read_text()
+    front = yaml.safe_load(text.split("---")[1])
+    assert [c["config_name"] for c in front["configs"]][:3] == ["index", "summary", "core"]
+    assert "| `summary` | trajectory |" in text
+    collapse = manifest["translation_collapse"]
+    assert collapse["threshold_aa_per_s"] == 1.0 and set(collapse["families"]) == set(CELLS)
+    assert "It flags {:,} trajectories in this release, {:,} of them".format(
+        collapse["trajectories"], collapse["divided"]) in text
+
+
+def test_deg_rates_files_are_copied_and_summarised(tmp_path, monkeypatch, capsys):
+    from fnmatch import fnmatch
+
+    from well4cell_build import hub
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    write_campaign_db(settings)
+    finalize.cmd_finalize(settings, finalize_args())
+    assert json.loads((settings.repo_dir / "manifest.json").read_text())["deg_rates"] == {}
+    assert "Degradation rates." not in (settings.repo_dir / "README.md").read_text()
+    figures = {"n_units": 854, "pct_units": 27.26, "pct_expression": 12.087}
+    document = {"parca_cache": PARCA_CACHE, "kb_sha256": KB_SHA256, "n_mrna_units": 3133,
+                "rate_floor_as_half_life_min": 91.2, "rate_ceiling_as_half_life_min": 0.4,
+                "imputation_constant_min": 5.190693, "on_floor": {**figures, "n_units": 245},
+                "on_ceiling": {**figures, "n_units": 7}, "imputed_average": {**figures, "n_units": 602},
+                "not_a_fit": figures, "units_not_a_fit": {"floor": {"TU0-1[c]": 0.1}}}
+    source = settings.build_dir / "provenance" / "deg_rates_{}.json".format(PARCA_CACHE)
+    source.parent.mkdir(parents=True)
+    source.write_text(json.dumps(document))
+    (settings.build_dir / "provenance" / "deg_rates_other.json").write_text(
+        json.dumps({**document, "parca_cache": "other"}))
+    finalize.cmd_finalize(settings, finalize_args())
+    copied = settings.repo_dir / "provenance" / source.name
+    assert json.loads(copied.read_text()) == document
+    assert not (settings.repo_dir / "provenance" / "deg_rates_other.json").exists()
+    assert "the index does not name" in capsys.readouterr().err
+    headline = json.loads((settings.repo_dir / "manifest.json").read_text())["deg_rates"][PARCA_CACHE]
+    assert headline["not_a_fit"]["n_units"] == 854 and headline["path"] == "provenance/" + source.name
+    assert "units_not_a_fit" not in headline
+    card_text = (settings.repo_dir / "README.md").read_text()
+    provenance = card_text[card_text.index("## Provenance"):card_text.index("## Licence")]
+    assert ("- `{}`: 854 of 3,133 mRNA transcription units, carrying 12.1% of basal mRNA expression, are not a "
+            "fit: 245 on the floor (91.2 min), 7 on the ceiling (0.4 min) and 602 imputed (5.2 min).".format(
+                PARCA_CACHE)) in provenance
+    globs = hub.include_globs(settings, ["provenance"])
+    name = "provenance/" + source.name
+    assert any(fnmatch(name, g) for g in globs) and not any(fnmatch(name, e) for e in hub.EXCLUDES)
+    source.write_text(json.dumps({**document, "kb_sha256": "0" * 64}))
+    with pytest.raises(SystemExit, match="re-run `w4c deg-rates`"):
+        finalize.cmd_finalize(settings, finalize_args())

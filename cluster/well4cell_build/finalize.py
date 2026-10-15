@@ -7,10 +7,25 @@
 3. stats            stats/<family>.parquet reduced from the per-part stats npz files
 4. failed jobs      provenance/failed_jobs.parquet (campaign DB, read-only) and
                     provenance/scan_runs.parquet (build/scan/runs.jsonl)
-5. parca caches     provenance/parca_cache_<hash>/kb/*.cPickle (plain byte copies: never a
-                    hard link, so no inode under the campaign's out/ changes)
-6. card             README.md from card.render
-7. manifest         manifest.json: version, commit, row/byte totals, counts
+5. card             README.md from card.render
+6. manifest         manifest.json: version, commit, row/byte totals, counts, and the
+                    kb_sha256 of each Parca cache the index names
+7. deg rates        build/provenance/deg_rates_<cache>.json (written by ``deg-rates``)
+                    copied to provenance/, with their headline figures in the card and
+                    manifest; absent files are not an error
+
+The ``summary`` config (data/summary/<family>/part-00000.parquet, written by ``summarize``
+from core, not by export) has no sentinels and no index locators. When present it is counted
+in the card and manifest from the files themselves (one row per trajectory); when absent
+nothing refuses. A summary family whose row count differs from the index's located core
+trajectories gets a warning: re-run ``summarize`` and then finalize. From the summary parts
+finalize also counts Cellarium's ``translation_collapse`` (``ribosome_elongation_rate_mean <
+COLLAPSE_RATE``, and how many of those divided) for the card's Outcomes and manifest.json.
+
+The Parca caches are not copied into repo/: they are wcEcoli's fitted parameters, under
+the Stanford licence, and the repo identifies them only by ``parca_cache`` and
+``kb_sha256`` (ADR 0009). finalize refuses an index without ``kb_sha256`` (built before
+that column existed; re-run ``index build``).
 
 Completeness. finalize refuses while any part planned for the configs being finalized
 (``--configs``, default all) has no sentinel or a failed one, and only warns about
@@ -27,7 +42,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -40,8 +54,10 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from . import card
+from . import deg_rates as deg_rate_provenance
 from .ledger import append_jsonl, now, read_json, read_jsonl, rename_into_place, temp_path_for, write_atomic_json
-from .settings import CONFIGS, FAMILIES, MATRIX_CHANNELS, SCALAR_CHANNELS, Settings
+from .pathways import PREFIX as PATHWAY_PREFIX
+from .settings import COLLAPSE_RATE, CONFIGS, FAMILIES, MATRIX_CHANNELS, SCALAR_CHANNELS, SUMMARY_CONFIG, Settings
 
 STATS = ("n", "sum", "sumsq", "min", "max")
 _STAT_KEY = re.compile(r"^(?P<channel>.+?)(?:/|\.|__|:)(?P<stat>n|sum|sumsq|min|max)$")
@@ -403,43 +419,68 @@ def write_scan_runs(settings: Settings, runs: dict[str, dict]) -> int:
     return table.num_rows
 
 
-# -- 5. parca caches -------------------------------------------------------------------------
-def parca_cache_names(settings: Settings, index: pa.Table | None) -> list[str]:
-    names = set()
-    if index is not None and "parca_cache" in index.column_names:
-        for value in index.column("parca_cache").unique().to_pylist():
-            if value:
-                name = Path(value).name
-                names.add(name if name.startswith("parca_cache_") else "parca_cache_" + name)
-    if not names:
-        names = {p.name for p in settings.out_dir.glob("parca_cache_*") if p.is_dir()}
-    return sorted(names)
+# -- fitted parameters (identified by hash, never copied) ------------------------------------
+def kb_sha256_by_cache(index: pa.Table) -> dict[str, str]:
+    """parca_cache -> kb_sha256 for every cache the index names (ADR 0009)."""
+    if "parca_cache" not in index.column_names or "kb_sha256" not in index.column_names:
+        return {}
+    pairs = zip(index.column("parca_cache").to_pylist(), index.column("kb_sha256").to_pylist())
+    return dict(sorted({(c, h) for c, h in pairs if c is not None}))
 
 
-def copy_parca_caches(settings: Settings, names: list[str]) -> dict:
-    copied = {}
-    for name in names:
-        source = settings.out_dir / name / "kb"
-        if not source.is_dir():
-            raise SystemExit("parca cache {} not found under {}".format(name, settings.out_dir))
-        target = settings.repo_dir / "provenance" / name / "kb"
-        target.mkdir(parents=True, exist_ok=True)
-        total = 0
-        for pickle in sorted(source.glob("*.cPickle")):
-            destination = target / pickle.name
-            total += pickle.stat().st_size
-            if destination.exists() and destination.stat().st_size == pickle.stat().st_size:
-                continue
-            # A plain byte copy (no hard link, no metadata): the campaign tree's inodes,
-            # link counts and times are never touched.
-            partial = temp_path_for(destination)
-            shutil.copyfile(pickle, partial)
-            partial.replace(destination)
-        copied[name] = total
-    return copied
+def check_kb_sha256(settings: Settings, index: pa.Table) -> None:
+    """Refuse an index in which a named Parca cache lacks exactly one kb_sha256; warn about Parca
+    caches an older finalize copied into repo/ (hub upload excludes them)."""
+    if "kb_sha256" not in index.column_names:
+        raise SystemExit("{} has no kb_sha256 column (built before it existed); re-run `w4c index build`, "
+                         "then finalize".format(settings.index_path))
+    hashes: dict[str, set] = {}
+    for cache, digest in zip(index.column("parca_cache").to_pylist(), index.column("kb_sha256").to_pylist()):
+        if cache is not None:
+            hashes.setdefault(cache, set()).add(digest)
+    bad = {c: sorted(h, key=str) for c, h in hashes.items() if len(h) != 1 or None in h}
+    if bad:
+        raise SystemExit("parca caches without exactly one kb_sha256 in {}: {}; re-run `w4c index build`".format(
+            settings.index_path, bad))
+    stale = sorted(p.name for p in (settings.repo_dir / "provenance").glob("parca_cache_*"))
+    if stale:
+        print("WARNING: {} under {} were copied by an older finalize and must not be published (ADR 0009); "
+              "delete them. hub upload excludes them.".format(stale, settings.repo_dir / "provenance"), file=sys.stderr)
 
 
-# -- 7. manifest and summary -----------------------------------------------------------------
+# -- 6. manifest and summary -----------------------------------------------------------------
+def publish_deg_rates(settings: Settings, index: pa.Table) -> dict[str, dict]:
+    """Copy each build/provenance/deg_rates_<cache>.json (``w4c deg-rates``) into repo/provenance/
+    and return {parca_cache: headline figures + path}. Refuses a file whose kb_sha256 is not the
+    index's for that cache (the fit changed since it was classified); skips, with a warning, a
+    cache the index does not name; warns about a repo copy no build file backs any more."""
+    expected = kb_sha256_by_cache(index)
+    prefix = deg_rate_provenance.FILE_PREFIX
+    published: dict[str, dict] = {}
+    for path in sorted((settings.build_dir / "provenance").glob(prefix + "*.json")):
+        document = read_json(path)
+        cache = document.get("parca_cache") or path.stem[len(prefix):]
+        if cache not in expected:
+            print("WARNING: {} is for parca cache {}, which the index does not name; not published".format(
+                path, cache), file=sys.stderr)
+            continue
+        if document.get("kb_sha256") != expected[cache]:
+            raise SystemExit("{}: kb_sha256 {} but the index records {} for {}; re-run `w4c deg-rates`".format(
+                path, document.get("kb_sha256"), expected[cache], cache))
+        target = settings.repo_dir / "provenance" / path.name
+        temporary = temp_path_for(target)
+        temporary.write_bytes(path.read_bytes())
+        rename_into_place(temporary, target)
+        published[cache] = {**deg_rate_provenance.headline(document), "path": "provenance/" + path.name}
+    stale = sorted(p.name for p in (settings.repo_dir / "provenance").glob(prefix + "*.json")
+                   if p.name not in {Path(v["path"]).name for v in published.values()})
+    if stale:
+        print("WARNING: {} in {} no longer match a build/provenance file the index names; `hub upload "
+              "--include provenance` would publish them: delete them".format(stale, settings.repo_dir / "provenance"),
+              file=sys.stderr)
+    return published
+
+
 def git_commit(settings: Settings) -> tuple[str | None, bool]:
     def run(*argv):
         result = subprocess.run(["git", "-C", str(settings.repo_root)] + list(argv), capture_output=True, text=True)
@@ -463,9 +504,10 @@ def data_files(settings: Settings) -> dict[str, dict[str, list[Path]]]:
 
 
 def check_data_tree(settings: Settings, parts: dict[str, dict]) -> None:
-    """Every published parquet must be a current ok part, and every ok part must be on disk."""
-    on_disk = {str(p.relative_to(settings.repo_dir)) for fams in data_files(settings).values()
-               for files in fams.values() for p in files}
+    """Every published export parquet must be a current ok part, and every ok part must be on
+    disk. The summary config is not exported (no sentinels) and is not checked here."""
+    on_disk = {str(p.relative_to(settings.repo_dir)) for config, fams in data_files(settings).items()
+               if config != SUMMARY_CONFIG for files in fams.values() for p in files}
     orphans = sorted(on_disk - set(parts))
     missing = sorted(set(parts) - on_disk)
     wrong_size = sorted(p for p in set(parts) & on_disk
@@ -486,7 +528,9 @@ def check_data_tree(settings: Settings, parts: dict[str, dict]) -> None:
 def product_fields(files: dict[str, dict[str, list[Path]]]) -> tuple[dict[str, str], dict[str, str]]:
     """Units and types of every product column, from the first file of each config."""
     units, types = dict(UNITS), {}
-    for families in files.values():
+    for config, families in files.items():
+        if config == SUMMARY_CONFIG:
+            continue
         for paths in families.values():
             for field in pq.read_schema(paths[0]):
                 types[field.name] = str(field.type)
@@ -534,9 +578,14 @@ def summarize(settings: Settings, index: pa.Table, parts: dict[str, dict], extra
     files = data_files(settings)
     for config, family in held:
         files.get(config, {}).pop(family, None)
+        if config == "core":  # the summary is computed from core: it follows core's hold-back
+            files.get(SUMMARY_CONFIG, {}).pop(family, None)
     files = {c: f for c, f in files.items() if f}
     configs = {}
     for config, families in files.items():
+        if config == SUMMARY_CONFIG:
+            configs[config] = summary_config(index, families)
+            continue
         per_family = {}
         for family, paths in families.items():
             recorded = [parts[str(p.relative_to(settings.repo_dir))] for p in paths
@@ -596,7 +645,7 @@ def summarize(settings: Settings, index: pa.Table, parts: dict[str, dict], extra
         "max_generation": max(_distinct(index, "generation") or [None]) if "generation" in index.column_names else None,
         "sim_git_hashes": _distinct(index, "git_hash"),
         "sim_options_hashes": _distinct(index, "sim_options_hash"),
-        "parca_caches": extra.get("parca_caches", {}),
+        "kb_sha256": kb_sha256_by_cache(index),
         "failed_jobs": extra.get("failed_jobs", {}),
         "qc": extra.get("qc", {}),
         "scan_runs": extra.get("scan_runs"),
@@ -607,7 +656,61 @@ def summarize(settings: Settings, index: pa.Table, parts: dict[str, dict], extra
         "never_recorded": list(NEVER_RECORDED),
         "scalar_channels": list(SCALAR_CHANNELS),
         "held_back": sorted("{}/{}".format(c, f) for c, f in held),
+        "translation_collapse": translation_collapse(index, files.get(SUMMARY_CONFIG, {})),
+        "deg_rates": extra.get("deg_rates", {}),
     }
+
+
+def summary_config(index: pa.Table, families: dict[str, list[Path]]) -> dict:
+    """The summary config's card/manifest entry, from its files (one row per trajectory). Warns
+    when a family's row count differs from the index's located core trajectories. When parts
+    carry ``pathway_<name>`` columns (summarize --pathways), the entry lists them (``pathways``)
+    and each such family has ``pathway_columns``."""
+    per_family, pathways = {}, []
+    for family, paths in families.items():
+        rows = sum(pq.read_metadata(p).num_rows for p in paths)
+        per_family[family] = {"files": len(paths), "bytes": sum(p.stat().st_size for p in paths),
+                              "rows": rows, "trajectories": rows}
+        names = [f.name for f in pq.read_schema(paths[0]) if f.name.startswith(PATHWAY_PREFIX)]
+        if names:  # summarize --pathways (only for a family with expression parts)
+            per_family[family]["pathway_columns"] = len(names)
+            pathways += [n for n in names if n not in pathways]
+        if "core_file" in index.column_names and "family" in index.column_names:
+            located = int(pc.sum(pc.and_(pc.equal(index.column("family"), family),
+                                         pc.is_valid(index.column("core_file")))).as_py() or 0)
+            if located != rows:
+                print("WARNING: data/{}/{} has {} rows but the index locates {} core trajectories; re-run "
+                      "`w4c summarize`, then finalize".format(SUMMARY_CONFIG, family, rows, located), file=sys.stderr)
+    entry = {"stride": 1, "matrices": [], "files": sum(f["files"] for f in per_family.values()),
+             "bytes": sum(f["bytes"] for f in per_family.values()),
+             "rows": sum(f["rows"] for f in per_family.values()),
+             "trajectories": sum(f["trajectories"] for f in per_family.values()), "families": per_family}
+    if pathways:
+        entry["pathways"] = pathways
+    return entry
+
+
+def translation_collapse(index: pa.Table, families: dict[str, list[Path]]) -> dict:
+    """Cellarium's ``translation_collapse`` on the summary parts: trajectories with
+    ``ribosome_elongation_rate_mean < COLLAPSE_RATE`` (aa/s), and how many of them divided
+    (index ``termination_class`` none). Empty when there are no summary parts (the card then
+    shows TODO)."""
+    if not families:
+        return {}
+    termination = dict(zip(index.column("sample_id").to_pylist(), index.column("termination_class").to_pylist())) \
+        if "termination_class" in index.column_names else {}
+    per_family = {}
+    for family in [f for f in FAMILIES if f in families] + sorted(f for f in families if f not in FAMILIES):
+        flagged = []
+        for path in families[family]:
+            table = pq.read_table(path, columns=["sample_id", "ribosome_elongation_rate_mean"])
+            low = pc.fill_null(pc.less(table.column("ribosome_elongation_rate_mean"), COLLAPSE_RATE), False)
+            flagged += table.column("sample_id").filter(low).to_pylist()
+        per_family[family] = {"trajectories": len(flagged),
+                              "divided": sum(1 for s in flagged if termination.get(s) == "none")}
+    return {"threshold_aa_per_s": COLLAPSE_RATE,
+            "trajectories": sum(f["trajectories"] for f in per_family.values()),
+            "divided": sum(f["divided"] for f in per_family.values()), "families": per_family}
 
 
 def manifest_payload(summary: dict) -> dict:
@@ -624,8 +727,10 @@ def manifest_payload(summary: dict) -> dict:
         "termination_class": summary["termination_class"],
         "qc": summary["qc"],
         "failed_jobs": summary["failed_jobs"],
-        "parca_caches": summary["parca_caches"],
+        "kb_sha256": summary["kb_sha256"],
         "held_back": summary.get("held_back", []),
+        "translation_collapse": summary.get("translation_collapse", {}),
+        "deg_rates": summary.get("deg_rates", {}),
     }
 
 
@@ -647,6 +752,7 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
     configs = [c.strip() for c in args.configs.split(",")] if args.configs else list(CONFIGS)
     for config in configs:
         settings.config(config)
+    check_kb_sha256(settings, pq.read_table(settings.index_path))
     incomplete = check_complete(settings, configs, args.allow_incomplete)
     sentinels = export_sentinels(settings)
     parts = current_parts(sentinels)
@@ -670,15 +776,12 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
     report["failed_jobs"] = write_failed_jobs(settings, runs)
     report["scan_runs"] = write_scan_runs(settings, runs)
     index = pq.read_table(settings.index_path)
-    if args.skip_parca:
-        report["parca_caches"] = {}
-    else:
-        report["parca_caches"] = copy_parca_caches(settings, parca_cache_names(settings, index))
+    report["deg_rates"] = publish_deg_rates(settings, index)
     summary = summarize(settings, index, parts, report, held)
     _write_text(settings.repo_dir / "README.md", card.render(settings, summary))
     write_atomic_json(settings.repo_dir / "manifest.json", manifest_payload(summary))
     append_jsonl(settings.ledger, {"at": now(), "stage": "finalize", "configs": configs, **{
-        k: report[k] for k in ("locators", "qc", "stats", "failed_jobs", "scan_runs")}})
+        k: report[k] for k in ("locators", "qc", "stats", "failed_jobs", "scan_runs", "deg_rates")}})
     for key, value in report.items():
         print("{}: {}".format(key, value))
     print("wrote {} and {}".format(settings.repo_dir / "README.md", settings.repo_dir / "manifest.json"))
@@ -688,7 +791,6 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
 def add_parser(sub: argparse._SubParsersAction) -> None:
     parser = sub.add_parser("finalize", help="index locators, export QC, stats, provenance, card, manifest")
     parser.add_argument("--configs", help="comma-separated configs whose index locators to refill (default: all)")
-    parser.add_argument("--skip-parca", action="store_true", help="do not copy the parca caches into provenance/")
     parser.add_argument("--hold-back", help="comma-separated <config>/<family> exported locally but not published "
                                             "yet: left out of the locators, stats, manifest and card (re-run "
                                             "finalize without it once they are uploaded)")

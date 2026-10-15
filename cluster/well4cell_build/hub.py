@@ -7,6 +7,7 @@
 
 This module can only add or overwrite remote files. It never passes ``--delete`` to
 ``hf upload`` and never calls a delete API: removing anything remote is done by hand.
+Every upload excludes the Parca caches (``provenance/parca_cache_*``, ``*.cPickle``).
 
 huggingface_hub lives in the wcecoli-hf environment (next to WCECOLI_HF_BIN), not in the
 builder's; the API calls run there as a short child script that reads HF_TOKEN_PATH itself.
@@ -25,7 +26,7 @@ import time
 from pathlib import Path
 
 from .ledger import append_jsonl, now
-from .settings import CONFIGS, FAMILIES, Settings
+from .settings import CONFIGS, FAMILIES, SUMMARY_CONFIG, Settings
 
 # Parts of repo/ and the --include globs that select them.
 FIXED_PARTS = {
@@ -33,11 +34,15 @@ FIXED_PARTS = {
     "index": ["index.parquet"],
     "manifest": ["manifest.json"],
     "stats": ["stats/**"],
-    "provenance": ["provenance/**"],
+    "provenance": ["provenance/**"],  # includes deg_rates_<cache>.json (finalize copies them from build/)
 }
 ALIASES = {"README.md": "readme", "card": "readme", "index.parquet": "index", "manifest.json": "manifest"}
 DEFAULT_PARTS = ["readme", "index", "manifest", "stats", "provenance"]
-EXCLUDES = ["**/*.tmp", "**/.*"]
+# Data parts: the exported configs plus the summary config (written by summarize).
+DATA_CONFIGS = list(CONFIGS) + [SUMMARY_CONFIG]
+# Parca caches (wcEcoli's fitted parameters) are never published (ADR 0009); an older finalize
+# copied them into repo/provenance/, so they are excluded even when present locally.
+EXCLUDES = ["**/*.tmp", "**/.*", "provenance/parca_cache_*/**", "**/*.cPickle"]
 
 # Read-only and create-only Hub calls, run in the wcecoli-hf environment. No delete call
 # appears here, by design.
@@ -133,26 +138,26 @@ def include_globs(settings: Settings, parts: list[str], families: list[str] | No
         part = ALIASES.get(part, part)
         if part in FIXED_PARTS:
             globs.extend(FIXED_PARTS[part])
-        elif part in CONFIGS:
+        elif part in DATA_CONFIGS:
             if families:
                 globs.extend("data/{}/{}/**".format(part, f) for f in families)
             else:
                 globs.append("data/{}/**".format(part))
         elif part == "data":
             if families:
-                globs.extend("data/{}/{}/**".format(c, f) for c in CONFIGS for f in families
+                globs.extend("data/{}/{}/**".format(c, f) for c in DATA_CONFIGS for f in families
                              if (settings.repo_dir / "data" / c / f).is_dir())
             else:
                 globs.append("data/**")
         else:
             raise SystemExit("unknown part {!r}; choose from {}".format(
-                part, ", ".join(list(FIXED_PARTS) + list(ALIASES) + list(CONFIGS) + ["data"])))
+                part, ", ".join(list(FIXED_PARTS) + list(ALIASES) + DATA_CONFIGS + ["data"])))
     return list(dict.fromkeys(globs))
 
 
 def default_parts(settings: Settings) -> list[str]:
     data = settings.repo_dir / "data"
-    present = [c for c in CONFIGS if (data / c).is_dir()]
+    present = [c for c in DATA_CONFIGS if (data / c).is_dir()]
     return DEFAULT_PARTS + present
 
 
@@ -240,7 +245,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     create.set_defaults(func=cmd_create)
     upload = stage.add_parser("upload", help="hf upload the named parts of repo/ (resumable)")
     upload.add_argument("--include", help="comma-separated parts: readme, index, manifest, stats, provenance, data, "
-                                          "or config names (default: all present)")
+                                          "or config names, including summary (default: all present)")
     upload.add_argument("--families", help="comma-separated families: narrow config parts to "
                                            "data/<config>/<family>/** (fixed parts are unaffected)")
     upload.add_argument("--dry-run", action="store_true", help="print the command only")

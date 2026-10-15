@@ -6,9 +6,23 @@ missing figure is visible in review rather than silently wrong.
 
 from __future__ import annotations
 
-from .settings import CONFIGS, FAMILIES, FAMILY_BY_TIER, MATRIX_CHANNELS, SCALAR_CHANNELS, Settings
+from .settings import (COLLAPSE_RATE, CONFIGS, FAMILIES, FAMILY_BY_TIER, MATRIX_CHANNELS, SCALAR_CHANNELS,
+                       SUMMARY_CONFIG, SUMMARY_STATS, Settings)
 
 TODO = "{{TODO}}"
+# Data configs in card order: the per-trajectory summary first, then the exported configs.
+CARD_CONFIGS = [SUMMARY_CONFIG] + list(CONFIGS)
+
+# well4cell termination_class -> the Cellarium corpus `qc` vocabulary, and what it means.
+QC_CROSSWALK = (
+    ("none", "ok", "the cell divided"),
+    ("time_limit", "no_division", "the generation ran to the time limit without dividing; the model's \"did not divide\""),
+    ("negative_counts", "crashed", "simulator error (a molecule count went negative)"),
+    ("fba_infeasible", "fba_infeasible", "metabolism solver failure"),
+    ("equilibrium_unstable", "crashed", "equilibrium solver failure"),
+    ("other", "crashed", "any other simulator error"),
+)
+CELLARIUM_URL = "https://github.com/evanniko1/cellarium"
 
 FAMILY_TEXT = {
     "wildtype_media": "wild-type cells in a range of static media",
@@ -69,7 +83,8 @@ INDEX_COLUMNS = {
     "run_dir": "campaign run directory",
     "h5_group": "group in the run's channels.h5, e.g. `seed0/gen0`",
     "git_hash": "wcEcoli commit that ran the simulation",
-    "parca_cache": "fitted-parameter cache used (see provenance/)",
+    "parca_cache": "Parca (fitted-parameter) cache the run used, by name; the cache itself is not distributed",
+    "kb_sha256": "sha256 of the fitted parameter set (simData.cPickle) used; the set itself is not distributed",
     "sim_options_hash": "sha256 of the run's simulation options minus per-run keys and the keys "
                         "carried as columns (git_hash, timeline, multi-knockout indices); key into "
                         "`provenance/sim_options/`",
@@ -109,6 +124,14 @@ def _bytes(value) -> str:
     return TODO
 
 
+def _parameter_sets(n: int) -> tuple[str, str]:
+    """("one of two fitted parameter sets", "the two parameter sets") for n = 2; TODO when unknown."""
+    if n == 1:
+        return "one fitted parameter set", "builds with other parameter sets"
+    word = {2: "two", 3: "three", 4: "four"}.get(n, str(n)) if n else TODO
+    return "one of {} fitted parameter sets".format(word), "the {} parameter sets".format(word)
+
+
 def size_category(n: int | None) -> str:
     if not isinstance(n, int):
         return "n<1K"
@@ -137,7 +160,7 @@ def front_matter(summary: dict) -> str:
         "  data_files: index.parquet",
     ]
     configs = summary.get("configs", {})
-    ordered = [c for c in CONFIGS if c in configs] + sorted(c for c in configs if c not in CONFIGS)
+    ordered = [c for c in CARD_CONFIGS if c in configs] + sorted(c for c in configs if c not in CARD_CONFIGS)
     for config in ordered:
         families = configs[config].get("families", {})
         ordered_families = [f for f in FAMILIES if f in families] + sorted(f for f in families if f not in FAMILIES)
@@ -171,6 +194,19 @@ def _configs_table(summary: dict) -> list[str]:
     active = summary.get("active_columns", {})
     rows = ["| config | rows every | matrices (active columns) | trajectories | rows | size |",
             "|---|---|---|---:|---:|---:|"]
+    info = configs.get(SUMMARY_CONFIG)
+    what = "none: `n_steps` and {} of each scalar".format(", ".join("`_{}`".format(s) for s in SUMMARY_STATS))
+    if info and info.get("pathways"):
+        what += "; {} `pathway_<name>` fractions".format(len(info["pathways"]))
+    if info is None:
+        rows.append("| `{}` | trajectory | {} | not in this release | | |".format(SUMMARY_CONFIG, what))
+    else:
+        trajectories = _n(info.get("trajectories"))
+        present = _present(summary, SUMMARY_CONFIG)
+        if present and len(present) < len(FAMILIES):
+            trajectories += " ({} only)".format(", ".join(present))
+        rows.append("| `{}` | trajectory | {} | {} | {} | {} |".format(
+            SUMMARY_CONFIG, what, trajectories, _n(info.get("rows")), _bytes(info.get("bytes"))))
     for name, config in CONFIGS.items():
         info = configs.get(name)
         matrices = ", ".join("`{}` ({})".format(m, _n(active.get(m, {}).get("active"))) for m in config.matrices) or "scalars only"
@@ -221,11 +257,11 @@ def _coverage(summary: dict) -> list[str]:
     configs = summary.get("configs", {})
     held = set(summary.get("held_back") or [])
     counts = summary.get("families", {})
-    rows = ["| family | trajectories | " + " | ".join("`{}`".format(c) for c in CONFIGS) + " |",
-            "|---|---:|" + "---|" * len(CONFIGS)]
+    rows = ["| family | trajectories | " + " | ".join("`{}`".format(c) for c in CARD_CONFIGS) + " |",
+            "|---|---:|" + "---|" * len(CARD_CONFIGS)]
     for family in FAMILIES:
         cells = []
-        for config in CONFIGS:
+        for config in CARD_CONFIGS:
             info = configs.get(config, {}).get("families", {}).get(family)
             if info is not None:
                 cells.append("yes ({})".format(_bytes(info.get("bytes"))))
@@ -238,7 +274,7 @@ def _coverage(summary: dict) -> list[str]:
 
     sentences = []
     partial: dict[tuple, list[str]] = {}
-    for config in CONFIGS:
+    for config in CARD_CONFIGS:
         present = _present(summary, config)
         if present and len(present) < len(FAMILIES):
             partial.setdefault(tuple(present), []).append(config)
@@ -253,6 +289,8 @@ def _coverage(summary: dict) -> list[str]:
         size = "~{} estimated".format(_bytes(sum(estimates))) if None not in estimates else "planned"
         sentences.append("{} ({}) {} not in this release.".format(
             _codes(absent), ", ".join(x for x in (what, size) if x), "is" if len(absent) == 1 else "are"))
+    if not _present(summary, SUMMARY_CONFIG):
+        sentences.append("`{}` is not in this release.".format(SUMMARY_CONFIG))
     if not sentences:
         sentences.append("Every config is complete: all five families are in this repo.")
 
@@ -274,6 +312,75 @@ def _coverage(summary: dict) -> list[str]:
         "family is uploaded).",
         "",
     ]
+
+
+def _qc_crosswalk() -> list[str]:
+    rows = ["| well4cell `termination_class` | Cellarium `qc` | meaning |", "|---|---|---|"]
+    for termination, qc, meaning in QC_CROSSWALK:
+        rows.append("| `{}` | `{}` | {} |".format(termination, qc, meaning))
+    return rows
+
+
+def _pathway_text(summary: dict) -> str:
+    """The summary's pathway columns (summarize --pathways), when its parts have them; "" otherwise."""
+    info = summary.get("configs", {}).get(SUMMARY_CONFIG) or {}
+    names = info.get("pathways") or []
+    if not names:
+        return ""
+    families = [f for f in FAMILIES if (info.get("families", {}).get(f) or {}).get("pathway_columns")]
+    scope = "every family" if len(families) == len(FAMILIES) else _codes(families) + " only"
+    return (" For {} it also has {} pathway proteome fractions, {} (float32, unit `fraction`): for each pathway of "
+            "the Cellarium pathway panel, the pathway's protein counts over all protein counts at each 10 s "
+            "`expression` row, averaged over the trajectory (Cellarium's definition; the gene lists are in "
+            "Cellarium's `pathway_panel.py`).".format(scope, len(names), _codes(names)))
+
+
+def _translation_collapse(summary: dict) -> list[str]:
+    """The Cellarium ``translation_collapse`` predicate on the summary config, with its counts
+    (finalize.translation_collapse; TODO when the summary config is not in this release)."""
+    collapse = summary.get("translation_collapse") or {}
+    return [
+        "A generation can divide while its ribosomes have effectively stopped, because chromosome replication "
+        "does not require ongoing translation. The Cellarium corpus flags this as `translation_collapse` when "
+        "the mean ribosome elongation rate over the generation is below {rate:g} aa/s, an order of magnitude "
+        "below the slowest elongation rate measured in *E. coli* (Dai et al. 2016). The same predicate on this "
+        "dataset is `ribosome_elongation_rate_mean < {rate:g}` in the `{config}` config. It flags {n} "
+        "trajectories in this release, {m} of them with `termination_class` `none` (divided, but with "
+        "translation collapsed). Treat them as inviable in any viability task.".format(
+            rate=COLLAPSE_RATE, config=SUMMARY_CONFIG, n=_n(collapse.get("trajectories")),
+            m=_n(collapse.get("divided"))),
+    ]
+
+
+def _deg_rates(summary: dict) -> list[str]:
+    """Which mRNA degradation rates of each Parca cache are not fits (finalize.publish_deg_rates,
+    from ``w4c deg-rates``); nothing when no cache has been classified."""
+    caches = summary.get("deg_rates") or {}
+    if not caches:
+        return []
+    lines = [
+        "Degradation rates. Not every mRNA half-life in the fitted parameters is a fit to that transcript. The fitted "
+        "rates are bounded below by the slowest measured mRNA decay (the longest measured half-life), and a unit "
+        "whose rate sits on that bound is on the floor. Rates faster than the fastest measured decay (the shortest "
+        "measured half-life) are clipped to it, and those units are on the ceiling. A unit none of whose genes "
+        "has a measured half-life is imputed: it carries the mean measured half-life. Any claim about the stability of these transcripts, or that depends on it, rests on "
+        "a bound or a population mean, not on a measurement of that transcript. "
+        "`provenance/deg_rates_<parca_cache>.json` lists the units of each class with their share of expression.",
+        "",
+    ]
+    for cache, figures in caches.items():
+        def count(key: str) -> str:
+            return _n((figures.get(key) or {}).get("n_units"))
+        lines.append(
+            "- `{cache}`: {n} of {total} mRNA transcription units, carrying {pct}% of basal mRNA expression, are not "
+            "a fit: {floor} on the floor ({floor_min} min), {ceiling} on the ceiling ({ceiling_min} min) and "
+            "{imputed} imputed ({imputed_min} min).".format(
+                cache=cache, n=count("not_a_fit"), total=_n(figures.get("n_mrna_units")),
+                pct=_n((figures.get("not_a_fit") or {}).get("pct_expression"), "{:.1f}"),
+                floor=count("on_floor"), floor_min=_n(figures.get("rate_floor_as_half_life_min"), "{:g}"),
+                ceiling=count("on_ceiling"), ceiling_min=_n(figures.get("rate_ceiling_as_half_life_min"), "{:g}"),
+                imputed=count("imputed_average"), imputed_min=_n(figures.get("imputation_constant_min"), "{:.1f}")))
+    return lines + [""]
 
 
 def _index_schema(summary: dict) -> list[str]:
@@ -315,7 +422,7 @@ def render(settings: Settings, summary: dict) -> str:
     active = summary.get("active_columns", {})
     qc = summary.get("qc", {})
     failed = summary.get("failed_jobs", {})
-    parca = summary.get("parca_caches", {})
+    kb_sha256 = summary.get("kb_sha256", {})
     never = summary.get("never_recorded", [])
 
     body = [
@@ -335,10 +442,16 @@ def render(settings: Settings, summary: dict) -> str:
     ] + _families_table(summary) + [""] + _coverage(summary) + [
         "## Configs",
         "",
-        "Each config is one data product. Every config carries `sample_id`, `t`, `t_abs` and the 18 scalar "
+        "Each config is one data product. `summary` is one row per trajectory and joins to `index.parquet` on "
+        "`sample_id`: `n_steps` and, for each of the 18 scalar channels in the order of the product schema, "
+        "`<channel>_mean`, `_min`, `_max`, `_first` and `_last` over the trajectory's 1 s `core` rows (int32 for "
+        "`mrna_counts` and `n_oric` except `_mean`, float32 otherwise; the `growth_rate` statistics skip its null "
+        "row 0, so `growth_rate_first` is the value at t = 1).{} Every other config carries `sample_id`, `t`, "
+        "`t_abs` and the 18 scalar "
         "channels; the matrix configs add per-gene or per-reaction columns. `expression` and `metabolism` keep "
         "the rows with `t % 10 == 0` plus each trajectory's last row (point samples, not averages); "
-        "`expression_1s` and `metabolism_1s` keep every row. The split of every config is the family.",
+        "`expression_1s` and `metabolism_1s` keep every row. The split of every config is the family."
+        .format(_pathway_text(summary)),
         "",
     ] + _configs_table(summary) + [
         "",
@@ -432,6 +545,18 @@ def render(settings: Settings, summary: dict) -> str:
         "`time_limit` is the only clean non-division; the other classes are solver failures, and the rows "
         "before the failure are kept as recorded.",
         "",
+        "The same outcomes in the `qc` vocabulary of the Cellarium corpus:",
+        "",
+    ] + _qc_crosswalk() + [
+        "",
+        "Only `time_limit` is a prediction of the model about the cell; the other non-`none` classes are "
+        "numerical failures of the simulation, and a viability task should treat them as such. Cellarium's "
+        "`implausible_channel` and `over_replicated` have no counterpart here because well4cell does not run "
+        "those checks; its vocabulary is defined in the Cellarium repository's `docs/QC_STATUSES.md` ({})."
+        .format(CELLARIUM_URL),
+        "",
+    ] + _translation_collapse(summary) + [
+        "",
         "## Suggested tasks",
         "",
         "1. **Growth-rate regression from the perturbation**: predict `growth_rate` (index) from the "
@@ -451,8 +576,12 @@ def render(settings: Settings, summary: dict) -> str:
         "",
         "- Simulator commits (`index.git_hash`): {}.".format(", ".join("`{}`".format(h) for h in summary.get("sim_git_hashes", [])) or TODO),
         "- Simulation options hashes (`index.sim_options_hash`): {}.".format(", ".join("`{}`".format(h) for h in summary.get("sim_options_hashes", [])) or TODO),
-        "- Fitted parameters: the parca caches are included as `provenance/<cache>/kb/*.cPickle`: {}.".format(
-            ", ".join("`{}` ({})".format(name, _bytes(size)) for name, size in parca.items()) or TODO),
+        "- Fitted parameters (`index.parca_cache`, with the sha256 of its `simData.cPickle` in "
+        "`index.kb_sha256`): {}. The Parca caches themselves are not included in this repo (see Licence).".format(
+            ", ".join("`{}` (sha256 `{}`)".format(name, digest) for name, digest in kb_sha256.items()) or TODO),
+        "- Every trajectory ran with operons on and the steady-state tRNA charging model (`trna_charging` true, "
+        "no kinetic charging), from {} identified by `kb_sha256` and `parca_cache`; do not pool rows across {} "
+        "without checking `kb_sha256`.".format(*_parameter_sets(len(kb_sha256))),
         "- `provenance/scan_runs.parquet`: every run directory read ({} runs), with its generation count and reference-id hash.".format(_n(summary.get("scan_runs"))),
         "- `provenance/failed_jobs.parquet`: {} campaign jobs that failed, with the error message and the generations they left behind.".format(_n(failed.get("failed_jobs"))),
         "- `provenance/export_qc.parquet`: the QC verdict of every trajectory in every config ({} checks, {} failed). "
@@ -460,12 +589,16 @@ def render(settings: Settings, summary: dict) -> str:
         "- `stats/<family>.parquet`: per product, channel and matrix column: mean, population std, min, max and row count.",
         "- `manifest.json`: row and byte totals per config, counts per family.",
         "",
+    ] + _deg_rates(summary) + [
         "Never recorded: {} are in the exporter's channel list but were not written by any simulation, so they "
         "are absent from every product.".format(", ".join("`{}`".format(c) for c in never) or TODO),
         "",
         "## Licence",
         "",
-        "CC BY 4.0. The wcEcoli model is by the Covert lab (Stanford); see its repository for the model's licence.",
+        "CC BY 4.0 for everything in this repo. The wcEcoli model is by the Covert lab (Stanford) and is licensed "
+        "separately under the Stanford Academic Software License; it is not included here. The fitted parameter "
+        "sets (Parca caches) are not distributed either and are identified only by `kb_sha256` / `parca_cache`; "
+        "reproducing these simulations requires obtaining wcEcoli under its own licence.",
         "",
         "## Citation",
         "",
