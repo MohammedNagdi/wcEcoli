@@ -13,6 +13,7 @@ import '../../styles/experiments.css'
 import { ExperimentControls, ExperimentStatus, DeleteMenu, EMPTY_FILTERS, isExperimentActive, statusGroup, RequestNotice } from './ExperimentControls'
 import { useExperimentResource } from './useExperimentResource'
 import type { Experiment } from '../../types'
+import { ExperimentScrollRegion, useCatalogScrollRestoration } from './ExperimentPresentation'
 
 type AssistantExperimentSummary = {
   id: number
@@ -60,6 +61,7 @@ export function ExperimentListPage() {
   const view: 'all' | 'batches' | 'failed' = requestedView === 'failed' ? 'failed' : requestedView === 'batches' || (!requestedView && searchParams.has('batch')) ? 'batches' : 'all'
   const rawSelectedId = Number(searchParams.get('experiment'))
   const selectedId = Number.isSafeInteger(rawSelectedId) && rawSelectedId > 0 ? rawSelectedId : null
+  const catalogRef = useCatalogScrollRestoration(selectedId != null, view)
   const [selectedDetail, setSelectedDetail] = useState<Experiment | null>(null)
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [selectionRetry, setSelectionRetry] = useState(0)
@@ -320,19 +322,19 @@ export function ExperimentListPage() {
       }}>{value === 'all' ? 'Single experiments' : value === 'batches' ? 'Batches' : 'Failed jobs'}</button>)}
     </div>
     <div className="experiment-layout" data-inspecting={selectedId != null}>
-      <div className="experiment-catalog min-w-0">
+      <div ref={catalogRef} className="experiment-catalog min-w-0">
         <section className="experiment-view" id="catalog-all" role="tabpanel" aria-labelledby="experiments-all" hidden={view !== 'all'}>
           <ExperimentControls label="Find an experiment" filters={filters} onChange={setFilters} types={standaloneExperiments.map((exp) => exp.variant_type)} conditions={standaloneExperiments.map((exp) => exp.condition)} count={visibleExperiments.length} total={standaloneExperiments.length} />
           <RequestNotice error={resource.error} retry={() => void resource.refresh()} />
-          {loading ? <p role="status" className="p-8 text-gray-500">Loading experiments…</p> : !resource.error && standaloneExperiments.length === 0 ? <div className="bg-white border border-gray-200 rounded-lg p-8 text-center"><p>No experiments yet</p><p className="text-sm text-gray-500 my-3">Save a configuration before running a simulation.</p><Link className="experiment-button experiment-button-primary" to="/experiments/new">Design your first experiment</Link></div> : visibleExperiments.length === 0 && standaloneExperiments.length > 0 ? <p className="p-8 text-gray-500">No matching experiments. Adjust search or clear filters.</p> : standaloneExperiments.length > 0 ? <div className="experiment-table-wrap">
+          {loading ? <p role="status" className="p-8 text-gray-500">Loading experiments…</p> : !resource.error && standaloneExperiments.length === 0 ? <div className="bg-white border border-gray-200 rounded-lg p-8 text-center"><p>No experiments yet</p><p className="text-sm text-gray-500 my-3">Save a configuration before running a simulation.</p><Link className="experiment-button experiment-button-primary" to="/experiments/new">Design your first experiment</Link></div> : visibleExperiments.length === 0 && standaloneExperiments.length > 0 ? <p className="p-8 text-gray-500">No matching experiments. Adjust search or clear filters.</p> : standaloneExperiments.length > 0 ? <ExperimentScrollRegion label="Single experiments table">
             <table className="experiment-table"><thead><tr><th>Name</th><th>Type</th><th>Condition</th><th>Status</th><th aria-sort={ascending ? 'ascending' : 'descending'}><button onClick={() => setAscending((value) => !value)}>Created {ascending ? '↑' : '↓'}</button></th><th><span className="sr-only">Actions</span></th></tr></thead>
               <tbody>{visibleExperiments.map((exp) => <tr key={exp.id} data-selected={exp.id === selectedId} onClick={() => selectExperiment(exp.id)}>
                 <td><button className="text-left font-medium text-gray-900" aria-label={`Inspect ${exp.name}`} onClick={(event) => { event.stopPropagation(); selectExperiment(exp.id) }}>{exp.name}</button>{exp.gene_symbol && <p className="mt-1 text-xs text-gray-500">Gene: <span className="font-mono text-bio-gene">{exp.gene_symbol}</span>{exp.variant_type === 'gene_knockout' ? ` · Knockout index ${exp.variant_index}` : ''}</p>}</td>
                 <td className="text-gray-600">{variantLabel(exp.variant_type)}</td><td className="text-gray-600">{exp.condition}</td><td><ExperimentStatus status={exp.status} /></td><td className="text-gray-500 whitespace-nowrap">{formatDate(exp.created_at)}</td><td><DeleteMenu label={exp.name} onDelete={() => handleDelete(exp)} /></td>
               </tr>)}</tbody></table>
-          </div> : null}
+          </ExperimentScrollRegion> : null}
         </section>
-        <section className="experiment-view" id="catalog-batches" role="tabpanel" aria-labelledby="experiments-batches" hidden={view !== 'batches'}><BatchDashboard onExpandedChange={(id) => setSearchParams((previous) => { const next = new URLSearchParams(previous); if (id) next.set('batch', id); else next.delete('batch'); return next }, { replace: true })} active={view === 'batches'} initialExpandedId={createdBatchId || undefined} selectedExperiment={view === 'batches' ? selectedExperiment : null} selectedExperimentDetailSnapshot={detailAssistantSnapshot} onOpenExperiment={(exp) => { setExperiments((previous) => previous.some((row) => row.id === exp.id) ? previous : [...previous, exp]); selectExperiment(exp.id) }} onDeletedExperiment={(id) => { setExperiments((previous) => previous.filter((exp) => exp.id !== id)); if (selectedId === id) { deletionNavigation.current = true; selectExperiment(null) } }} onAssistantSnapshot={setBatchAssistantSnapshot} /></section>
+        <section className="experiment-view" id="catalog-batches" role="tabpanel" aria-labelledby="experiments-batches" hidden={view !== 'batches'}><BatchDashboard presentation="experiments" onExpandedChange={(id) => setSearchParams((previous) => { const next = new URLSearchParams(previous); if (id) next.set('batch', id); else next.delete('batch'); return next }, { replace: true })} active={view === 'batches'} initialExpandedId={createdBatchId || undefined} selectedExperiment={view === 'batches' ? selectedExperiment : null} selectedExperimentDetailSnapshot={detailAssistantSnapshot} onOpenExperiment={(exp) => { setExperiments((previous) => previous.some((row) => row.id === exp.id) ? previous : [...previous, exp]); selectExperiment(exp.id) }} onDeletedExperiment={(id) => { setExperiments((previous) => previous.filter((exp) => exp.id !== id)); if (selectedId === id) { deletionNavigation.current = true; selectExperiment(null) } }} onAssistantSnapshot={setBatchAssistantSnapshot} /></section>
         <section className="experiment-view" id="catalog-failed" role="tabpanel" aria-labelledby="experiments-failed" hidden={view !== 'failed'}><FailedJobsPanel experiments={experiments} active={view === 'failed'} onOpenExperiment={selectExperiment} onAssistantSnapshot={setFailedAssistantSnapshot} /></section>
       </div>
       {selectedId != null && <div className="min-w-0"><button className="experiment-button experiment-narrow-back" onClick={() => selectExperiment(null)}>← Back to experiments</button>

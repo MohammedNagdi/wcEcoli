@@ -408,7 +408,7 @@ export function TimelineComposer({
   return (
     <div className="space-y-4">
       <div className={`grid gap-3 ${showLibrarySave ? 'md:grid-cols-[1fr_1fr]' : ''}`}>
-        <div className="rounded-lg border border-gray-200">
+        <div className="designer-preset-panel rounded-lg border border-gray-200">
           <button
             type="button"
             aria-expanded={presetOpen}
@@ -497,7 +497,7 @@ export function TimelineComposer({
         </div>
 
         {showLibrarySave && (
-          <div className="rounded-lg border border-gray-200 px-4 py-3">
+          <div className="designer-library-save rounded-lg border border-gray-200 px-4 py-3">
             <p className="mb-2 text-xs font-medium text-gray-600">{`Save this ${entryNounSingular} for later`}</p>
             <div className="flex items-center gap-2">
               <input
@@ -524,7 +524,7 @@ export function TimelineComposer({
         )}
       </div>
 
-      <div className="rounded-lg border border-gray-200 px-4 py-3">
+      <div className="designer-vial-browser rounded-lg border border-gray-200 px-4 py-3">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-medium text-gray-600">Media vials</p>
@@ -722,7 +722,7 @@ export function TimelineComposer({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-gray-200">
+      <div className="designer-events-table overflow-hidden rounded-lg border border-gray-200">
         <div className="designer-event-header grid grid-cols-[90px_1fr_160px_80px] bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
           <span>Time (min)</span><span>Vial</span><span>Media ID</span><span />
         </div>

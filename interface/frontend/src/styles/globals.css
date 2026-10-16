@@ -209,3 +209,25 @@ code, .font-mono {
     transition: none;
   }
 }
+
+/* Portalled contextual help must retain its theme outside page containers. */
+.help-tip-popup {
+  position: fixed;
+  z-index: 200;
+  display: block;
+  width: 256px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border: 1px solid rgb(var(--color-border-subtle));
+  border-radius: 8px;
+  background: rgb(var(--color-elevated));
+  color: rgb(var(--color-text-secondary));
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: left;
+}

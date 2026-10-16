@@ -4,6 +4,7 @@ import { useExperimentResource } from './useExperimentResource'
 import { getFailedJobs, retryJob, deleteJobPermanent } from '../../api/client'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { variantLabel } from '../../utils/labels'
+import { ExperimentScrollRegion } from './ExperimentPresentation'
 import type { Experiment, FailedJobSummary } from '../../types'
 
 function formatDate(iso: string): string {
@@ -22,7 +23,7 @@ function ErrorPhaseTag({ phase }: { phase: string }) {
   }
   const color = phaseColors[phase] || 'bg-red-50 text-red-600'
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${color}`}>
+    <span className={`experiment-failure-phase inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${color}`}>
       {phase}
     </span>
   )
@@ -169,7 +170,7 @@ export function FailedJobsPanel({
       <RequestNotice error={resource.error} retry={() => void fetchJobs()} />
       <ExperimentControls label="Find a failed job" filters={filters} onChange={setFilters} failed types={visibleJobs.map((job) => job.variant_type)} conditions={visibleJobs.map((job) => job.condition)} count={visibleJobs.length} total={jobs.length} />
       {visibleJobs.length === 0 && <p className="text-sm text-gray-500 p-5">No matching failed jobs. Adjust search or clear filters.</p>}
-      <div className="experiment-table-wrap">
+      <ExperimentScrollRegion label="Failed jobs table">
         <table className="experiment-table">
           <thead className="bg-red-50/50 border-b border-gray-200">
             <tr>
@@ -202,7 +203,7 @@ export function FailedJobsPanel({
                       </p>
                     </button>
                     {isExpanded && job.error_message && (
-                      <div className="mt-2 px-3 py-2 bg-red-50 rounded border border-red-100 text-xs text-red-700 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">
+                      <div role="region" aria-label={`Error for job ${job.id}`} tabIndex={0} className="mt-2 px-3 py-2 bg-red-50 rounded border border-red-100 text-xs text-red-700 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">
                         {job.error_message}
                       </div>
                     )}
@@ -241,7 +242,7 @@ export function FailedJobsPanel({
             })}
           </tbody>
         </table>
-      </div>
+      </ExperimentScrollRegion>
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="Delete failed job"

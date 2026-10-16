@@ -1,3 +1,4 @@
+import { ExperimentScrollRegion } from './ExperimentPresentation'
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { createBatchExperiments, getConditions, getGenes, getMediaRecipes, getVariantDetail, getVariants } from '../../api/client'
@@ -1011,7 +1012,7 @@ export function TypedBatchBuilder() {
                 )}
               </div>
             </div>
-            <div role="region" aria-label="Available genes" tabIndex={0} className="batch-table-scroll max-h-[420px] overflow-auto rounded-lg border border-gray-200">
+            <ExperimentScrollRegion label="Available genes" className="batch-table-scroll max-h-[420px] overflow-auto rounded-lg border border-gray-200">
               <table className="w-full table-fixed text-sm">
                 <thead className="sticky top-0 z-20 border-b border-gray-200 bg-gray-100 shadow-sm">
                   <tr>
@@ -1052,7 +1053,7 @@ export function TypedBatchBuilder() {
                   )}
                 </tbody>
               </table>
-            </div>
+            </ExperimentScrollRegion>
           </section>
         ) : (
           <section className="rounded-lg border border-gray-200 bg-white p-4">
@@ -1287,7 +1288,7 @@ export function TypedBatchBuilder() {
               No preview records yet.
             </div>
           ) : (
-            <div role="region" aria-label="Preview records" tabIndex={0} className="batch-table-scroll max-h-[460px] overflow-auto rounded-lg border border-gray-200">
+            <ExperimentScrollRegion label="Preview records" className="batch-table-scroll max-h-[460px] overflow-auto rounded-lg border border-gray-200">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 border-b border-gray-200 bg-gray-50/95">
                   <tr>
@@ -1365,7 +1366,7 @@ export function TypedBatchBuilder() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ExperimentScrollRegion>
           )}
         </section>
 

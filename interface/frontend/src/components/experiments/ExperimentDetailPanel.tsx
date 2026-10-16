@@ -145,7 +145,7 @@ export function ExperimentDetailPanel({ experiment, onClose, onUpdated, onDirtyC
     onAssistantSnapshot?.(assistantSnapshot)
   }, [assistantSnapshot, onAssistantSnapshot])
 
-  return <aside className="experiment-inspector" aria-label="Experiment details">
+  return <aside className="experiment-inspector" aria-label="Experiment details" tabIndex={0}>
     <header className="experiment-inspector-header">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0"><h2 className="text-lg font-semibold text-gray-900 break-words">{experiment.name}</h2><div className="mt-2"><ExperimentStatus status={experiment.status} /></div></div>
@@ -159,7 +159,7 @@ export function ExperimentDetailPanel({ experiment, onClose, onUpdated, onDirtyC
         </>}
       </div>
       <div role="tablist" aria-label="Experiment detail sections" className="experiment-tabs mt-3 mb-0">
-        {(['overview', 'jobs'] as const).map((value) => <button key={value} id={`detail-${value}`} role="tab" aria-selected={tab === value} aria-controls={`panel-${value}`} tabIndex={tab === value ? 0 : -1} onKeyDown={(event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = value === 'overview' ? 'jobs' : 'overview'; setTab(next); document.getElementById(`detail-${next}`)?.focus() } }} onClick={() => setTab(value)}>{value === 'overview' ? 'Overview' : `Simulation jobs (${jobs.length})`}</button>)}
+        {(['overview', 'jobs'] as const).map((value) => <button key={value} id={`detail-${value}`} role="tab" aria-selected={tab === value} aria-controls={`panel-${value}`} tabIndex={tab === value ? 0 : -1} onKeyDown={(event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 'overview' : event.key === 'End' ? 'jobs' : value === 'overview' ? 'jobs' : 'overview'; setTab(next); document.getElementById(`detail-${next}`)?.focus() } }} onClick={() => setTab(value)}>{value === 'overview' ? 'Overview' : `Simulation jobs (${jobs.length})`}</button>)}
       </div>
     </header>
     <div className="experiment-inspector-body space-y-4">

@@ -136,3 +136,41 @@
 .experiment-designer.experiment-designer [role=option] > span { min-width: 0; overflow-wrap: anywhere; }
 .experiment-designer.experiment-designer p.truncate,
 .experiment-designer.experiment-designer .designer-vial span.truncate { white-space: normal; text-overflow: clip; overflow: visible; }
+
+/* Waza UI: consistent reading scale within the existing designer/batch flows. */
+.experiment-designer.experiment-designer h1 { font-size:22px; line-height:30px; }
+.experiment-designer.experiment-designer :is(h2, h3) { font-size:16px; line-height:24px; }
+.experiment-designer.experiment-designer :is(label, dt, dd, .text-xs, [class~='text-[10px]'], [class~='text-[11px]']) { font-size:13px; line-height:20px; }
+.experiment-designer.experiment-designer :is(input:not([type=checkbox]), select, textarea) { min-height:40px; font-size:14px; }
+.experiment-designer.experiment-designer button:not(.designer-marker) { min-height:36px; font-size:13px; }
+.experiment-designer.experiment-designer .designer-summary :is(button, a) { min-height:40px; }
+.experiment-designer.experiment-designer .designer-status { font-size:13px; line-height:20px; }
+.experiment-designer.experiment-designer .designer-notice { border-left-width:1px; background:rgb(var(--color-subtle)); }
+.experiment-designer.experiment-designer .designer-notice p { font-size:14px; line-height:22px; }
+.experiment-designer.experiment-designer .designer-reveal { animation:none; }
+.experiment-designer.experiment-designer .designer-gene-menu { animation:none; }
+.experiment-designer.experiment-designer .designer-vial > span,
+.experiment-designer.experiment-designer .designer-event-row code,
+.experiment-designer.experiment-designer p.truncate { white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; }
+.experiment-designer.experiment-designer .designer-vial code { white-space:normal; overflow-wrap:anywhere; }
+.experiment-designer.experiment-designer .designer-event-row { font-size:13px; }
+.experiment-designer.experiment-designer .designer-event-row input { min-width:72px; }
+.experiment-designer.experiment-designer .designer-summary dl { row-gap:16px; }
+.experiment-designer.experiment-designer details:not([open]) { background:transparent; }
+.experiment-designer.experiment-designer .designer-vial { border-color:rgb(var(--color-border-subtle)); }
+.experiment-designer.experiment-designer .designer-vial[aria-pressed='true'] { border-color:rgb(var(--color-focus)); }
+.experiment-designer.experiment-designer p:is(.text-xs, .text-sm) { font-size:14px; line-height:22px; }
+.experiment-designer.experiment-designer .designer-preset-panel { border:0; background:transparent; }
+.experiment-designer.experiment-designer .designer-vial-browser { border-inline:0; border-bottom:0; border-radius:0; padding-inline:0; }
+.experiment-designer.experiment-designer .designer-events-table { border-inline:0; border-radius:0; }
+.experiment-designer.experiment-designer [tabindex]:focus-visible { outline:2px solid rgb(var(--color-focus)); outline-offset:-2px; }
+.batch-designer.batch-designer .batch-table-scroll p { font-size:13px; line-height:20px; }
+@container designer (min-width:700px) {
+  .experiment-designer.experiment-designer :is(.designer-event-header, .designer-event-row) {
+    grid-template-columns:110px minmax(0,1fr) minmax(110px,160px) 80px;
+    gap:8px;
+  }
+}
+.experiment-designer.experiment-designer button[aria-label='More info'] { width:28px; height:28px; min-height:28px; border-radius:50%; font-size:12px; }
+.experiment-designer.experiment-designer .designer-library-save { border:0; background:transparent; }
+.experiment-designer.experiment-designer button:is(.w-6, .w-7, .w-8) { min-width:36px; width:36px; height:36px; }

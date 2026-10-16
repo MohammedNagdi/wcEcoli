@@ -2,11 +2,12 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { cancelBatch, deleteBatch, deleteExperiment, getBatches, getBatchDetail, resumeBatch, runBatch } from '../../api/client'
 import { statusLabel, variantLabel } from '../../utils/labels'
+import { ExperimentActionPopup, ExperimentScrollRegion } from './ExperimentPresentation'
 import { ResultsActionPopup, ResultsChevron } from '../results/ResultsPresentation'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import '../../styles/experiments.css'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'
-import { ExperimentControls, EMPTY_FILTERS, RequestNotice } from './ExperimentControls'
+import { ExperimentControls, EMPTY_FILTERS, RequestNotice, statusGroup } from './ExperimentControls'
 import { useExperimentResource } from './useExperimentResource'
 import type { BatchSummary, BatchDetail, Experiment } from '../../types'
 
@@ -49,7 +50,7 @@ function summarizeExperiment(exp: Experiment) {
 }
 
 export function BatchDashboard({ presentation = 'default', initialExpandedId, active = true, selectedExperiment: externalSelection = null, selectedExperimentDetailSnapshot: externalSnapshot = null, onOpenExperiment: externalOpen, onDeletedExperiment: externalDelete, onExpandedChange, onAssistantSnapshot }: {
-  presentation?: 'default' | 'results'
+  presentation?: 'default' | 'results' | 'experiments'
   initialExpandedId?: string
   active?: boolean
   selectedExperiment?: Experiment | null
@@ -337,7 +338,7 @@ export function BatchDashboard({ presentation = 'default', initialExpandedId, ac
       )}
 
       <RequestNotice error={resource.error} retry={() => void resource.refresh()} />
-      <ExperimentControls label="Find a batch" filters={filters} onChange={setFilters} statusLabel="Contains status" types={batches.flatMap((batch) => batch.variant_types)} conditions={batches.flatMap((batch) => batch.conditions)} count={visibleBatches.length} total={batches.length} />
+      <ExperimentControls polished={presentation === 'experiments'} label="Find a batch" filters={filters} onChange={setFilters} statusLabel="Contains status" types={batches.flatMap((batch) => batch.variant_types)} conditions={batches.flatMap((batch) => batch.conditions)} count={visibleBatches.length} total={batches.length} />
       {expandedId && <RequestNotice error={detailResource.error} retry={() => void detailResource.refresh()} />}
       {visibleBatches.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
@@ -416,7 +417,7 @@ function BatchCard({
   selectedId,
 }: {
   batch: BatchSummary
-  presentation: 'default' | 'results'
+  presentation: 'default' | 'results' | 'experiments'
   onRun: (id: string) => void
   onCancel: (id: string) => void
   onResume: (id: string) => void
@@ -434,6 +435,7 @@ function BatchCard({
   detail: BatchDetail | null
 }) {
   const Heading = presentation === 'results' ? 'h2' : 'h3'
+  const ActionPopup = presentation === 'experiments' ? ExperimentActionPopup : ResultsActionPopup
   const { total, done, failed, running, queued, draft, cancelled } = batch
 
 
@@ -452,7 +454,7 @@ function BatchCard({
   const conditionSummary = batch.conditions.length > 0 ? batch.conditions.join(', ') : 'No condition'
 
   useEffect(() => {
-    if (presentation === 'results' || (openExperimentMenuId == null && !batchMenuOpen)) return
+    if (presentation !== 'default' || (openExperimentMenuId == null && !batchMenuOpen)) return
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as HTMLElement
       if (!target.closest('[data-batch-card-menu]')) setBatchMenuOpen(false)
@@ -471,7 +473,7 @@ function BatchCard({
   }
 
   return (
-    <div className={`bg-white border border-gray-200 rounded-lg overflow-hidden ${presentation === 'results' ? 'results-batch-card' : ''}`}>
+    <div className={`bg-white border border-gray-200 rounded-lg overflow-hidden ${presentation === 'results' ? 'results-batch-card' : presentation === 'experiments' ? 'experiment-batch-card' : ''}`}>
       {/* Header: clickable to expand */}
       <div
         className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
@@ -480,8 +482,8 @@ function BatchCard({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              {presentation === 'results' ? <ResultsChevron expanded={isExpanded} /> : <span className={`text-gray-400 text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>▶</span>}
-              <Heading className="font-medium text-gray-900"><button aria-expanded={isExpanded} aria-controls={presentation === 'results' ? `results-batch-detail-${batch.batch_id}` : undefined} className="text-left" onClick={(event) => { event.stopPropagation(); onToggleExpand(batch.batch_id) }}>{batch.name}</button></Heading>
+              {presentation !== 'default' ? <ResultsChevron expanded={isExpanded} /> : <span className={`text-gray-400 text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>▶</span>}
+              <Heading className="font-medium text-gray-900"><button aria-expanded={isExpanded} aria-controls={presentation !== 'default' ? `results-batch-detail-${batch.batch_id}` : undefined} className="text-left" onClick={(event) => { event.stopPropagation(); onToggleExpand(batch.batch_id) }}>{batch.name}</button></Heading>
               {isActive && (
                 <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-500 " />
@@ -576,7 +578,7 @@ function BatchCard({
                 ...
               </button>
               {batchMenuOpen && (
-                <ResultsActionPopup enabled={presentation === 'results'} anchor={batchMenuRef} onClose={() => setBatchMenuOpen(false)} label={`Actions for ${batch.name}`} fallbackClassName="absolute right-0 top-full z-20 mt-1 w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                <ActionPopup enabled={presentation !== 'default'} anchor={batchMenuRef} onClose={() => setBatchMenuOpen(false)} label={`Actions for ${batch.name}`} fallbackClassName="absolute right-0 top-full z-20 mt-1 w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                   <button
                     type="button"
                     onClick={() => {
@@ -587,7 +589,7 @@ function BatchCard({
                   >
                     Delete batch
                   </button>
-                </ResultsActionPopup>
+                </ActionPopup>
               )}
             </div>
           </div>
@@ -679,7 +681,7 @@ function BatchCard({
               Loading experiments...
             </div>
           ) : (
-            <div className="max-h-[400px] overflow-y-auto" role={presentation === 'results' ? 'region' : undefined} aria-label={presentation === 'results' ? `Experiments in ${batch.name}` : undefined} tabIndex={presentation === 'results' ? 0 : undefined}>
+            <ExperimentScrollRegion enabled={presentation === 'experiments'} labelWhenDisabled={presentation === 'results'} label={`Experiments in ${batch.name}`} className="experiment-batch-table-scroll max-h-[400px] overflow-y-auto">
               <table className="experiment-table">
                 <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
                   <tr>
@@ -703,7 +705,7 @@ function BatchCard({
                       </td>
                       <td className="px-4 py-2 text-gray-600">{exp.condition}</td>
                       <td className="px-4 py-2">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                        <span data-status={statusGroup(exp.status)} className={`experiment-status inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
                           STATUS_COLORS[exp.status] ?? 'bg-gray-100 text-gray-600'
                         }`}>
                           {['queued', 'running', 'running_parca', 'running_sim', 'ingesting'].includes(exp.status) && (
@@ -736,7 +738,7 @@ function BatchCard({
                               ...
                             </button>
                             {openExperimentMenuId === exp.id && (
-                              <ResultsActionPopup enabled={presentation === 'results'} anchor={experimentMenuRef} onClose={() => setOpenExperimentMenuId(null)} label={`Actions for ${exp.name}`} fallbackClassName="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                              <ActionPopup enabled={presentation !== 'default'} anchor={experimentMenuRef} onClose={() => setOpenExperimentMenuId(null)} label={`Actions for ${exp.name}`} fallbackClassName="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -747,7 +749,7 @@ function BatchCard({
                                 >
                                   Delete experiment
                                 </button>
-                              </ResultsActionPopup>
+                              </ActionPopup>
                             )}
                           </div>
                         </div>
@@ -756,7 +758,7 @@ function BatchCard({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ExperimentScrollRegion>
           )}
         </div>
       )}

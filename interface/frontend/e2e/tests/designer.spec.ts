@@ -193,3 +193,41 @@ for (const width of [390, 768, 1440]) test(`native wheel scrolling reaches detai
   await expect.poll(() => main.evaluate(e => e.scrollTop)).toBe(0)
   await expect(page.getByRole('heading', { name: 'Design experiment' })).toBeInViewport()
 })
+
+for (const width of [390, 768, 1440]) test(`contextual help stays inside the viewport at ${width}px`, async ({ page }) => {
+  await setup(page)
+  await page.setViewportSize({ width, height: 720 })
+  await page.goto('/experiments/new')
+  const help = page.getByRole('button', { name: 'More info', exact: true }).first()
+  await help.evaluate(element => element.scrollIntoView({ block: 'start' }))
+  await help.hover()
+  const tip = page.getByRole('tooltip')
+  await expect(tip).toBeVisible()
+  await expect(tip).toContainText("Gene knockout")
+  expect(await tip.evaluate(element => element.parentElement === document.body)).toBe(true)
+  const assertBounds = async () => {
+    await expect.poll(async () => {
+      const bounds = await tip.boundingBox()
+      const viewport = page.viewportSize()!
+      return !!bounds && bounds.x >= 11 && bounds.y >= 11 && bounds.x + bounds.width <= viewport.width - 11 && bounds.y + bounds.height <= viewport.height - 11
+    }).toBe(true)
+  }
+  await assertBounds()
+  const triggerBounds = (await help.boundingBox())!
+  if (triggerBounds.y < 100) expect((await tip.boundingBox())!.y).toBeGreaterThan(triggerBounds.y + triggerBounds.height)
+  // Clicking pins hovered help so its text can be read and selected.
+  await help.click()
+  await tip.hover()
+  await expect(tip).toBeVisible()
+  await page.setViewportSize({ width: 320, height: 320 })
+  await assertBounds()
+  await page.keyboard.press('Escape')
+  await expect(tip).toHaveCount(0)
+  await expect(help).toBeFocused()
+  await expect(help).toHaveAttribute('aria-expanded', 'false')
+  await page.keyboard.press('Tab')
+  await help.focus()
+  await expect(tip).toBeVisible()
+  await page.mouse.click(2, 2)
+  await expect(tip).toHaveCount(0)
+})

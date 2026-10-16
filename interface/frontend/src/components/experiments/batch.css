@@ -29,3 +29,13 @@
 .batch-gene-filters :is(input, select) { width: 100%; }
 @container designer (max-width: 599px) { .batch-gene-filters { grid-template-columns: minmax(0, 1fr); } }
 .batch-designer.batch-designer .batch-table-scroll td.font-mono { color: rgb(var(--color-text-primary)); }
+
+.batch-designer.batch-designer .batch-table-scroll { scroll-padding-bottom:88px; padding-bottom:88px; }
+.batch-designer.batch-designer .batch-table-scroll :is(td, th) { font-size:13px; line-height:20px; }
+.batch-designer.batch-designer .batch-table-scroll input[type=checkbox] { width:16px; height:16px; margin:10px; }
+.batch-designer.batch-designer .batch-table-scroll :is(input:not([type=checkbox]), select) { min-height:36px; }
+.batch-designer.batch-designer .batch-table-scroll button { min-height:36px; }
+.batch-designer.batch-designer .batch-table-scroll { padding-bottom:0; }
+.batch-designer.batch-designer .batch-table-scroll[data-overflow-y='true'] { padding-bottom:88px; }
+.batch-designer.batch-designer :is(.bg-amber-50, .bg-emerald-50, .bg-blue-50, .bg-brand-50) { background:rgb(var(--color-subtle)); }
+.batch-designer.batch-designer .batch-table-scroll td:first-child:has(input[type=checkbox]) { padding-inline:0; text-align:center; }
