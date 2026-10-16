@@ -30,3 +30,13 @@ The three Inspo detail captures were reviewed again before this implementation. 
 Run `npm run build` and `npm run e2e -- workspace.spec.ts home.spec.ts theme.spec.ts smoke.spec.ts a11y.spec.ts --workers=3 --retries=0` from the frontend. Tests mock API responses; they do not launch simulations. Check 390/768/1440px, light/dark/system, reduced motion, and a 720×480 effective viewport representing 200% zoom on a 1440×960 window. Short windows allow page scrolling rather than clipping the table and inspector.
 
 Implementation validation: build passed; all 140 tests passed across Chromium and WebKit, including 30 workspace checks. Real local API previews were reviewed at the three target widths in all theme modes and the effective zoom viewport. Captures are in `output/workspace-refresh/`. The build retains the existing large-bundle warning; no dependencies, backend routes, or data models were changed.
+
+## Waza UI polish (2026-10-15)
+
+Preserves the existing workspace reference lock and scientific content. Coordinate cells now have a 200px minimum and do not wrap; the live 1440px catalog's first row measured 65.5px rather than the prior 82.5px. Supporting labels use 13px, explanations 14px, and selected-gene headings 22px. Filtering controls share 36px minimum heights and adapt to panel width.
+
+The catalog is a labelled, focusable scroll region with an overflow-dependent hint and explicit Left/Right scrolling when the region itself has focus. Hidden catalog panes retain overflow state to preserve scroll restoration. Catalog and inspector scrolling areas include 88px bottom clearance. Genomic context retains its text and biological graphics with reduced nested framing; focus indicators use the platform violet token.
+
+Pathway requests now distinguish pending, failed, and successfully empty results. Retry reloads annotations locally without changing the selected gene, filters, or disclosures. Assistant context reports loading/unavailable state and omits a numeric match count until the request succeeds.
+
+Validation: frontend build passed; 120 workspace/smoke/theme/accessibility checks passed across Chromium and WebKit. After the final scoped dark-surface correction, all 44 workspace checks passed again. Live read-only review covered 390px and 1440px in both themes; mocked checks also cover 768px, system theme, reduced motion, effective 200% zoom, loading/failure recovery, and scroll preservation. Existing homepage edits were preserved.

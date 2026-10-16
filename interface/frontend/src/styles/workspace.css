@@ -128,7 +128,8 @@
   min-height: 40px;
 }
 .workspace-filter-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 12px;
@@ -341,7 +342,7 @@
   flex-basis: 100%;
 }
 .workspace-gene-title h2 {
-  font-size: 24px;
+  font-size: 22px;
   line-height: 32px;
   font-weight: 650;
 }
@@ -682,9 +683,6 @@
   .gene-workspace[data-pane='browse'] .workspace-catalog-panel {
     animation: workspace-panel-reveal 180ms ease-out;
   }
-  .workspace-filter-row {
-    flex-wrap: nowrap;
-  }
 
 }
 @media (max-width: 639px) {
@@ -810,3 +808,122 @@
 }
 
 @media (max-width:1099px) and (min-width:640px) { .workspace-shell > aside#workspace-navigation { width:64px; } }
+
+/* Workspace refinement: readable catalog geometry and quiet inspector surfaces. */
+.gene-workspace {
+  --workspace-label-size: 13px;
+  --workspace-control-height: 36px;
+  --workspace-scroll-clearance: 88px;
+}
+.gene-workspace :is(button, a, input, select, [tabindex]):focus-visible,
+.workspace-inspector-panel:focus {
+  outline: 2px solid rgb(var(--color-focus));
+  outline-offset: -2px;
+}
+.workspace-filter-group {
+  gap: 8px;
+}
+.workspace-filter-group > button,
+.workspace-filter-with-help,
+.workspace-category-label select {
+  min-height: var(--workspace-control-height);
+  border-radius: 8px;
+}
+.workspace-filter-group button,
+.workspace-filter-group button > span,
+.workspace-category-label,
+.workspace-category-label select,
+.workspace-result-summary,
+.workspace-result-summary > span:first-child,
+.workspace-catalog-heading > span,
+.workspace-search-shortcut,
+.workspace-gene-id,
+.workspace-fact-label,
+.workspace-facts .font-mono,
+.workspace-disclosure-heading small,
+.workspace-primary-button,
+.workspace-secondary-button,
+.workspace-pane-switch button,
+.workspace-state-eyebrow {
+  font-size: var(--workspace-label-size);
+}
+.workspace-page-header p,
+.workspace-product-description,
+.workspace-section-empty {
+  font-size: 14px;
+  line-height: 22px;
+}
+.workspace-empty h2 {
+  font-size: 22px;
+}
+.workspace-inspector-content :is(.text-xs, [class~='text-[10px]'], [class~='text-[11px]']) {
+  font-size: var(--workspace-label-size);
+  line-height: 20px;
+}
+.workspace-filter-with-help .workspace-help-button {
+  height: 32px;
+}
+.workspace-catalog table {
+  min-width: 640px;
+}
+.workspace-catalog th,
+.workspace-catalog td > .font-mono:not(.workspace-gene-button),
+.workspace-catalog td p,
+.workspace-catalog td.font-mono {
+  font-size: var(--workspace-label-size);
+  line-height: 20px;
+}
+.workspace-catalog th:nth-child(3),
+.workspace-catalog td:nth-child(3) {
+  width: 200px;
+  min-width: 200px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-catalog td:nth-child(2) > span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: var(--workspace-label-size);
+}
+.workspace-table-hint {
+  flex-shrink: 0;
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 20px;
+  color: rgb(var(--color-text-secondary));
+}
+.workspace-table-scroll {
+  min-height: 0;
+  scroll-padding-bottom: var(--workspace-scroll-clearance);
+  padding-bottom: var(--workspace-scroll-clearance);
+}
+.workspace-inspector-scroll {
+  padding-bottom: var(--workspace-scroll-clearance);
+  scroll-padding-bottom: var(--workspace-scroll-clearance);
+}
+.workspace-pathway-error {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 22px;
+}
+.gene-workspace .workspace-inspector-content .workspace-genome-context > div {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+.gene-workspace .workspace-inspector-content .workspace-genome-context > div > div:first-child p {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: rgb(var(--color-text-secondary));
+}
+.workspace-genome-context div:has(> svg[aria-label^='Genomic context']) {
+  border: 0;
+  background: transparent;
+  padding-inline: 0;
+}

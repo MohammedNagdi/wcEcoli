@@ -483,3 +483,140 @@ test('two-finger touch pinch zooms around its midpoint', async ({ page, browserN
   await expect(page).toHaveURL('/genome')
   expect(await page.evaluate(() => window.visualViewport!.scale)).toBe(1)
 })
+
+for (const width of [390, 768, 1440]) {
+  test(`category popover preserves map placement and restores keyboard focus at ${width}px`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.setViewportSize({ width, height: 960 })
+    await page.goto('/genome')
+    await expect(page.locator('path[data-gene]')).toHaveCount(2)
+    const trigger = page.getByRole('button', { name: 'Highlight categories', exact: true })
+    const map = page.locator('.genome-map-frame')
+    const before = await map.boundingBox()
+    await trigger.focus()
+    await page.keyboard.press('Enter')
+    const choices = page.getByRole('group', { name: 'Category highlights', exact: true })
+    await expect(choices).toBeVisible()
+    await expect(choices.getByRole('button').first()).toBeFocused()
+    expect((await map.boundingBox())!.y).toBe(before!.y)
+    const popup = (await choices.boundingBox())!
+    expect(popup.x).toBeGreaterThanOrEqual(11)
+    expect(popup.x + popup.width).toBeLessThanOrEqual(width - 11)
+    expect(popup.y + popup.height).toBeLessThanOrEqual(949)
+    await page.keyboard.press('Escape')
+    await expect(choices).toHaveCount(0)
+    await expect(trigger).toBeFocused()
+    await trigger.click()
+    await page.getByRole('heading', { name: 'Genome Map', exact: true }).click()
+    await expect(choices).toHaveCount(0)
+  })
+
+  test(`annotations and inspector navigation remain readable at ${width}px`, async ({ page }, testInfo) => {
+    await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' })
+    await page.addInitScript(() => localStorage.setItem('wcecoli.theme', 'dark'))
+    await page.setViewportSize({ width, height: 960 })
+    await page.goto('/genome?gene=dnaA&source=review')
+    await expect(page.getByRole('heading', { name: 'dnaA', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Fit genome', exact: true }).click()
+    const annotations = page.locator('.genome-map-annotations text')
+    await expect(annotations).toHaveCount(13)
+    const renderedSizes = await annotations.evaluateAll((nodes) => nodes.map((node) => {
+      const text = node as SVGTextElement
+      return Number.parseFloat(getComputedStyle(text).fontSize) * text.getScreenCTM()!.a
+    }))
+    renderedSizes.slice(0, 11).forEach((size) => expect(size).toBeGreaterThanOrEqual(10.95))
+    expect(renderedSizes[11]).toBeCloseTo(14, 1)
+    expect(renderedSizes[12]).toBeCloseTo(12, 1)
+    const frame = (await page.locator('.genome-map-frame').boundingBox())!
+    for (const label of await annotations.all()) {
+      const rect = (await label.boundingBox())!
+      expect(rect.x).toBeGreaterThanOrEqual(frame.x - 1)
+      expect(rect.x + rect.width).toBeLessThanOrEqual(frame.x + frame.width + 1)
+    }
+    const initial = await cameraState(page)
+    const url = page.url()
+    if (width < 1100) {
+      await page.getByRole('button', { name: 'View gene details', exact: true }).click()
+      await expect(page.getByRole('complementary', { name: 'Genome inspector' })).toBeFocused()
+      await page.getByRole('button', { name: 'Back to map', exact: true }).click()
+      await expect(page.getByRole('group', { name: 'Interactive chromosome map', exact: true })).toBeFocused()
+    } else {
+      await expect(page.getByRole('button', { name: 'View gene details', exact: true })).toHaveCount(0)
+      await expect(page.locator('.genome-inspector')).toHaveCSS('width', '360px')
+    }
+    expect(await cameraState(page)).toBe(initial)
+    expect(page.url()).toBe(url)
+    await expect(page.locator('.genome-gene-details header h2')).toHaveCSS('font-size', '22px')
+    await expect(page.locator('.genome-page')).toHaveCSS('padding-bottom', '88px')
+    await page.screenshot({ path: `/tmp/genome-polish-${testInfo.project.name}-${width}.png` })
+  })
+}
+
+test('hover tooltip fits the map panel and zoom reuses gene glyph attributes', async ({ page }) => {
+  await page.goto('/genome?gene=dnaA')
+  await expect(camera(page)).toHaveAttribute('data-zoom', '8')
+  const gene = page.locator('path[data-gene="dnaA"]')
+  await gene.hover()
+  const tooltip = page.locator('.genome-map-tooltip')
+  await expect(tooltip).toContainText('500,000–501,400 bp')
+  const panel = (await page.locator('.genome-map').boundingBox())!
+  const popup = (await tooltip.boundingBox())!
+  expect(popup.x).toBeGreaterThanOrEqual(panel.x)
+  expect(popup.x + popup.width).toBeLessThanOrEqual(panel.x + panel.width)
+  expect(popup.y + popup.height).toBeLessThanOrEqual(panel.y + panel.height)
+  await page.locator('svg[aria-label="Chromosome genes"]').evaluate((svg) => {
+    ;(window as unknown as { glyphMutations: number }).glyphMutations = 0
+    new MutationObserver((records) => {
+      ;(window as unknown as { glyphMutations: number }).glyphMutations += records.length
+    }).observe(svg.querySelector('path[data-gene]')!, { attributes: true })
+  })
+  await page.getByRole('button', { name: 'Zoom in', exact: true }).click()
+  await expect(camera(page)).not.toHaveAttribute('data-zoom', '8')
+  expect(await page.evaluate(() => (window as unknown as { glyphMutations: number }).glyphMutations)).toBe(0)
+})
+
+test('Assistant dock uses the narrow layout and category Escape leaves the dock open', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/genome?gene=dnaA')
+  await expect(page.getByRole('heading', { name: 'dnaA', exact: true })).toBeVisible()
+  await page.getByTestId('assistant-dock-toggle').click()
+  await expect(page.getByTestId('assistant-dock')).toHaveAttribute('role', 'complementary')
+  await expect(page.getByRole('button', { name: 'View gene details', exact: true })).toBeVisible()
+  const before = await cameraState(page)
+  await page.getByRole('button', { name: 'Highlight categories', exact: true }).click()
+  await expect(page.getByRole('group', { name: 'Category highlights' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('group', { name: 'Category highlights' })).toHaveCount(0)
+  await expect(page.getByTestId('assistant-dock')).toBeVisible()
+  expect(await cameraState(page)).toBe(before)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('deep-link focus waits for a styled scroll frame on a cold load', async ({ page }) => {
+  await page.addInitScript(() => {
+    const style = document.createElement('style')
+    style.id = 'delayed-map-styles'
+    style.textContent = '.genome-map-frame { overflow: visible !important; width: 1200px !important; }'
+    const observer = new MutationObserver(() => {
+      if (!document.head) return
+      document.head.appendChild(style)
+      observer.disconnect()
+    })
+    observer.observe(document, { childList: true, subtree: true })
+  })
+  await page.goto('/genome?gene=dnaA')
+  await expect(camera(page)).toHaveAttribute('data-zoom', '8')
+  await page.evaluate(() => document.getElementById('delayed-map-styles')!.remove())
+  const frame = page.locator('.genome-map-frame')
+  await expect(frame).toHaveCSS('overflow-x', 'auto')
+  await expect.poll(async () => {
+    const gene = (await page.locator('path[data-gene="dnaA"]').boundingBox())!
+    const viewport = (await frame.boundingBox())!
+    return Math.hypot(gene.x + gene.width / 2 - viewport.x - viewport.width / 2,
+      gene.y + gene.height / 2 - viewport.y - viewport.height / 2)
+  }).toBeLessThan(5)
+  const before = await cameraState(page)
+  await page.locator('path[data-gene="crp"]').click()
+  await expect(page.getByRole('heading', { name: 'crp', exact: true })).toBeVisible()
+  expect(await cameraState(page)).toBe(before)
+})

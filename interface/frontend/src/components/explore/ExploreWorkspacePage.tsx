@@ -38,6 +38,9 @@ export function ExploreWorkspacePage() {
     retry,
   } = useGeneDetail(selectedGene)
   const [aaPathways, setAAPathways] = useState<AAPathway[]>([])
+  const [pathwaysLoading, setPathwaysLoading] = useState(true)
+  const [pathwaysError, setPathwaysError] = useState(false)
+  const [pathwaysAttempt, setPathwaysAttempt] = useState(0)
   const [catalogAssistantSnapshot, setCatalogAssistantSnapshot] = useState<Record<
     string,
     unknown
@@ -75,8 +78,10 @@ export function ExploreWorkspacePage() {
       selected_gene_detail_loading: detailLoading,
       selected_gene_detail: summarizeGeneDetail(selectedGeneDetail),
       pathway_context: {
+        loading: pathwaysLoading,
+        unavailable: pathwaysError,
         loaded_pathways: aaPathways.length,
-        selected_gene_match_count: pathwayMatches.length,
+        selected_gene_match_count: pathwaysLoading || pathwaysError ? null : pathwayMatches.length,
         selected_gene_matches: pathwayMatches
           .slice(0, ASSISTANT_PATHWAY_SAMPLE_LIMIT)
           .map((match) => ({
@@ -91,6 +96,8 @@ export function ExploreWorkspacePage() {
     }
   }, [
     aaPathways,
+    pathwaysLoading,
+    pathwaysError,
     assistantCapturedAt,
     catalogAssistantSnapshot,
     detailLoading,
@@ -130,17 +137,22 @@ export function ExploreWorkspacePage() {
 
   useEffect(() => {
     let mounted = true
+    setPathwaysLoading(true)
+    setPathwaysError(false)
     getAAPathways()
       .then((pathways) => {
         if (mounted) setAAPathways(pathways)
       })
       .catch(() => {
-        if (mounted) setAAPathways([])
+        if (mounted) setPathwaysError(true)
+      })
+      .finally(() => {
+        if (mounted) setPathwaysLoading(false)
       })
     return () => {
       mounted = false
     }
-  }, [])
+  }, [pathwaysAttempt])
 
   useEffect(() => {
     if (selectedGene) setActivePane('detail')
@@ -296,6 +308,9 @@ export function ExploreWorkspacePage() {
           <SelectedGeneSummary
             gene={selectedGeneDetail}
             aaPathways={aaPathways}
+            pathwaysLoading={pathwaysLoading}
+            pathwaysError={pathwaysError}
+            onRetryPathways={() => setPathwaysAttempt((value) => value + 1)}
             loading={detailLoading}
             error={detailError}
             notFound={notFound}
@@ -313,6 +328,9 @@ export function ExploreWorkspacePage() {
 function SelectedGeneSummary({
   gene,
   aaPathways,
+  pathwaysLoading,
+  pathwaysError,
+  onRetryPathways,
   loading,
   error,
   notFound,
@@ -323,6 +341,9 @@ function SelectedGeneSummary({
 }: {
   gene: GeneDetail | null
   aaPathways: AAPathway[]
+  pathwaysLoading: boolean
+  pathwaysError: boolean
+  onRetryPathways: () => void
   loading: boolean
   error: string | null
   notFound: boolean
@@ -481,11 +502,20 @@ function SelectedGeneSummary({
           </WorkspaceDisclosure>
           <WorkspaceDisclosure
             title="Pathways"
-            summary={`${matches.length} match${matches.length === 1 ? '' : 'es'}`}
+            summary={pathwaysLoading ? 'Loading pathways…' : pathwaysError ? 'Pathways unavailable' : `${matches.length} match${matches.length === 1 ? '' : 'es'}`}
             open={sections.pathways}
             onToggle={() => toggle('pathways')}
           >
-            {matches.length ? (
+            {pathwaysLoading ? (
+              <p className="workspace-section-empty" role="status">Loading pathways…</p>
+            ) : pathwaysError ? (
+              <div className="workspace-pathway-error" role="alert">
+                <p>Unable to load pathway annotations.</p>
+                <button type="button" className="workspace-secondary-button" onClick={onRetryPathways}>
+                  Retry pathways
+                </button>
+              </div>
+            ) : matches.length ? (
               <PathwayContext gene={gene} pathways={aaPathways} />
             ) : (
               <p className="workspace-section-empty">
@@ -500,7 +530,9 @@ function SelectedGeneSummary({
             onToggle={() => toggle('genome')}
           >
             {gene.left_end_pos != null ? (
-              <GenomeContextRail symbol={gene.symbol} window={5000} onSelectGene={onSelectGene} />
+              <div className="workspace-genome-context">
+                <GenomeContextRail symbol={gene.symbol} window={5000} onSelectGene={onSelectGene} />
+              </div>
             ) : (
               <p className="workspace-section-empty">
                 Genomic coordinates are unavailable for this gene.

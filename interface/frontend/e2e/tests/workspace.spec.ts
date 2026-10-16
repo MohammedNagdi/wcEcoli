@@ -381,3 +381,86 @@ test('loaded pages and catalog scroll survive inspection, with retry for additio
   await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBe(savedScroll)
   await expect(page.getByRole('button', { name: 'Inspect gene099', exact: true })).toHaveCount(1)
 })
+
+test('pathway loading, failure, and retry do not masquerade as zero matches', async ({ page }) => {
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => { release = resolve })
+  let attempts = 0
+  let retrying = false
+  await page.route('**/api/pathways/amino-acids', async (route) => {
+    attempts += 1
+    if (!retrying) {
+      await pending
+      return route.fulfill({ status: 503, json: { detail: 'Unavailable' } })
+    }
+    return route.fulfill({ json: [] })
+  })
+  await page.goto('/explore?gene=dnaA')
+  const disclosure = page.getByRole('button', { name: /^Pathways/ })
+  await expect(disclosure).toContainText('Loading pathways')
+  await disclosure.click()
+  const region = page.getByRole('region', { name: /^Pathways/ })
+  await expect(region).not.toContainText('No matching')
+  release()
+  await expect(disclosure).toContainText('Pathways unavailable')
+  await expect(region).toContainText('Unable to load pathway annotations.')
+  await expect(disclosure).not.toContainText('0 matches')
+  retrying = true
+  const initialAttempts = attempts
+  await page.getByRole('button', { name: 'Retry pathways', exact: true }).click()
+  await expect(disclosure).toContainText('0 matches')
+  await expect(region).toContainText('No matching amino acid pathways')
+  expect(attempts).toBe(initialAttempts + 1)
+})
+
+for (const theme of ['light', 'dark']) {
+  for (const width of [390, 768, 1440]) {
+    test(`workspace polish keeps coordinates and controls readable at ${width}px in ${theme}`, async ({ page }) => {
+      await page.addInitScript((value) => localStorage.setItem('wcecoli.theme', value), theme)
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await page.setViewportSize({ width, height: 960 })
+      await page.route('**/api/genes?*', (route) => route.fulfill({ json: {
+        genes: [{ ...genes[0], left_end_pos: 1234567, right_end_pos: 1239999 }],
+        total: 1, page: 1, page_size: 100,
+      } }))
+      await page.goto('/explore')
+      const table = page.getByRole('region', { name: 'Gene catalog table', exact: true })
+      await expect(table).toHaveAttribute('tabindex', '0')
+      const position = table.locator('tbody tr').first().locator('td').nth(2)
+      await expect(position).toContainText('1,234,567-1,239,999')
+      const geometry = await position.evaluate((el) => ({
+        width: el.getBoundingClientRect().width,
+        whitespace: getComputedStyle(el).whiteSpace,
+        rowHeight: el.parentElement!.getBoundingClientRect().height,
+      }))
+      expect(geometry.width).toBeGreaterThanOrEqual(200)
+      expect(geometry.whitespace).toBe('nowrap')
+      expect(geometry.rowHeight).toBeLessThan(75)
+      const overflow = await table.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+      await expect(page.getByText('Scroll horizontally for more gene information.')).toHaveCount(overflow ? 1 : 0)
+      if (overflow) {
+        await table.focus()
+        await expect(table).toBeFocused()
+        await page.keyboard.press('ArrowRight')
+        await expect.poll(() => table.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
+      }
+      await table.evaluate((el) => { el.scrollLeft = 0 })
+      await expect(table).toHaveCSS('padding-bottom', '88px')
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      await page.screenshot({ path: `/tmp/workspace-polish-${theme}-${width}-catalog.png` })
+      await table.getByRole('button', { name: 'Inspect dnaA', exact: true }).click()
+      await expect(page.locator('.workspace-gene-title h2')).toHaveCSS('font-size', '22px')
+      await expect(page.locator('.workspace-product-description')).toHaveCSS('font-size', '14px')
+      await expect(page.locator('.workspace-inspector-scroll')).toHaveCSS('padding-bottom', '88px')
+      if (width < 1100) {
+        const inspector = page.getByRole('region', { name: 'Selected gene inspector' })
+        await expect(inspector).toBeFocused()
+        expect(await inspector.evaluate((el) => getComputedStyle(el).outlineColor)).toBe(
+          await inspector.evaluate((el) => `rgb(${getComputedStyle(el).getPropertyValue('--color-focus').trim().split(/\s+/).join(', ')})`),
+        )
+      }
+      await expect(page.locator('.workspace-genome-context > div')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+      await page.screenshot({ path: `/tmp/workspace-polish-${theme}-${width}-inspector.png` })
+    })
+  }
+}

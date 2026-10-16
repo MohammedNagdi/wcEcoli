@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getAllGenes } from '../../api/client'
@@ -24,6 +25,7 @@ import {
 import { useTheme } from '../theme/ThemeProvider'
 import { WorkspaceHelp, WORKSPACE_HELP } from '../workspace/WorkspaceHelp'
 import { WorkspaceDisclosure } from '../workspace/WorkspaceDisclosure'
+import { useMediaQuery } from '../workspace/useMediaQuery'
 import '../../styles/genome.css'
 
 interface CategorySummary {
@@ -64,6 +66,61 @@ export function GenomeViewerPage({
   const [attempt, setAttempt] = useState(0)
   const [tab, setTab] = useState<'details' | 'legend'>('details')
   const [categoriesOpen, setCategoriesOpen] = useState(false)
+  const narrow = useMediaQuery('(max-width: 1099px)')
+  const categoryTriggerRef = useRef<HTMLButtonElement>(null)
+  const categoryPopoverRef = useRef<HTMLDivElement>(null)
+  const inspectorRef = useRef<HTMLElement>(null)
+  const mapPanelRef = useRef<HTMLElement>(null)
+  const [categoryPosition, setCategoryPosition] = useState({ left: 12, top: 12, width: 0, maxHeight: 0 })
+  useLayoutEffect(() => {
+    if (!categoriesOpen) return
+    const position = () => {
+      const rect = categoryTriggerRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const width = Math.min(520, window.innerWidth - 24)
+      const below = window.innerHeight - rect.bottom - 20
+      const above = rect.top - 20
+      const openBelow = below >= 160 || below >= above
+      const maxHeight = Math.min(320, window.innerHeight - 24, Math.max(80, openBelow ? below : above))
+      const contentHeight = categoryPopoverRef.current?.firstElementChild?.scrollHeight
+      const height = Math.min(maxHeight, contentHeight != null ? contentHeight + 2 : maxHeight)
+      setCategoryPosition({
+        left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)),
+        top: Math.max(12, Math.min(openBelow ? rect.bottom + 8 : rect.top - 8 - height, window.innerHeight - height - 12)),
+        width,
+        maxHeight,
+      })
+    }
+    const dismiss = (event: PointerEvent) => {
+      if (!categoryPopoverRef.current?.contains(event.target as Node) &&
+          !categoryTriggerRef.current?.contains(event.target as Node)) setCategoriesOpen(false)
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      event.stopPropagation()
+      setCategoriesOpen(false)
+      categoryTriggerRef.current?.focus({ preventScroll: true })
+    }
+    position()
+    const observer = new ResizeObserver(position)
+    if (categoryPopoverRef.current?.firstElementChild) observer.observe(categoryPopoverRef.current.firstElementChild)
+    const focusFrame = requestAnimationFrame(() => {
+      categoryPopoverRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+    })
+    window.addEventListener('resize', position)
+    document.addEventListener('scroll', position, true)
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape, true)
+    return () => {
+      cancelAnimationFrame(focusFrame)
+      observer.disconnect()
+      window.removeEventListener('resize', position)
+      document.removeEventListener('scroll', position, true)
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape, true)
+    }
+  }, [categoriesOpen])
   const initialGene = useRef(
     new URLSearchParams(location.search).get('gene') ??
       new URLSearchParams(location.search).get('q'),
@@ -293,6 +350,7 @@ export function GenomeViewerPage({
         </div>
         <div className="genome-category-actions">
           <button
+            ref={categoryTriggerRef}
             type="button"
             className="workspace-secondary-button"
             aria-expanded={categoriesOpen}
@@ -314,12 +372,18 @@ export function GenomeViewerPage({
         </div>
         <p>Highlights emphasize genes; all genes remain on the map.</p>
       </div>
-      {categoriesOpen && (
+      {categoriesOpen && createPortal(
+        <div ref={categoryPopoverRef} className="genome-page genome-popover-root" style={{
+          left: categoryPosition.left, top: categoryPosition.top, width: categoryPosition.width,
+          visibility: categoryPosition.width ? 'visible' : 'hidden',
+        }}>
         <div
           id="genome-category-options"
           className="genome-category-options"
           role="group"
           aria-label="Category highlights"
+          tabIndex={0}
+          style={{ maxHeight: categoryPosition.maxHeight }}
         >
           {categorySummary.map(({ category, count }) => (
             <button
@@ -342,6 +406,7 @@ export function GenomeViewerPage({
           ))}
           {!categorySummary.length && <p>Categories will appear as genome data loads.</p>}
         </div>
+        </div>, document.body,
       )}
       {mapSearchTerm && (
         <section className="genome-search-results" aria-label="Gene search results">
@@ -359,7 +424,7 @@ export function GenomeViewerPage({
               Clear search
             </button>
           </div>
-          <div className="genome-results-list">
+          <div className="genome-results-list" role="region" aria-label="Matching genome genes" tabIndex={0}>
             {matches.map((gene) => (
               <button
                 type="button"
@@ -421,7 +486,7 @@ export function GenomeViewerPage({
         {!loading && !error && !genes.length && <p>No genome genes are available.</p>}
       </div>
       <div className="genome-layout">
-        <section className="genome-canvas-panel" aria-label="Chromosome visualization">
+        <section ref={mapPanelRef} className="genome-canvas-panel" aria-label="Chromosome visualization">
           <CircularGenomeMap
             genes={mappedGenes}
             searchTerm={mapSearchTerm}
@@ -431,9 +496,23 @@ export function GenomeViewerPage({
             onSelectGene={selectGene}
             compact={compact}
             darkMode={darkMode}
+            onViewDetails={narrow && selectedGene ? () => {
+              setTab('details')
+              inspectorRef.current?.focus({ preventScroll: true })
+              inspectorRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' })
+            } : undefined}
           />
         </section>
-        <aside className="genome-inspector" aria-label="Genome inspector">
+        <aside ref={inspectorRef} tabIndex={-1} className="genome-inspector" aria-label="Genome inspector">
+          {narrow && selectedGene && (
+            <div className="genome-inspector-navigation">
+              <button type="button" className="workspace-secondary-button" onClick={() => {
+                const frame = mapPanelRef.current?.querySelector<HTMLElement>('.genome-map-frame')
+                frame?.focus({ preventScroll: true })
+                mapPanelRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' })
+              }}>Back to map</button>
+            </div>
+          )}
           <div className="genome-inspector-tabs" role="tablist" aria-label="Genome information">
             {(['details', 'legend'] as const).map((value, index) => (
               <button
@@ -471,6 +550,7 @@ export function GenomeViewerPage({
             aria-labelledby="genome-tab-details"
             hidden={tab !== 'details'}
             className="genome-inspector-body"
+            tabIndex={0}
           >
             {!selectedGene ? (
               <div className="genome-inspector-empty">
@@ -579,11 +659,11 @@ export function GenomeViewerPage({
                   </div>
                 </dl>
                 {selectedMapped && (
-                  <GenomeContextRail
+                  <div className="genome-neighbors"><GenomeContextRail
                     key={detail.symbol}
                     symbol={detail.symbol}
                     onSelectGene={selectGene}
-                  />
+                  /></div>
                 )}
                 <button
                   type="button"
@@ -601,6 +681,7 @@ export function GenomeViewerPage({
             aria-labelledby="genome-tab-legend"
             hidden={tab !== 'legend'}
             className="genome-inspector-body"
+            tabIndex={0}
           >
             <GenomeLegend
               mappedCount={mappedGenes.length}

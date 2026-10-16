@@ -140,6 +140,22 @@ export function GeneCatalogPage({
   const [phenotypeMap, setPhenotypeMap] = useState<Map<string, GeneKOSummary>>(new Map())
   const savedScroll = useRef({ top: 0, left: 0 })
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [tableOverflows, setTableOverflows] = useState(false)
+  useLayoutEffect(() => {
+    const region = scrollRef.current
+    if (!workspaceLayout || !region) return
+    const update = () => {
+      // Hidden catalog panes retain their hint and geometry for scroll restoration.
+      if (region.clientWidth && region.getClientRects().length) {
+        setTableOverflows(region.scrollWidth > region.clientWidth + 1)
+      }
+    }
+    const observer = new ResizeObserver(update)
+    observer.observe(region)
+    if (region.firstElementChild) observer.observe(region.firstElementChild)
+    update()
+    return () => observer.disconnect()
+  }, [workspaceLayout])
   useLayoutEffect(() => {
     if (visible && workspaceLayout && scrollRef.current) {
       scrollRef.current.scrollTop = savedScroll.current.top
@@ -643,8 +659,25 @@ export function GeneCatalogPage({
           </div>
         )}
 
+        {workspaceLayout && tableOverflows && (
+          <p className="workspace-table-hint">Scroll horizontally for more gene information.</p>
+        )}
         <div
           ref={scrollRef}
+          role={workspaceLayout ? 'region' : undefined}
+          aria-label={workspaceLayout ? 'Gene catalog table' : undefined}
+          tabIndex={workspaceLayout ? 0 : undefined}
+          onKeyDown={(event) => {
+            if (!workspaceLayout || event.target !== event.currentTarget ||
+                event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              event.preventDefault()
+              event.currentTarget.scrollBy({
+                left: event.key === 'ArrowRight' ? 80 : -80,
+                behavior: 'instant',
+              })
+            }
+          }}
           onScroll={(event) => {
             if (event.currentTarget.getClientRects().length) {
               savedScroll.current = {
@@ -653,7 +686,7 @@ export function GeneCatalogPage({
               }
             }
           }}
-          className="flex-1 overflow-auto rounded-lg border border-gray-200 bg-white"
+          className={`flex-1 overflow-auto rounded-lg border border-gray-200 bg-white${workspaceLayout ? ' workspace-table-scroll' : ''}`}
         >
           <table className="w-full text-sm">
             {workspaceLayout && (

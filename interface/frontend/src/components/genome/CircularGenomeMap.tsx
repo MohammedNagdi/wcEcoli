@@ -37,6 +37,7 @@ interface Props {
   onSelectGene: (symbol: string) => void
   compact?: boolean
   darkMode?: boolean
+  onViewDetails?: () => void
 }
 interface Camera {
   zoom: number
@@ -68,9 +69,11 @@ export function CircularGenomeMap({
   onSelectGene,
   compact = false,
   darkMode = false,
+  onViewDetails,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapFrameRef = useRef<HTMLDivElement>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
   const cameraRef = useRef<Camera>({ zoom: 1, x: 0, y: 0 })
   const suppressClick = useRef(false)
@@ -137,11 +140,27 @@ export function CircularGenomeMap({
   useLayoutEffect(() => {
     const frame = mapFrameRef.current
     if (!frame) return
-    const measure = () => setViewportSize(frame.getBoundingClientRect().width)
+    let styleFrame: number | undefined
+    const measure = () => {
+      // Do not measure the unstyled frame during a cold stylesheet load.
+      if (getComputedStyle(frame).overflowX === 'auto') {
+        if (styleFrame != null) cancelAnimationFrame(styleFrame)
+        styleFrame = undefined
+        setViewportSize(frame.getBoundingClientRect().width)
+      } else if (styleFrame == null) {
+        styleFrame = requestAnimationFrame(() => {
+          styleFrame = undefined
+          measure()
+        })
+      }
+    }
     const observer = new ResizeObserver(measure)
     observer.observe(frame)
     measure()
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (styleFrame != null) cancelAnimationFrame(styleFrame)
+    }
   }, [])
 
   useLayoutEffect(() => {
@@ -337,8 +356,8 @@ export function CircularGenomeMap({
     if (!rect) return
     setTooltip({
       gene,
-      x: Math.max(8, Math.min(event.clientX - rect.left + 14, rect.width - 248)),
-      y: Math.max(8, Math.min(event.clientY - rect.top + 14, rect.height - 180)),
+      x: Math.max(8, Math.min(event.clientX - rect.left + 14, rect.width - Math.min(260, rect.width - 16) - 8)),
+      y: Math.max(8, 8 - rect.top, Math.min(event.clientY - rect.top + 14, Math.min(rect.height, window.innerHeight - rect.top) - (tooltipRef.current?.offsetHeight ?? 190) - 8)),
     })
   }, [])
   const hasSearch = Boolean(searchTerm.trim())
@@ -347,7 +366,6 @@ export function CircularGenomeMap({
   const chromosomeScene = useMemo(
     () => (
       <g>
-        <GenomeTicks posText={palette.muted} />
         <circle cx={CENTER} cy={CENTER} r={250} fill={palette.bg} stroke={palette.ring} />
         <circle cx={CENTER} cy={CENTER} r={298} fill="none" stroke={palette.ring} />
         <circle cx={CENTER} cy={CENTER} r={342} fill="none" stroke={palette.ring} />
@@ -391,38 +409,6 @@ export function CircularGenomeMap({
             </path>
           )
         })}
-        <GenomeMarker
-          bp={ORIC_BP}
-          label="oriC"
-          fill="#facc15"
-          stroke={palette.bg}
-          textFill={palette.text}
-        />
-        <GenomeMarker
-          bp={TER_BP}
-          label="ter"
-          fill="#60a5fa"
-          stroke={palette.bg}
-          textFill={palette.text}
-        />
-        <text
-          x={CENTER}
-          y={CENTER - 8}
-          textAnchor="middle"
-          fill={palette.text}
-          className="text-lg font-semibold"
-        >
-          E. coli K-12 MG1655
-        </text>
-        <text
-          x={CENTER}
-          y={CENTER + 20}
-          textAnchor="middle"
-          fill={palette.muted}
-          className="text-sm"
-        >
-          {(GENOME_LENGTH / 1_000_000).toFixed(2)} Mbp
-        </text>
       </g>
     ),
     [
@@ -437,6 +423,48 @@ export function CircularGenomeMap({
       onSelectGene,
     ],
   )
+  // Text scales with the fitted viewport; camera updates reuse the gene scene.
+  const annotationScale = VIEW_SIZE / (viewportSize || VIEW_SIZE)
+  const annotations = useMemo(() => (
+    <g className="genome-map-annotations">
+      <GenomeTicks posText={palette.muted} fontSize={11 * annotationScale} />
+        <GenomeMarker
+          bp={ORIC_BP}
+          label="oriC"
+          fill="#facc15"
+          stroke={palette.bg}
+          textFill={palette.text}
+          fontSize={11 * annotationScale}
+        />
+        <GenomeMarker
+          bp={TER_BP}
+          label="ter"
+          fill="#60a5fa"
+          stroke={palette.bg}
+          textFill={palette.text}
+          fontSize={11 * annotationScale}
+        />
+        <text
+          x={CENTER}
+          y={CENTER - 8 * annotationScale}
+          textAnchor="middle"
+          fill={palette.text}
+          fontSize={14 * annotationScale}
+          className="font-semibold"
+        >
+          E. coli K-12 MG1655
+        </text>
+        <text
+          x={CENTER}
+          y={CENTER + 20 * annotationScale}
+          textAnchor="middle"
+          fill={palette.muted}
+          fontSize={12 * annotationScale}
+        >
+          {(GENOME_LENGTH / 1_000_000).toFixed(2)} Mbp
+        </text>
+    </g>
+  ), [palette, annotationScale])
   return (
     <div className={`genome-map ${compact ? 'genome-map-compact' : ''}`} ref={containerRef}>
       <div className="genome-map-controls" role="group" aria-label="Map controls">
@@ -462,6 +490,7 @@ export function CircularGenomeMap({
         <button type="button" onClick={() => setCamera({ zoom: 1, x: 0, y: 0 })}>
           Fit genome
         </button>
+        {onViewDetails && <button type="button" onClick={onViewDetails}>View gene details</button>}
       </div>
       <div
         className="genome-map-frame"
@@ -534,11 +563,12 @@ export function CircularGenomeMap({
             data-pan-y={camera.y}
           >
             {chromosomeScene}
+            {annotations}
           </g>
         </svg>
       </div>
       {tooltip && (
-        <div className="genome-map-tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
+        <div ref={tooltipRef} className="genome-map-tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
           <strong className="font-mono">{tooltip.gene.symbol}</strong>
           <p>{categoryLabel(tooltip.gene.category)}</p>
           <p className="font-mono">
@@ -553,7 +583,7 @@ export function CircularGenomeMap({
   )
 }
 
-function GenomeTicks({ posText }: { posText: string }) {
+function GenomeTicks({ posText, fontSize }: { posText: string; fontSize: number }) {
   const ticks = Array.from({ length: 9 }, (_, index) => (index + 1) * 500_000).filter(
     (bp) => bp < GENOME_LENGTH,
   )
@@ -579,10 +609,10 @@ function GenomeTicks({ posText }: { posText: string }) {
             <text
               x={label.x}
               y={label.y}
-              textAnchor="middle"
+              textAnchor={label.x < 40 ? 'start' : label.x > VIEW_SIZE - 40 ? 'end' : 'middle'}
               dominantBaseline="middle"
               fill={posText}
-              className="text-[11px]"
+              fontSize={fontSize}
             >
               {(bp / 1_000_000).toFixed(1)}
             </text>
@@ -599,12 +629,14 @@ function GenomeMarker({
   fill,
   stroke,
   textFill,
+  fontSize,
 }: {
   bp: number
   label: string
   fill: string
   stroke: string
   textFill: string
+  fontSize: number
 }) {
   const angle = bpToAngle(bp)
   const tip = polarToCartesian(CENTER, CENTER, 356, angle)
@@ -626,7 +658,8 @@ function GenomeMarker({
         textAnchor="middle"
         dominantBaseline="middle"
         fill={textFill}
-        className="text-[11px] font-medium"
+        fontSize={fontSize}
+        className="font-medium"
       >
         {label}
       </text>
