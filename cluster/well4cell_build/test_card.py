@@ -174,6 +174,8 @@ def test_translation_collapse_counts_come_from_the_summary(tmp_path, monkeypatch
     assert "`translation_collapse` when the mean ribosome elongation rate over the generation is below 1 aa/s" in paragraph
     assert "(Dai et al. 2016)" in paragraph
     assert "`ribosome_elongation_rate_mean < 1` in the `summary` config" in paragraph
+    assert "the flag is the index column `translation_collapse`" in paragraph
+    assert "null for a trajectory without a summary row" in paragraph
     assert ("It flags 6,273 trajectories in this release, 4,188 of them with `termination_class` `none`"
             in paragraph)
     assert "Treat them as inviable in any viability task." in paragraph

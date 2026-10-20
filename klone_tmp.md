@@ -14,12 +14,9 @@ directory on klone is now behind the Hub and the code. Do these in order.
 
 ## 2. Rebuild the index
 
-`finalize` now refuses an index without `kb_sha256`, so the local index is stale.
+`finalize` now refuses an index without `kb_sha256` or `translation_collapse`, so the local index is stale.
 
-To do first (not implemented yet): add a `translation_collapse` column to `index.py`
-(boolean, mean `ribosome_elongation_rate` below 1 aa/s over the generation, next to
-`termination_class`), so it lands in this rebuild. Until then the card states the same
-predicate as `ribosome_elongation_rate_mean < 1` in `summary`, with counts from finalize.
+`index build` writes the new `translation_collapse` column null; `finalize` fills it from the summary.
 
 ```
 cluster/w4c index build

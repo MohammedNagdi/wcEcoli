@@ -137,7 +137,9 @@ the published summary has no pathway columns until then.
 flags `translation_collapse` when the mean ribosome elongation rate is below 1 aa/s; here
 that is `ribosome_elongation_rate_mean < 1` in `summary` (`settings.COLLAPSE_RATE`), counted
 by finalize into the card's Outcomes and `manifest.json` (6,273 trajectories in 1.0.0-rc1,
-4,188 of them with `termination_class` none). It is not yet an index column.
+4,188 of them with `termination_class` none). It is also the index column
+`translation_collapse`: `index build` writes it null and finalize fills it from the summary
+parts (null where a trajectory has no summary row; a null mean counts as false).
 
 **Stride.** The 10 s products are point samples, not averages: keep rows with `t % 10 == 0`
 plus the last row of the sample, so the division state is always present. A 10 s product is
@@ -264,6 +266,7 @@ One row per sample, sorted by `family` in tier order (T1..T5), then `cell_id`, `
 | | `divided` | bool | `not terminated` |
 | | `terminated` | bool | the lineage ended in this generation |
 | | `termination_class` | string | `none`, `time_limit`, `negative_counts`, `fba_infeasible`, `equilibrium_unstable`, `other` |
+| | `translation_collapse` | bool | `ribosome_elongation_rate_mean < 1` in `summary`; null until finalize fills it, and where there is no summary row |
 | | `termination_reason` | string | raw reason text |
 | | `division_time_sec` | float32 | `n_steps - 1` when divided, else null |
 | | `final_mass_fg` | float32 | cell mass at the last row |
@@ -399,9 +402,6 @@ seconds).
   `expression_1s` and `metabolism_1s` uploads.
 - **Package**: the `well4cell` repository, PyPI release and baselines.
 - **DOI**: mint at release, after the repo goes public with the `v1.0` tag.
-- **`translation_collapse` index column**: a boolean next to `termination_class`
-  (`ribosome_elongation_rate` mean below 1 aa/s), set by `index build`; not implemented yet.
-  The card states the predicate on `summary` meanwhile.
 - **Degradation-rate provenance, first run**: `deg_rates.py` is tested on synthetic arrays
   only; its loader has never read a real cache. Check the first output: counts near
   Cellarium's 854 of 3,133 units and 12% of basal mRNA expression, each unit in exactly one

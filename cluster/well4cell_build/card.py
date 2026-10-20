@@ -69,6 +69,9 @@ INDEX_COLUMNS = {
     "divided": "the cell divided (= not terminated)",
     "terminated": "the lineage ended in this generation",
     "termination_class": "none, time_limit, negative_counts, fba_infeasible, equilibrium_unstable, other",
+    "translation_collapse": "Cellarium's translation collapse, `ribosome_elongation_rate_mean < {:g}` (aa/s) in the "
+                            "`{}` config; null for a trajectory without a summary row (see Outcomes)".format(
+                                COLLAPSE_RATE, SUMMARY_CONFIG),
     "termination_reason": "the simulator's termination message",
     "division_time_sec": "`n_steps - 1` when divided, else null",
     "final_mass_fg": "cell mass at the last row, fg",
@@ -336,15 +339,17 @@ def _pathway_text(summary: dict) -> str:
 
 
 def _translation_collapse(summary: dict) -> list[str]:
-    """The Cellarium ``translation_collapse`` predicate on the summary config, with its counts
-    (finalize.translation_collapse; TODO when the summary config is not in this release)."""
+    """The Cellarium ``translation_collapse`` flag (index column) and its predicate on the summary
+    config, with its counts (finalize.translation_collapse; TODO when the summary config is not
+    in this release)."""
     collapse = summary.get("translation_collapse") or {}
     return [
         "A generation can divide while its ribosomes have effectively stopped, because chromosome replication "
         "does not require ongoing translation. The Cellarium corpus flags this as `translation_collapse` when "
         "the mean ribosome elongation rate over the generation is below {rate:g} aa/s, an order of magnitude "
-        "below the slowest elongation rate measured in *E. coli* (Dai et al. 2016). The same predicate on this "
-        "dataset is `ribosome_elongation_rate_mean < {rate:g}` in the `{config}` config. It flags {n} "
+        "below the slowest elongation rate measured in *E. coli* (Dai et al. 2016). Here the flag is the index "
+        "column `translation_collapse`, the same predicate as `ribosome_elongation_rate_mean < {rate:g}` in the "
+        "`{config}` config (null for a trajectory without a summary row). It flags {n} "
         "trajectories in this release, {m} of them with `termination_class` `none` (divided, but with "
         "translation collapsed). Treat them as inviable in any viability task.".format(
             rate=COLLAPSE_RATE, config=SUMMARY_CONFIG, n=_n(collapse.get("trajectories")),

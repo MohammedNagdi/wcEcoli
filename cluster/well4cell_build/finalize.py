@@ -2,7 +2,8 @@
 
 ``finalize`` is re-runnable and touches only repo/ (plus a ledger line):
 
-1. index locators   <config>_file / _row_offset / _n_rows filled from ok export sentinels
+1. index locators   <config>_file / _row_offset / _n_rows filled from ok export sentinels;
+                    translation_collapse filled from the summary parts (below)
 2. export_qc        provenance/export_qc.parquet, one row per trajectory per config attempt
 3. stats            stats/<family>.parquet reduced from the per-part stats npz files
 4. failed jobs      provenance/failed_jobs.parquet (campaign DB, read-only) and
@@ -20,13 +21,16 @@ from core, not by export) has no sentinels and no index locators. When present i
 in the card and manifest from the files themselves (one row per trajectory); when absent
 nothing refuses. A summary family whose row count differs from the index's located core
 trajectories gets a warning: re-run ``summarize`` and then finalize. From the summary parts
-finalize also counts Cellarium's ``translation_collapse`` (``ribosome_elongation_rate_mean <
-COLLAPSE_RATE``, and how many of those divided) for the card's Outcomes and manifest.json.
+finalize evaluates Cellarium's ``translation_collapse`` (``ribosome_elongation_rate_mean <
+COLLAPSE_RATE``; a null mean is false, though summarize writes none) once per trajectory,
+writes it to the index column ``translation_collapse`` (null where no published summary row
+exists: no summary yet, no core part, or its core family held back), and counts it, with how
+many of those divided, for the card's Outcomes and manifest.json.
 
 The Parca caches are not copied into repo/: they are wcEcoli's fitted parameters, under
 the Stanford licence, and the repo identifies them only by ``parca_cache`` and
-``kb_sha256`` (ADR 0009). finalize refuses an index without ``kb_sha256`` (built before
-that column existed; re-run ``index build``).
+``kb_sha256`` (ADR 0009). finalize refuses an index without ``kb_sha256`` or a boolean
+``translation_collapse`` (built before those columns existed; re-run ``index build``).
 
 Completeness. finalize refuses while any part planned for the configs being finalized
 (``--configs``, default all) has no sentinel or a failed one, and only warns about
@@ -215,6 +219,28 @@ def fill_index(settings: Settings, located: dict, configs: list[str]) -> dict:
     pq.write_table(table, temporary, compression=settings.compression)
     rename_into_place(temporary, settings.index_path)
     return report
+
+
+def check_translation_collapse_column(settings: Settings, index: pa.Table) -> None:
+    """Refuse an index without a boolean translation_collapse column (built before it existed)."""
+    if index.schema.get_field_index("translation_collapse") < 0 or \
+            index.schema.field("translation_collapse").type != pa.bool_():
+        raise SystemExit("{} has no boolean translation_collapse column (built before it existed); re-run "
+                         "`w4c index build`, then finalize".format(settings.index_path))
+
+
+def fill_translation_collapse(settings: Settings, flags: dict[str, dict[str, bool]]) -> dict:
+    """Index column translation_collapse from ``collapse_flags``: true/false where a summary row
+    exists, null elsewhere. Returns the counts of each value."""
+    table = pq.read_table(settings.index_path)
+    by_sample = {s: f for family in flags.values() for s, f in family.items()}
+    values = [by_sample.get(s) for s in table.column("sample_id").to_pylist()]
+    table = _set_column(table, "translation_collapse", pa.array(values, pa.bool_()))
+    temporary = temp_path_for(settings.index_path)
+    pq.write_table(table, temporary, compression=settings.compression)
+    rename_into_place(temporary, settings.index_path)
+    return {"true": sum(v is True for v in values), "false": sum(v is False for v in values),
+            "null": sum(v is None for v in values)}
 
 
 # -- 2. export QC ----------------------------------------------------------------------------
@@ -577,14 +603,20 @@ def withhold(parts: dict[str, dict], held: set[tuple[str, str]]) -> dict[str, di
     return {p: r for p, r in parts.items() if (r.get("config"), r.get("family")) not in held}
 
 
-def summarize(settings: Settings, index: pa.Table, parts: dict[str, dict], extra: dict,
-              held: set[tuple[str, str]] = frozenset()) -> dict:
+def published_files(settings: Settings, held: set[tuple[str, str]] = frozenset()
+                    ) -> dict[str, dict[str, list[Path]]]:
+    """``data_files`` minus the held-back families; a summary family follows its core family."""
     files = data_files(settings)
     for config, family in held:
         files.get(config, {}).pop(family, None)
         if config == "core":  # the summary is computed from core: it follows core's hold-back
             files.get(SUMMARY_CONFIG, {}).pop(family, None)
-    files = {c: f for c, f in files.items() if f}
+    return {c: f for c, f in files.items() if f}
+
+
+def summarize(settings: Settings, index: pa.Table, parts: dict[str, dict], extra: dict,
+              held: set[tuple[str, str]] = frozenset()) -> dict:
+    files = published_files(settings, held)
     configs = {}
     for config, families in files.items():
         if config == SUMMARY_CONFIG:
@@ -694,22 +726,32 @@ def summary_config(index: pa.Table, families: dict[str, list[Path]]) -> dict:
     return entry
 
 
+def collapse_flags(families: dict[str, list[Path]]) -> dict[str, dict[str, bool]]:
+    """family (tier order) -> {sample_id: Cellarium's ``translation_collapse``} for every row of
+    the summary parts: ``ribosome_elongation_rate_mean < COLLAPSE_RATE`` (aa/s). A null mean is
+    false (not flagged); summarize never writes one (only growth_rate statistics are nullable).
+    The one place the predicate is evaluated: the index column and the counts both come from it."""
+    out: dict[str, dict[str, bool]] = {}
+    for family in [f for f in FAMILIES if f in families] + sorted(f for f in families if f not in FAMILIES):
+        flags = out.setdefault(family, {})
+        for path in families[family]:
+            table = pq.read_table(path, columns=["sample_id", "ribosome_elongation_rate_mean"])
+            low = pc.fill_null(pc.less(table.column("ribosome_elongation_rate_mean"), COLLAPSE_RATE), False)
+            flags.update(zip(table.column("sample_id").to_pylist(), low.to_pylist()))
+    return out
+
+
 def translation_collapse(index: pa.Table, families: dict[str, list[Path]]) -> dict:
-    """Cellarium's ``translation_collapse`` on the summary parts: trajectories with
-    ``ribosome_elongation_rate_mean < COLLAPSE_RATE`` (aa/s), and how many of them divided
-    (index ``termination_class`` none). Empty when there are no summary parts (the card then
-    shows TODO)."""
+    """Counts of ``collapse_flags`` on the summary parts: flagged trajectories, and how many of
+    them divided (index ``termination_class`` none). Empty when there are no summary parts (the
+    card then shows TODO)."""
     if not families:
         return {}
     termination = dict(zip(index.column("sample_id").to_pylist(), index.column("termination_class").to_pylist())) \
         if "termination_class" in index.column_names else {}
     per_family = {}
-    for family in [f for f in FAMILIES if f in families] + sorted(f for f in families if f not in FAMILIES):
-        flagged = []
-        for path in families[family]:
-            table = pq.read_table(path, columns=["sample_id", "ribosome_elongation_rate_mean"])
-            low = pc.fill_null(pc.less(table.column("ribosome_elongation_rate_mean"), COLLAPSE_RATE), False)
-            flagged += table.column("sample_id").filter(low).to_pylist()
+    for family, flags in collapse_flags(families).items():
+        flagged = [s for s, flag in flags.items() if flag]
         per_family[family] = {"trajectories": len(flagged),
                               "divided": sum(1 for s in flagged if termination.get(s) == "none")}
     return {"threshold_aa_per_s": COLLAPSE_RATE,
@@ -756,7 +798,9 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
     configs = [c.strip() for c in args.configs.split(",")] if args.configs else list(CONFIGS)
     for config in configs:
         settings.config(config)
-    check_kb_sha256(settings, pq.read_table(settings.index_path))
+    index = pq.read_table(settings.index_path)
+    check_kb_sha256(settings, index)
+    check_translation_collapse_column(settings, index)
     check_no_deg_rate_copies(settings)
     incomplete = check_complete(settings, configs, args.allow_incomplete)
     sentinels = export_sentinels(settings)
@@ -775,6 +819,8 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
         sentinel_paths = {p: s for p, s in sentinel_paths.items() if p in parts}
     located = locators(parts)
     report = {"locators": fill_index(settings, located, configs), "incomplete_parts": len(incomplete)}
+    report["translation_collapse"] = fill_translation_collapse(
+        settings, collapse_flags(published_files(settings, held).get(SUMMARY_CONFIG, {})))
     report["qc"] = write_export_qc(settings, sentinels)
     report["stats"] = write_stats(settings, parts, sentinel_paths)
     runs = {r["run_dir"]: r for r in read_jsonl(settings.scan_dir / "runs.jsonl")}
@@ -786,7 +832,8 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
     _write_text(settings.repo_dir / "README.md", card.render(settings, summary))
     write_atomic_json(settings.repo_dir / "manifest.json", manifest_payload(summary))
     append_jsonl(settings.ledger, {"at": now(), "stage": "finalize", "configs": configs, **{
-        k: report[k] for k in ("locators", "qc", "stats", "failed_jobs", "scan_runs", "deg_rates")}})
+        k: report[k] for k in ("locators", "translation_collapse", "qc", "stats", "failed_jobs", "scan_runs",
+                               "deg_rates")}})
     for key, value in report.items():
         print("{}: {}".format(key, value))
     print("wrote {} and {}".format(settings.repo_dir / "README.md", settings.repo_dir / "manifest.json"))

@@ -238,4 +238,8 @@ def test_translation_collapse_counts_low_elongation_and_the_divided_subset(tmp_p
                         "families": {"wildtype_media": {"trajectories": 1, "divided": 1},
                                      "single_knockout": {"trajectories": 2, "divided": 1}}}
     assert list(collapse["families"]) == ["wildtype_media", "single_knockout"]  # tier order
+    # one evaluation of the predicate feeds the counts and the index column; a null mean is false
+    flags = finalize.collapse_flags(families)
+    assert flags == {"wildtype_media": {"e": False, "f": True},
+                     "single_knockout": {"a": True, "b": True, "c": False, "d": False}}
     assert finalize.translation_collapse(index, {}) == {}

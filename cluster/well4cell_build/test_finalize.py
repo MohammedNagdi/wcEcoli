@@ -57,6 +57,7 @@ def samples(n_generations: int = 2) -> list[dict]:
                             "parent_id": "{}/g{}".format(lineage, generation - 1) if generation else None,
                             "family": family, "generation": generation, "seed": 0,
                             "termination_class": "none" if generation == 0 else "time_limit",
+                            "translation_collapse": None,
                             "split_by_lineage": "train", "split_by_gene": "train",
                             "git_hash": "abc123", "sim_options_hash": "opt1",
                             "parca_cache": PARCA_CACHE, "kb_sha256": KB_SHA256})
@@ -65,6 +66,8 @@ def samples(n_generations: int = 2) -> list[dict]:
 
 def write_index(settings: Settings, rows: list[dict]) -> None:
     columns = {key: [r[key] for r in rows] for key in rows[0]}
+    if "translation_collapse" in columns:  # null at index build, typed as index.schema() types it
+        columns["translation_collapse"] = pa.array(columns["translation_collapse"], pa.bool_())
     table = pa.table(columns)
     for config in CONFIGS:
         table = table.append_column(config + "_file", pa.nulls(len(rows), pa.string()))
@@ -534,3 +537,59 @@ def test_hub_upload_excludes_deg_rates_files(tmp_path, monkeypatch):
     assert any(fnmatch(name, g) for g in hub.include_globs(settings, ["provenance"]))
     assert any(fnmatch(name, e) for e in excludes)
     assert not any(fnmatch("provenance/export_qc.parquet", e) for e in excludes)
+
+
+def write_summary_part(settings: Settings, family: str, rates: dict[str, float | None]) -> None:
+    """A summary part holding only the columns translation_collapse reads."""
+    path = settings.repo_dir / "data" / "summary" / family / "part-00000.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.table({"sample_id": list(rates),
+                             "ribosome_elongation_rate_mean": pa.array(list(rates.values()), pa.float32())}), path)
+
+
+def test_finalize_fills_translation_collapse_from_the_summary(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    write_campaign_db(settings)
+    finalize.cmd_finalize(settings, finalize_args())
+    index = pq.read_table(settings.index_path)
+    assert index.schema.field("translation_collapse").type == pa.bool_()
+    assert index.column("translation_collapse").null_count == index.num_rows  # no summary yet
+    # true below 1 aa/s, false at or above it, false for a null mean (as the counts), null without a row
+    write_summary_part(settings, "wildtype_media", {"T1/wildtype/basal/s0/g0": 0.5, "T1/wildtype/basal/s0/g1": 1.0,
+                                                    "T1/wildtype/acetate/s0/g0": None})
+    write_summary_part(settings, "single_knockout", {"T2/argG_KO/basal/s0/g1": 0.0})
+    finalize.cmd_finalize(settings, finalize_args())
+    index = pq.read_table(settings.index_path)
+    names = index.schema.names
+    assert names.index("translation_collapse") == names.index("termination_class") + 1
+    flags = dict(zip(index.column("sample_id").to_pylist(), index.column("translation_collapse").to_pylist()))
+    assert flags == {"T1/wildtype/basal/s0/g0": True, "T1/wildtype/basal/s0/g1": False,
+                     "T1/wildtype/acetate/s0/g0": False, "T1/wildtype/acetate/s0/g1": None,
+                     "T2/argG_KO/basal/s0/g0": None, "T2/argG_KO/basal/s0/g1": True}
+    manifest = json.loads((settings.repo_dir / "manifest.json").read_text())
+    assert manifest["translation_collapse"]["trajectories"] == sum(v is True for v in flags.values()) == 2
+    assert manifest["translation_collapse"]["divided"] == 1  # g0 is termination_class none
+    assert "| `translation_collapse` | bool | Cellarium's translation collapse" in (
+        settings.repo_dir / "README.md").read_text()
+    ledger = [json.loads(line) for line in settings.ledger.read_text().splitlines()]
+    assert ledger[-1]["translation_collapse"] == {"true": 2, "false": 2, "null": 2}
+    # a held-back core family takes its summary family, and so its flags, with it
+    finalize.cmd_finalize(settings, finalize_args(hold_back="core/single_knockout"))
+    index = pq.read_table(settings.index_path)
+    flags = dict(zip(index.column("sample_id").to_pylist(), index.column("translation_collapse").to_pylist()))
+    assert flags["T2/argG_KO/basal/s0/g1"] is None and flags["T1/wildtype/basal/s0/g0"] is True
+
+
+def test_finalize_refuses_an_index_without_translation_collapse(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    index = pq.read_table(settings.index_path)
+    pq.write_table(index.drop_columns(["translation_collapse"]), settings.index_path)
+    with pytest.raises(SystemExit, match="no boolean translation_collapse column.*re-run `w4c index build`"):
+        finalize.cmd_finalize(settings, finalize_args())
+    column = index.schema.get_field_index("translation_collapse")
+    pq.write_table(index.set_column(column, "translation_collapse", pa.nulls(index.num_rows, pa.string())),
+                   settings.index_path)
+    with pytest.raises(SystemExit, match="no boolean translation_collapse column"):
+        finalize.cmd_finalize(settings, finalize_args())

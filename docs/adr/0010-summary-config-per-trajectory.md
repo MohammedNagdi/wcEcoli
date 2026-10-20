@@ -34,3 +34,6 @@ core_n_rows`, and writes the summary parts; `finalize` then counts them in the c
 `channels.h5`, has no export sentinels and no `<config>_file` locator in the index. Its split
 is the family, like every config. The summary is only as current as the core parts it was
 computed from: after a new core export, run `summarize` again before the next `finalize`.
+One summary-derived value does go into the index: `translation_collapse`, Cellarium's
+`ribosome_elongation_rate_mean < 1`, which `index build` writes null and `finalize` fills
+from the summary parts (null where a trajectory has no summary row).

@@ -213,3 +213,15 @@ def test_kb_sha256_hashes_simdata_once_per_cache(tmp_path, monkeypatch):
     assert sorted(calls) == ["aaa", "bbb"]
     hashes, errors = index.kb_hashes(tmp_path, ["aaa", "missing"])
     assert list(hashes) == ["aaa"] and len(errors) == 1 and "parca cache missing" in errors[0]
+
+
+def test_translation_collapse_is_written_null_next_to_termination_class():
+    names = index.schema().names
+    assert names.index("translation_collapse") == names.index("termination_class") + 1
+    assert index.schema().field("translation_collapse").type == "bool"
+    rows = [{"sample_id": "T1/wildtype/basal/s0/g0", "termination_class": "none"},
+            {"sample_id": "T1/wildtype/basal/s0/g1", "termination_class": "time_limit"}]
+    table = index.table_of(rows)  # what build writes: no row sets translation_collapse
+    assert table.schema == index.schema()
+    assert table.column("translation_collapse").type == "bool"
+    assert table.column("translation_collapse").null_count == 2

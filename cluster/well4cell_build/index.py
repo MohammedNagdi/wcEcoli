@@ -44,7 +44,10 @@ cells that divided (35,113 rows divided=0 terminated=0), so divided := not termi
 terminated is true only on the last present generation of a job with
 simulation_jobs.lineage_terminated = 1, and termination_reason is then the job's reason
 (e.g. "NegativeCountsError: ATP[c] in PolypeptideElongation (-886)"); termination_class
-maps its leading exception name (perturbation.TERMINATION_CLASSES). division_time_sec =
+maps its leading exception name (perturbation.TERMINATION_CLASSES). translation_collapse
+(Cellarium's, ribosome_elongation_rate_mean < settings.COLLAPSE_RATE) needs the summary
+config, which is computed after this index is finalized: build writes it null, finalize
+fills it from the summary parts. division_time_sec =
 n_steps - 1 when divided (equals simulation_results.division_time_sec where that is set).
 final_mass_fg and growth_rate are simulation_results' per-generation values (growth_rate
 there is the mean of the non-null growth_rate channel). lineage_generations = generations
@@ -124,7 +127,7 @@ def schema() -> pa.Schema:
         ("ppgpp_setpoint_um", pa.float32()), ("ppgpp_factor", pa.float32()), ("aa_shift", pa.string()),
         ("perturbation_text", pa.string()),
         ("n_steps", pa.int32()), ("divided", pa.bool_()), ("terminated", pa.bool_()),
-        ("termination_class", pa.string()), ("termination_reason", pa.string()),
+        ("termination_class", pa.string()), ("translation_collapse", pa.bool_()), ("termination_reason", pa.string()),
         ("division_time_sec", pa.float32()), ("final_mass_fg", pa.float32()), ("growth_rate", pa.float32()),
         ("lineage_terminated", pa.bool_()), ("lineage_generations", pa.int8()),
         ("split_by_lineage", pa.string()), ("split_by_gene", pa.string()),
@@ -403,11 +406,8 @@ def cmd_build(settings: Settings, args: argparse.Namespace) -> dict:
 
     # Families in tier order (T1..T5, settings.FAMILIES), then cell, seed, generation.
     rows.sort(key=lambda r: (FAMILIES.index(r["family"]), r["cell_id"], r["seed"], r["generation"]))
-    target = schema()
-    columns = {f.name: [r.get(f.name) for r in rows] for f in target}
-    table = pa.Table.from_arrays([pa.array(columns[f.name], type=f.type) for f in target], schema=target)
-    table = table.replace_schema_metadata({"well4cell_version": settings.version, "split_seed": str(seed),
-                                           "built_at": report["at"]})
+    table = table_of(rows).replace_schema_metadata({"well4cell_version": settings.version, "split_seed": str(seed),
+                                                    "built_at": report["at"]})
     temporary = temp_path_for(settings.index_path)
     pq.write_table(table, temporary, compression=settings.compression)
     rename_into_place(temporary, settings.index_path)
@@ -418,6 +418,13 @@ def cmd_build(settings: Settings, args: argparse.Namespace) -> dict:
     append_jsonl(settings.ledger, {"at": now(), "stage": "index.build", **summary})
     print("wrote {}: {}".format(settings.index_path, summary))
     return summary
+
+
+def table_of(rows: list[dict]) -> pa.Table:
+    """``rows`` as a table of ``schema()``; a column no row sets (translation_collapse, the
+    locators) is null."""
+    target = schema()
+    return pa.Table.from_arrays([pa.array([r.get(f.name) for r in rows], type=f.type) for f in target], schema=target)
 
 
 # -- check --------------------------------------------------------------------------------
@@ -449,6 +456,9 @@ def cmd_check(settings: Settings, args: argparse.Namespace) -> dict:
     for (t, c), n in sorted(Counter(zip(table.column("terminated").to_pylist(),
                                         table.column("termination_class").to_pylist())).items()):
         print("  terminated={!s:5s} {:22s} {:7d}".format(t, c, n))
+    if "translation_collapse" in table.column_names:
+        print("\ntranslation_collapse (null until finalize fills it from the summary): {}".format(
+            dict(sorted(Counter(table.column("translation_collapse").to_pylist()).items(), key=lambda kv: str(kv[0])))))
     print("\nsplits (lineage / gene):")
     for key in ("split_by_lineage", "split_by_gene"):
         print("  {:18s} {}".format(key, dict(sorted(Counter(table.column(key).to_pylist()).items()))))

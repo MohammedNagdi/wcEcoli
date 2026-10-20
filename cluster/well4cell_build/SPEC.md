@@ -55,9 +55,11 @@ parts (--expression-dir, --reference-dir override the paths), and when the index
 the expression trajectories and row counts must equal them; a summary row without expression rows gets
 nulls. Without --pathways there are no pathway columns. Run it once the expression export is complete.
 finalize lists the pathway columns of the summary parts (config entry `pathways`, per family
-`pathway_columns`) and the card describes them; finalize also counts `translation_collapse`
-(ribosome_elongation_rate_mean < settings.COLLAPSE_RATE = 1 aa/s, and how many have termination_class
-none) from the summary parts into the card's Outcomes and manifest.json `translation_collapse`.
+`pathway_columns`) and the card describes them; finalize also evaluates `translation_collapse`
+(ribosome_elongation_rate_mean < settings.COLLAPSE_RATE = 1 aa/s; a null mean is false) on the summary
+parts, writes it to the index column `translation_collapse` (null without a published summary row), and
+counts it (and how many have termination_class none) into the card's Outcomes and manifest.json
+`translation_collapse`. finalize refuses an index without a bool `translation_collapse` (re-run index build).
 
 ## index.parquet (one row per trajectory, sorted by family in tier order T1..T5, then cell_id, seed, generation)
 Column order and types: index.schema(). Column provenance: index.py and perturbation.py docstrings.
@@ -68,7 +70,7 @@ identity: sample_id (= lineage_id + "/g{gen}"), lineage_id (= cell_id + "/s{seed
   parent_id (string, null at gen 0), experiment_name (raw experiments.name)
 design: family, tier ("T1".."T5"), variant_type, variant_index (int32), variant (gene symbol / "wildtype" / variant_type), condition (DB, as designed), timeline (the schedule that actually ran, "0 minimal, 1200 minimal_acetate"; null for sinusoidal), seed (int8), generation (int8)
 perturbation: knockout_genes list<string>, knockout_gene_ids list<string>, knockout_tu_ids list<string> (a knockout zeroes a whole TU), media_schedule list<struct<t_abs_sec:int32, medium:string>> (lineage-absolute seconds), medium_at_birth, medium_at_division, media_a, media_b, period_sec (int32, sinusoidal only), tf_target (true TF symbol), tf_target_id (TF EcoCyc id), tf_state, ppgpp_setpoint_um (float32), ppgpp_factor (float32), aa_shift (string), perturbation_text
-outcome: n_steps int32, divided bool (= not terminated), terminated bool (lineage ended in THIS generation), termination_class string (none|time_limit|negative_counts|fba_infeasible|equilibrium_unstable|other), termination_reason, division_time_sec float32 (= n_steps-1 when divided else null), final_mass_fg float32, growth_rate float32 (mean of non-null growth_rate), lineage_terminated bool, lineage_generations int8 (generations present)
+outcome: n_steps int32, divided bool (= not terminated), terminated bool (lineage ended in THIS generation), termination_class string (none|time_limit|negative_counts|fba_infeasible|equilibrium_unstable|other), translation_collapse bool (null at build; finalize fills it from the summary parts), termination_reason, division_time_sec float32 (= n_steps-1 when divided else null), final_mass_fg float32, growth_rate float32 (mean of non-null growth_rate), lineage_terminated bool, lineage_generations int8 (generations present)
 splits: split_by_lineage, split_by_gene (string train|val|test; fixed seed W4C_SPLIT_SEED; 80/10/10; lineage split stratified by cell within family; gene split holds out whole genes, non-knockout rows go to train)
 provenance: job_id int32, attempt int8, started_at, run_dir, h5_group ("seed0/gen0": the scan's seed group, seed<S> with S = the job's seed), git_hash, parca_cache (the <hash> of out/parca_cache_<hash>), kb_sha256 (sha256 of out/parca_cache_<hash>/kb/simData.cPickle, hashed once per distinct cache at index build; an unreadable cache is fatal), sim_options_hash (sha256 of metadata.json minus description/time/seed/variant and minus the keys carried as columns: git_hash, timeline, multi_ko_indices)
 locators (filled by finalize, null before): <config>_file, <config>_row_offset (int64), <config>_n_rows (int32) for each config name.
