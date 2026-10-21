@@ -37,6 +37,14 @@ Completeness. finalize refuses while any part planned for the configs being fina
 incomplete parts of other configs; ``--allow-incomplete`` overrides the refusal (the
 trajectories of failed parts are then listed in export_qc and have null locators).
 
+Published-only parts (ADR 0011). An ok part whose file is not on disk is accepted iff
+build/published.jsonl has a record for it that matches its sentinel (``hub verify`` writes
+it, ``hub prune`` then deletes the file); otherwise it is refused as missing, as always.
+Nothing finalize writes reads a part's rows: bytes in the card and manifest come from the
+sentinel (equal to stat() for a local file, which is checked), the product schema from a
+local part or, when a config has none left, build/schemas/<config>.parquet. So finalize with
+some or all parts published-only writes the same repo/ as with every part on disk.
+
 Stats npz layout read here (contract with stats.py, SPEC.md): ``names`` plus
 ``<name>.n|sum|sumsq|min|max`` (stats.Moments.save). For robustness any key of the form
 ``<channel><sep><stat>`` with sep one of ``/ . __ :`` is also accepted. Scalars are shape
@@ -59,6 +67,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from . import card
+from . import published as published_store
 from . import deg_rates as deg_rate_provenance
 from .ledger import append_jsonl, now, read_json, read_jsonl, rename_into_place, temp_path_for, write_atomic_json
 from .pathways import PREFIX as PATHWAY_PREFIX
@@ -533,13 +542,17 @@ def data_files(settings: Settings) -> dict[str, dict[str, list[Path]]]:
     return out
 
 
-def check_data_tree(settings: Settings, parts: dict[str, dict]) -> None:
+def check_data_tree(settings: Settings, parts: dict[str, dict], published: dict[str, dict] | None = None
+                    ) -> dict[str, int]:
     """Every published export parquet must be a current ok part, and every ok part must be on
-    disk. The summary config is not exported (no sentinels) and is not checked here."""
+    disk or published-only: missing locally with a record in build/published.jsonl that
+    matches its sentinel (``hub verify``, then ``hub prune``). Returns how many are of each.
+    The summary config is not exported (no sentinels) and is not checked here."""
+    published = published or {}
     on_disk = {str(p.relative_to(settings.repo_dir)) for config, fams in data_files(settings).items()
                if config != SUMMARY_CONFIG for files in fams.values() for p in files}
     orphans = sorted(on_disk - set(parts))
-    missing = sorted(set(parts) - on_disk)
+    missing = sorted(set(parts) - on_disk - set(published))
     wrong_size = sorted(p for p in set(parts) & on_disk
                         if parts[p].get("bytes") is not None
                         and (settings.repo_dir / p).stat().st_size != int(parts[p]["bytes"]))
@@ -548,25 +561,60 @@ def check_data_tree(settings: Settings, parts: dict[str, dict]) -> None:
         problems.append("{} parquet files under data/ without an ok sentinel (would be published as "
                         "duplicate or stale rows): {}".format(len(orphans), orphans[:10]))
     if missing:
-        problems.append("{} ok sentinels whose file is missing: {}".format(len(missing), missing[:10]))
+        problems.append("{} ok sentinels whose file is missing (and not recorded as published by `hub "
+                        "verify`): {}".format(len(missing), missing[:10]))
     if wrong_size:
         problems.append("{} files whose size differs from their sentinel: {}".format(len(wrong_size), wrong_size[:10]))
     if problems:
         raise SystemExit("data tree does not match the export sentinels:\n  " + "\n  ".join(problems))
+    local = len(set(parts) & on_disk)
+    return {"local": local, "published_only": len(parts) - local}
 
 
-def product_fields(files: dict[str, dict[str, list[Path]]]) -> tuple[dict[str, str], dict[str, str]]:
-    """Units and types of every product column, from the first file of each config."""
+def exported_files(parts: dict[str, dict]) -> dict[str, dict[str, list[str]]]:
+    """config -> family -> repo paths of the current ok parts, local or published-only, sorted
+    as ``data_files`` sorts the tree (the two agree whenever every part is on disk)."""
+    out: dict[str, dict[str, list[str]]] = {}
+    for path in sorted(parts):
+        config, family = path.split("/")[1:3]
+        out.setdefault(config, {}).setdefault(family, []).append(path)
+    return {c: {f: out[c][f] for f in sorted(out[c])} for c in sorted(out)}
+
+
+def part_bytes(settings: Settings, path: str, record: dict) -> int:
+    """A part's size from its sentinel (check_data_tree has refused any local file whose size
+    differs from it); stat() only for a sentinel without bytes, which is then on disk."""
+    if record.get("bytes") is not None:
+        return int(record["bytes"])
+    return (settings.repo_dir / path).stat().st_size
+
+
+def config_schema(settings: Settings, config: str, paths: list[str]) -> pa.Schema:
+    """The schema of a config's parts: from its first local part, checked against
+    build/schemas/<config>.parquet when that exists; from that file when no part is local."""
+    local = next((settings.repo_dir / p for p in paths if (settings.repo_dir / p).exists()), None)
+    if local is not None:
+        schema = pq.read_schema(local)
+        published_store.agree(settings, config, schema, str(local))
+        return schema
+    stored = published_store.stored_schema(settings, config)
+    if stored is None:
+        raise SystemExit("no part of {} is on disk and {} does not exist; `hub verify` or `hub prune` stores it "
+                         "from a local part".format(config, published_store.schema_path(settings, config)))
+    return stored
+
+
+def product_fields(settings: Settings, files: dict[str, dict[str, list[str]]]
+                   ) -> tuple[dict[str, str], dict[str, str]]:
+    """Units and types of every product column, from each config's schema (config_schema)."""
     units, types = dict(UNITS), {}
     for config, families in files.items():
         if config == SUMMARY_CONFIG:
             continue
-        for paths in families.values():
-            for field in pq.read_schema(paths[0]):
-                types[field.name] = str(field.type)
-                if field.metadata and b"unit" in field.metadata:
-                    units[field.name] = field.metadata[b"unit"].decode()
-            break
+        for field in config_schema(settings, config, [p for paths in families.values() for p in paths]):
+            types[field.name] = str(field.type)
+            if field.metadata and b"unit" in field.metadata:
+                units[field.name] = field.metadata[b"unit"].decode()
     return units, types
 
 
@@ -605,7 +653,8 @@ def withhold(parts: dict[str, dict], held: set[tuple[str, str]]) -> dict[str, di
 
 def published_files(settings: Settings, held: set[tuple[str, str]] = frozenset()
                     ) -> dict[str, dict[str, list[Path]]]:
-    """``data_files`` minus the held-back families; a summary family follows its core family."""
+    """``data_files`` minus the held-back families; a summary family follows its core family.
+    finalize takes only the summary config from it (exported configs come from the sentinels)."""
     files = data_files(settings)
     for config, family in held:
         files.get(config, {}).pop(family, None)
@@ -616,7 +665,12 @@ def published_files(settings: Settings, held: set[tuple[str, str]] = frozenset()
 
 def summarize(settings: Settings, index: pa.Table, parts: dict[str, dict], extra: dict,
               held: set[tuple[str, str]] = frozenset()) -> dict:
-    files = published_files(settings, held)
+    """Exported configs from ``parts`` (sentinel bytes, so a published-only part counts as if it
+    were on disk); the summary config from its files."""
+    files: dict = exported_files(parts)
+    summary_files = published_files(settings, held).get(SUMMARY_CONFIG)
+    if summary_files:
+        files = dict(sorted({**files, SUMMARY_CONFIG: summary_files}.items()))
     configs = {}
     for config, families in files.items():
         if config == SUMMARY_CONFIG:
@@ -624,11 +678,10 @@ def summarize(settings: Settings, index: pa.Table, parts: dict[str, dict], extra
             continue
         per_family = {}
         for family, paths in families.items():
-            recorded = [parts[str(p.relative_to(settings.repo_dir))] for p in paths
-                        if str(p.relative_to(settings.repo_dir)) in parts]
+            recorded = [parts[p] for p in paths]
             per_family[family] = {
                 "files": len(paths),
-                "bytes": sum(p.stat().st_size for p in paths),
+                "bytes": sum(part_bytes(settings, p, parts[p]) for p in paths),
                 "rows": sum(int(r.get("rows") or 0) for r in recorded),
                 "trajectories": sum(1 for r in recorded for s in r.get("samples", [])
                                     if s.get("qc", {}).get("ok", True) and s.get("n_rows")),
@@ -662,7 +715,7 @@ def summarize(settings: Settings, index: pa.Table, parts: dict[str, dict], extra
             "cells": len(_distinct(subset, "cell_id")),
         }
     commit, dirty = git_commit(settings)
-    units, types = product_fields(files)
+    units, types = product_fields(settings, files)
     return {
         "version": settings.version,
         "repo_id": settings.repo_id,
@@ -809,7 +862,11 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
     for path, record in sentinels:
         if record.get("status") == "ok" and record.get("path"):
             sentinel_paths[record["path"]] = path
-    check_data_tree(settings, parts)
+    on_hub = published_store.published_parts(settings, parts)
+    where = check_data_tree(settings, parts, on_hub)
+    if where["published_only"]:
+        print("{local} part(s) on disk, {published_only} published-only (on the Hub, recorded in {path})".format(
+            path=published_store.records_path(settings), **where))
     held = parse_hold_back(args.hold_back)
     if held:
         kept = withhold(parts, held)
@@ -818,7 +875,7 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
         parts = kept
         sentinel_paths = {p: s for p, s in sentinel_paths.items() if p in parts}
     located = locators(parts)
-    report = {"locators": fill_index(settings, located, configs), "incomplete_parts": len(incomplete)}
+    report = {"locators": fill_index(settings, located, configs), "incomplete_parts": len(incomplete), "parts": where}
     report["translation_collapse"] = fill_translation_collapse(
         settings, collapse_flags(published_files(settings, held).get(SUMMARY_CONFIG, {})))
     report["qc"] = write_export_qc(settings, sentinels)
@@ -832,7 +889,7 @@ def cmd_finalize(settings: Settings, args: argparse.Namespace) -> dict:
     _write_text(settings.repo_dir / "README.md", card.render(settings, summary))
     write_atomic_json(settings.repo_dir / "manifest.json", manifest_payload(summary))
     append_jsonl(settings.ledger, {"at": now(), "stage": "finalize", "configs": configs, **{
-        k: report[k] for k in ("locators", "translation_collapse", "qc", "stats", "failed_jobs", "scan_runs",
+        k: report[k] for k in ("parts", "locators", "translation_collapse", "qc", "stats", "failed_jobs", "scan_runs",
                                "deg_rates")}})
     for key, value in report.items():
         print("{}: {}".format(key, value))

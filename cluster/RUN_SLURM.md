@@ -480,11 +480,9 @@ measured on a 12-run reference only: after the first parts of each config are ok
 the rest.
 
 Plan `expression_1s` and `metabolism_1s` **last**, and only after the storage question below
-is settled:
-
-```bash
-cluster/w4c export plan --configs expression_1s,metabolism_1s --families all
-```
+is settled. They do not fit on disk (about 1.2 TB): export them one batch at a time, as in
+[Configs that do not fit on disk](#configs-that-do-not-fit-on-disk), not with
+`--families all`.
 
 ### Finalize
 
@@ -508,7 +506,8 @@ while any part planned for the configs being finalized lacks an `ok` sentinel, a
 warns about the other configs, so `cluster/w4c finalize --configs core` works while the
 matrix configs are still exporting (`--allow-incomplete` overrides the refusal; those
 trajectories then have null locators). It also refuses if a parquet under `data/` has no ok
-sentinel, or one trajectory is in two files of one config. Re-run it after any further
+sentinel, an ok part is missing on disk without a `hub verify` record (see [Configs that do
+not fit on disk](#configs-that-do-not-fit-on-disk)), or one trajectory is in two files of one config. Re-run it after any further
 export. `--hold-back core/single_knockout[,...]` leaves
 exported `<config>/<family>` data out of the locators, stats, `manifest.json` and the card (which
 then says that data follows), for a staged upload; re-run finalize without it once that data is
@@ -618,6 +617,50 @@ configs whose files are missing.
 **Storage.** Before uploading `data/expression_1s/**` and `data/metabolism_1s/**`, confirm
 the organisation's plan covers them, or email Hugging Face for an academic storage grant.
 
+### Configs that do not fit on disk
+
+The 1 s tier is published in batches (ADR 0011): export a batch, upload it, verify it on
+the Hub, delete it locally, repeat; finalize once at the end. A batch is one config of one
+family (or several families, if they fit):
+
+```bash
+cluster/w4c export plan --configs expression_1s --families regulation
+cluster/w4c export dispatch
+cluster/w4c export status
+cluster/w4c export reconcile       # until every part of the batch is ok
+cluster/w4c hub upload --include expression_1s --families regulation
+cluster/w4c hub verify --configs expression_1s --families regulation
+cluster/w4c hub prune  --configs expression_1s --families regulation          # dry run
+cluster/w4c hub prune  --configs expression_1s --families regulation --yes
+```
+
+`hub verify` lists `data/<config>/<family>/` on the Hub and compares every ok part of the
+selection (path, exact size) with its sentinel; each match is appended to
+`build/published.jsonl` (with the Hub revision and LFS sha256). It exits non-zero on a part
+missing on the Hub, a size mismatch, or a remote file that is not a current ok part (remove
+that by hand); re-run `hub upload` and verify again. `hub prune` deletes only the selection's
+part files whose record, sentinel and local size agree, refuses the whole batch otherwise,
+and is a dry run without `--yes`. Before a config's last local part goes it stores the
+config's parquet schema in `build/schemas/<config>.parquet`, which finalize reads in its
+place. A family larger than the free space is dispatched in slices (`export dispatch --parts
+...`); verify and prune take the parts that are ok so far.
+
+After the last batch of both configs:
+
+```bash
+cluster/w4c finalize               # reports how many parts are on disk and how many published-only
+cluster/w4c hub upload --include index,manifest,provenance,stats
+cluster/w4c hub upload --include readme
+```
+
+finalize accepts a part missing on disk only if `build/published.jsonl` has a record for that
+export attempt with the sentinel's bytes, and refuses it as missing otherwise. Byte counts come
+from the sentinels and the schema from `build/schemas/`, so the index, stats, manifest and card
+are the ones it would write with every part on disk. Until then finalize refuses while 1 s
+parts are planned but not ok; run `finalize --configs core,expression,metabolism` in between,
+and upload the card only after the final finalize. A re-exported part has a new sentinel and
+must be uploaded and verified again.
+
 Release (paper submission): make the repo public, tag `v1.0`, mint the DOI on the Hub.
 
 ### Build tree
@@ -627,7 +670,9 @@ Release (paper submission): make the repo public, tag `v1.0`, mint the DOI on th
 | `build/manifests/<stage>_<ts>_<id>.jsonl` | `plan` | one shard (scan) or one part (export) per line |
 | `build/manifests/<...>.sentinels/` | the task | per-task outcome: status, rows, bytes, seconds, per-sample offsets and QC, error tail |
 | `build/dispatch_log.jsonl` | `dispatch` | array id, manifest, indices, account, concurrency |
-| `build/ledger.jsonl` | `scan reduce`, `index build`, `export reconcile`, `finalize`, `summarize`, `deg-rates`, `hub create` / `upload` | append-only, fsync'd outcome record |
+| `build/ledger.jsonl` | `scan reduce`, `index build`, `export reconcile`, `finalize`, `summarize`, `deg-rates`, `hub create` / `upload` / `verify` / `prune` | append-only, fsync'd outcome record |
+| `build/published.jsonl` | `hub verify` | append-only, one line per part verified on the Hub (path, bytes, revision, sha256, export attempt); finalize accepts a part missing on disk only with one |
+| `build/schemas/<config>.parquet` | `hub verify`, `hub prune` | the config's parquet schema (no rows), read by finalize when no part of the config is on disk |
 | `build/index_report.json` | `index build` | excluded runs, fatal and non-fatal disagreements |
 | `build/provenance/deg_rates_<parca_cache>.json` | `deg-rates` | mRNA degradation-rate classes of that cache; never published, finalize puts only its counts in the card and `manifest.json` |
 | `build/scan/` | `scan reduce` | `runs.jsonl`, `active_union.npz` |

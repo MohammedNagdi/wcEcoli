@@ -334,7 +334,8 @@ sentinel per task, an append-only ledger, and `cluster/well4cell.sbatch` always 
    `manifest.json` (with the `kb_sha256` of each Parca cache). It does not copy the Parca
    caches (ADR 0009) and refuses an index without `kb_sha256`. It refuses while any planned
    part of the configs being finalized lacks an `ok` sentinel (`--allow-incomplete`
-   overrides) and only warns about other configs.
+   overrides) and only warns about other configs. A part deleted locally after `hub
+   verify` recorded it as on the Hub (path and exact size) counts as present (ADR 0011).
    **summarize** (after finalize): stream the core parts into `data/summary/<family>/`,
    one row per trajectory, refusing unless the rows match the index's core locators one for
    one (`n_steps == core_n_rows`); then finalize again so the card and `manifest.json` list
@@ -354,6 +355,10 @@ sentinel per task, an append-only ledger, and `cluster/well4cell.sbatch` always 
    `hf upload`, resumable by re-running. huggingface_hub 2.1 has no `upload-large-folder`,
    the tool never deletes anything remotely, and every upload excludes
    `provenance/parca_cache_*`, `*.cPickle` and `deg_rates_*.json`.
+   The 1 s tier does not fit on disk and is published in batches (ADR 0011): export a
+   config of a family, `hub upload` it, `hub verify` it (Hub path and size against the
+   sentinels, recorded in `build/published.jsonl`), `hub prune` the local parts, repeat;
+   finalize once at the end, from the sentinels and `build/schemas/`.
 
 Storage: confirm the organisation's plan, or email Hugging Face for an academic storage
 grant, before uploading the 1 s matrix configs.

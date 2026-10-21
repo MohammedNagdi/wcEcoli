@@ -4,8 +4,14 @@
 ``upload``  ``hf upload <repo> repo/ . --repo-type dataset --include ...`` for the named parts.
             Re-runnable: hf upload skips files already committed and resumes a folder upload.
 ``status``  the remote file tree with sizes.
+``verify``  list data/<config>/<family>/ on the Hub and compare each current ok part (path,
+            size) with its sentinel; append a build/published.jsonl record for each match.
+``prune``   delete local part files that a published record matches (dry run unless --yes).
 
-This module can only add or overwrite remote files. It never passes ``--delete`` to
+verify and prune are for configs that do not fit on disk (ADR 0011): export a batch, upload,
+verify, prune, repeat, then finalize once; published.py describes the records.
+
+This module can only add or overwrite remote files (``prune`` deletes local files only). It never passes ``--delete`` to
 ``hf upload`` and never calls a delete API: removing anything remote is done by hand.
 Every upload excludes the Parca caches (``provenance/parca_cache_*``, ``*.cPickle``) and the
 per-cache degradation-rate classifications (``deg_rates_*.json``), neither of which is published.
@@ -26,6 +32,8 @@ import sys
 import time
 from pathlib import Path
 
+from . import finalize
+from . import published
 from .ledger import append_jsonl, now
 from .settings import CONFIGS, FAMILIES, SUMMARY_CONFIG, Settings
 
@@ -51,12 +59,13 @@ EXCLUDES = ["**/*.tmp", "**/.*", "provenance/parca_cache_*/**", "**/*.cPickle", 
 _API_SCRIPT = r"""
 import json, sys
 from huggingface_hub import HfApi
+from huggingface_hub.errors import EntryNotFoundError
 op, repo_id, allow_create = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 api = HfApi()
 out = {}
 if op == "create" and allow_create:
     api.create_repo(repo_id, repo_type="dataset", private=True, exist_ok=True)
-if op in ("create", "info", "tree"):
+if op in ("create", "info", "tree", "files"):
     info = api.repo_info(repo_id, repo_type="dataset")
     out["private"] = bool(info.private)
     out["id"] = info.id
@@ -67,6 +76,20 @@ if op == "tree":
         size = getattr(entry, "size", None)
         if size is not None:
             files.append({"path": entry.path, "size": int(size)})
+    out["files"] = files
+if op == "files":  # every file under each prefix (a folder), at the revision just read
+    files = []
+    for prefix in json.loads(sys.argv[4]):
+        try:
+            entries = list(api.list_repo_tree(repo_id, path_in_repo=prefix, repo_type="dataset", recursive=True,
+                                              revision=out["sha"]))
+        except EntryNotFoundError:
+            continue
+        for entry in entries:
+            size = getattr(entry, "size", None)
+            if size is not None:
+                lfs = getattr(entry, "lfs", None)
+                files.append({"path": entry.path, "size": int(size), "sha256": lfs.get("sha256") if lfs else None})
     out["files"] = files
 print(json.dumps(out))
 """
@@ -105,10 +128,10 @@ def _hf_python(settings: Settings) -> str:
     return str(candidate)
 
 
-def api_call(settings: Settings, op: str, allow_create: bool = False) -> dict:
+def api_call(settings: Settings, op: str, allow_create: bool = False, extra: tuple[str, ...] = ()) -> dict:
     guard_token(settings)
-    result = subprocess.run([_hf_python(settings), "-c", _API_SCRIPT, op, settings.repo_id, "1" if allow_create else "0"],
-                            capture_output=True, text=True, env=hf_env(settings))
+    result = subprocess.run([_hf_python(settings), "-c", _API_SCRIPT, op, settings.repo_id, "1" if allow_create else "0",
+                             *extra], capture_output=True, text=True, env=hf_env(settings))
     if result.returncode != 0:
         raise SystemExit("Hub {} for {} failed:\n{}".format(op, settings.repo_id, result.stderr.strip()[-2000:]))
     return json.loads(result.stdout.strip().splitlines()[-1])
@@ -158,8 +181,10 @@ def include_globs(settings: Settings, parts: list[str], families: list[str] | No
 
 
 def default_parts(settings: Settings) -> list[str]:
+    """The fixed parts plus every config with at least one local file (a pruned config may
+    leave empty directories behind)."""
     data = settings.repo_dir / "data"
-    present = [c for c in DATA_CONFIGS if (data / c).is_dir()]
+    present = [c for c in DATA_CONFIGS if (data / c).is_dir() and any(p.is_file() for p in (data / c).rglob("*"))]
     return DEFAULT_PARTS + present
 
 
@@ -239,8 +264,120 @@ def cmd_status(settings: Settings, args: argparse.Namespace) -> dict:
     return {"private": info["private"], "files": len(files), "bytes": total}
 
 
+# -- verify / prune (configs that do not fit on disk, ADR 0011) ------------------------------
+def _gb(n: int) -> str:
+    return "{:.2f} GB".format(n / 1e9)
+
+
+def selected_parts(settings: Settings, args: argparse.Namespace) -> tuple[dict[str, dict], dict[str, dict]]:
+    """(every current ok part, those of --configs and --families)."""
+    configs = [c.strip() for c in args.configs.split(",") if c.strip()]
+    for config in configs:
+        settings.config(config)
+    families = [f.strip() for f in args.families.split(",") if f.strip()] if args.families else None
+    unknown = [f for f in families or [] if f not in FAMILIES]
+    if unknown:
+        raise SystemExit("unknown families {}; choose from {}".format(unknown, ", ".join(FAMILIES)))
+    parts = finalize.current_parts(finalize.export_sentinels(settings))
+    selected = {p: r for p, r in parts.items()
+                if r["config"] in configs and (families is None or r["family"] in families)}
+    if not selected:
+        raise SystemExit("no ok export parts of {} ({})".format(",".join(configs), ",".join(families or ["all families"])))
+    return parts, selected
+
+
+def cmd_verify(settings: Settings, args: argparse.Namespace) -> dict:
+    """Compare the Hub's data/<config>/<family>/ with the ok sentinels; record the matches."""
+    parts, selected = selected_parts(settings, args)
+    prefixes = sorted({"data/{}/{}".format(r["config"], r["family"]) for r in selected.values()})
+    info = api_call(settings, "files", extra=(json.dumps(prefixes),))
+    remote = {f["path"]: f for f in info["files"]}
+    already = published.published_parts(settings, parts)
+    problems, matched, new = [], [], []
+    for path, part in sorted(selected.items()):
+        entry, local = remote.get(path), settings.repo_dir / path
+        if entry is None:
+            problems.append("not on the Hub: {}".format(path))
+            continue
+        if part.get("bytes") is None or entry["size"] != int(part["bytes"]):
+            problems.append("size on the Hub {} != sentinel {}: {}".format(entry["size"], part.get("bytes"), path))
+            continue
+        if local.exists():
+            if local.stat().st_size != int(part["bytes"]):
+                problems.append("local size {} != sentinel {}: {}".format(local.stat().st_size, part["bytes"], path))
+                continue
+            published.keep_schema(settings, part["config"], local)
+        matched.append(path)
+        if path not in already:
+            new.append(published.record(settings, part, entry, info.get("sha")))
+    stale = sorted(p for p in remote if p not in parts)
+    problems += ["on the Hub without a current ok part (stale or a duplicate; remove it by hand): {}".format(p)
+                 for p in stale]
+    published.append(settings, new)
+    append_jsonl(settings.ledger, {"at": now(), "stage": "hub.verify", "repo_id": settings.repo_id,
+                                   "revision": info.get("sha"), "prefixes": prefixes, "matched": len(matched),
+                                   "recorded": len(new), "problems": len(problems)})
+    print("{}: {} of {} part(s) match the Hub at {} ({}; {} newly recorded in {})".format(
+        settings.repo_id, len(matched), len(selected), info.get("sha"),
+        _gb(sum(int(selected[p]["bytes"]) for p in matched)), len(new), published.records_path(settings)))
+    for line in problems[:50]:
+        print("  " + line, file=sys.stderr)
+    if problems:
+        raise SystemExit("{} problem(s); re-run `hub upload` for the parts not on the Hub, then verify again".format(
+            len(problems)))
+    return {"matched": len(matched), "recorded": len(new)}
+
+
+def cmd_prune(settings: Settings, args: argparse.Namespace) -> dict:
+    """Delete local part files that build/published.jsonl publishes; dry run unless --yes."""
+    parts, selected = selected_parts(settings, args)
+    on_hub = published.published_parts(settings, parts)
+    data = (settings.repo_dir / "data").resolve()
+    problems, doomed, gone = [], [], 0
+    for path, part in sorted(selected.items()):
+        local = settings.repo_dir / path
+        if not local.exists():
+            gone += 1
+            continue
+        entry = on_hub.get(path)
+        if entry is None:
+            problems.append("no published record matching its sentinel (hub upload, hub verify): {}".format(path))
+            continue
+        size = local.stat().st_size
+        if size != int(part["bytes"]) or size != int(entry["bytes"]):
+            problems.append("local size {} vs sentinel {} vs published {}: {}".format(
+                size, part["bytes"], entry["bytes"], path))
+            continue
+        if local.is_symlink() or local.resolve().parent != data / part["config"] / part["family"]:
+            problems.append("not a plain file under data/{}/{}/: {}".format(part["config"], part["family"], path))
+            continue
+        doomed.append((part["config"], local, size))
+    if problems:
+        for line in problems[:50]:
+            print("  " + line, file=sys.stderr)
+        raise SystemExit("refusing to prune: {} problem(s); nothing deleted".format(len(problems)))
+    for config, local, _ in doomed:  # the schema outlives the last local part of a config
+        published.keep_schema(settings, config, local)
+    total = sum(size for _, _, size in doomed)
+    print("{} part(s) to delete ({}), {} already gone, of {} selected".format(
+        len(doomed), _gb(total), gone, len(selected)))
+    if not args.yes:
+        for _, local, _ in doomed[:20]:
+            print("  would delete {}".format(local))
+        print("dry run: pass --yes to delete")
+        return {"dry_run": True, "parts": len(doomed), "bytes": total}
+    for _, local, _ in doomed:
+        local.unlink()
+    append_jsonl(settings.ledger, {"at": now(), "stage": "hub.prune", "repo_id": settings.repo_id,
+                                   "configs": args.configs, "families": args.families,
+                                   "deleted": len(doomed), "bytes": total})
+    print("deleted {} part(s), {}".format(len(doomed), _gb(total)))
+    return {"deleted": len(doomed), "bytes": total}
+
+
 def add_parser(sub: argparse._SubParsersAction) -> None:
-    parser = sub.add_parser("hub", help="private Hub dataset repo: create, upload, status (never deletes)")
+    parser = sub.add_parser("hub", help="private Hub dataset repo: create, upload, status, verify, prune "
+                                        "(never deletes remotely)")
     stage = parser.add_subparsers(dest="action", required=True)
     create = stage.add_parser("create", help="create W4C_REPO_ID as a private dataset repo")
     create.add_argument("--allow-public", action="store_true", help="accept an existing public repo")
@@ -256,3 +393,13 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     status = stage.add_parser("status", help="remote files and sizes")
     status.add_argument("--files", action="store_true", help="list every file")
     status.set_defaults(func=cmd_status)
+    for name, func, text in (
+            ("verify", cmd_verify, "compare the Hub's parts (path, size) with the ok sentinels; record the matches "
+                                   "in build/published.jsonl (exits non-zero on any mismatch)"),
+            ("prune", cmd_prune, "delete local parts recorded as published (dry run unless --yes)")):
+        action = stage.add_parser(name, help=text)
+        action.add_argument("--configs", required=True, help="comma-separated exported configs, e.g. expression_1s")
+        action.add_argument("--families", help="comma-separated families (default: all)")
+        if name == "prune":
+            action.add_argument("--yes", action="store_true", help="delete (default: list what would be deleted)")
+        action.set_defaults(func=func)

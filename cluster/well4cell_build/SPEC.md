@@ -9,6 +9,7 @@ file is the build manager). This file is the interface contract the stage owners
 $W4C_ROOT/ (default $WCECOLI_CAMPAIGN_ROOT/well4cell)
   build/   manifests/ <stage>_<ts>_<id>.jsonl + .sentinels/   logs/   scan/runs.jsonl   scan/active_union.npz   index_report.json   ledger.jsonl   dispatch_log.jsonl
            provenance/deg_rates_<parca_cache>.json
+           published.jsonl   schemas/<config>.parquet   (hub verify / hub prune; docs/adr/0011)
   repo/    README.md  manifest.json  index.parquet  stats/<family>.parquet  provenance/...  data/<config>/<family>/part-NNNNN.parquet
            data/summary/<family>/part-00000.parquet
 ```
@@ -106,6 +107,27 @@ export.py + stats.py: agent "export". summarize.py, deg_rates.py, finalize.py + 
 finalize refuses while any part planned (in any export manifest) for the configs being
 finalized (`--configs`, default all) has no sentinel or a failed one; incomplete parts of other
 configs only warn. `--allow-incomplete` overrides.
+
+## Published-only parts (published.py, hub verify / hub prune; docs/adr/0011)
+For configs that do not fit on disk: export a batch, `hub upload`, `hub verify`, `hub prune`, repeat;
+finalize once. `hub verify --configs C [--families F]` lists data/<C>/<F>/ on the Hub (list_repo_tree at
+the current revision) and, per current ok part of the selection, compares the Hub's size with the
+sentinel's bytes (and the local size, when the file is there); each match without a record yet is
+appended to build/published.jsonl {at, repo_id, revision, config, family, path, bytes, sha256 (LFS oid or
+null), plan, part, finished_at}. A part missing on the Hub, a size mismatch, or a remote file under those
+folders that is not a current ok part are reported and exit non-zero (records for the matches are still
+written). `hub prune` deletes a selected part file only when a record matches its sentinel and the local
+size equals both; any problem refuses the whole selection; dry run unless `--yes`; nothing outside
+repo/data/<config>/<family>/ (no symlinks). A record matches a sentinel when repo_id = W4C_REPO_ID and
+path, bytes, plan and finished_at are equal, so a re-export voids it. build/schemas/<config>.parquet
+(pq.write_metadata, no rows) is stored from the first local part verify or prune reads and every later
+part read is checked against it (fields, types, field metadata; not the schema-level metadata, which
+names the family). finalize: an ok part missing on disk is accepted iff a record matches it, refused as
+missing otherwise; configs, families, files and bytes in the summary/manifest/card come from the ok
+sentinels (bytes = sentinel bytes, checked equal to stat() for every local file); product units and
+types from the config's first local part (checked against build/schemas/ when present) or, with no local
+part, build/schemas/<config>.parquet (refused when neither exists). It prints and ledgers {local,
+published_only}. The output is identical to a finalize with every part on disk.
 
 ## Parca caches are never published (docs/adr/0009)
 They are wcEcoli's fitted parameters (Stanford licence), not simulation output. finalize does

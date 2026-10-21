@@ -13,6 +13,8 @@
 #     cluster/w4c deg-rates && cluster/w4c finalize           # degradation-rate counts per Parca cache (files stay in build/)
 #     cluster/w4c hub create                                  # private repo on the Hub
 #     cluster/w4c hub upload --include index,provenance,stats,manifest
+#     cluster/w4c hub verify --configs expression_1s --families regulation   # 1 s tier, per batch:
+#     cluster/w4c hub prune --configs expression_1s --families regulation --yes  # upload, verify, prune
 set -euo pipefail
 REPO_ROOT="${WCECOLI_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck disable=SC1091
