@@ -81,6 +81,12 @@ locators (filled by finalize, null before): <config>_file, <config>_row_offset (
 run_dir, h5_group and n_steps are copied from index.parquet; export reads the trajectory at
 <out>/<run_dir>/export/channels.h5 [h5_group] and never constructs a group name itself.
 Parts are planned config by config, families in tier order, samples in index order.
+`export dispatch --parts` takes part indices and ranges (`0-161,170`); build/dispatch_log.jsonl records
+each submitted array's spec (`indices`, e.g. `0-161%50`). reconcile classifies a part without a sentinel
+as running/pending (live SLURM state), not dispatched yet (no dispatch record covers its index; a record
+without `indices` covers the whole manifest), or lost (dispatched, not live); only lost parts get a
+re-dispatch command. `export status` reports pending and not-dispatched separately. finalize's
+completeness rule counts both as incomplete.
 ## export sentinel (per part, <manifest stem>.sentinels/NNNNN.json):
 {plan, part, status ok|failed, config, family, path, planned_path, bytes, rows, qc_failed, seconds, started_at, finished_at,
  samples:[{sample_id, row_offset, n_rows, seconds, qc:{ok:bool, reasons:[...]}}], stats_npz (path), error}
@@ -128,6 +134,15 @@ sentinels (bytes = sentinel bytes, checked equal to stat() for every local file)
 types from the config's first local part (checked against build/schemas/ when present) or, with no local
 part, build/schemas/<config>.parquet (refused when neither exists). It prints and ledgers {local,
 published_only}. The output is identical to a finalize with every part on disk.
+`--parts P [--manifest M]` on verify and prune (a family dispatched in slices): P has the syntax of
+`export dispatch --parts` (export.parse_parts: N or N-M, comma-separated) and names part indices of
+the export manifest M (default the latest; an index M lacks is refused). Those indices are unique within
+M across configs and families, so several of either are allowed; the selection is M's lines in P of
+--configs/--families, everything else is ignored. Inside it: a line without an ok sentinel for that
+attempt (plan, part), or superseded by a later export of its path, is a problem for both commands; an ok
+line with path null is skipped (no file); the rest is checked as above. verify's stale check is
+unchanged: a remote file under the selected folders is reported only if it is no current ok part at all,
+so ok parts outside P are never flagged. Ledger lines of verify and prune carry `parts`.
 
 ## Parca caches are never published (docs/adr/0009)
 They are wcEcoli's fitted parameters (Stanford licence), not simulation output. finalize does

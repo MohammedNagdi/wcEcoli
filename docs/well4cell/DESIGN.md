@@ -358,7 +358,9 @@ sentinel per task, an append-only ledger, and `cluster/well4cell.sbatch` always 
    The 1 s tier does not fit on disk and is published in batches (ADR 0011): export a
    config of a family, `hub upload` it, `hub verify` it (Hub path and size against the
    sentinels, recorded in `build/published.jsonl`), `hub prune` the local parts, repeat;
-   finalize once at the end, from the sentinels and `build/schemas/`.
+   finalize once at the end, from the sentinels and `build/schemas/`. A family larger than
+   the disk goes in slices of its manifest's parts, each through `export dispatch`, `hub
+   verify` and `hub prune` with the same `--parts`.
 
 Storage: confirm the organisation's plan, or email Hugging Face for an academic storage
 grant, before uploading the 1 s matrix configs.

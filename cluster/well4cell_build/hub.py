@@ -9,7 +9,10 @@
 ``prune``   delete local part files that a published record matches (dry run unless --yes).
 
 verify and prune are for configs that do not fit on disk (ADR 0011): export a batch, upload,
-verify, prune, repeat, then finalize once; published.py describes the records.
+verify, prune, repeat, then finalize once; published.py describes the records. ``--parts``
+(with ``--manifest``) narrows both to a slice of one export manifest's part indices, the
+syntax of ``export dispatch --parts``; outside it everything is ignored, inside it the checks
+are the same.
 
 This module can only add or overwrite remote files (``prune`` deletes local files only). It never passes ``--delete`` to
 ``hf upload`` and never calls a delete API: removing anything remote is done by hand.
@@ -32,9 +35,10 @@ import sys
 import time
 from pathlib import Path
 
+from . import export
 from . import finalize
 from . import published
-from .ledger import append_jsonl, now
+from .ledger import append_jsonl, format_array, now
 from .settings import CONFIGS, FAMILIES, SUMMARY_CONFIG, Settings
 
 # Parts of repo/ and the --include globs that select them.
@@ -269,8 +273,14 @@ def _gb(n: int) -> str:
     return "{:.2f} GB".format(n / 1e9)
 
 
-def selected_parts(settings: Settings, args: argparse.Namespace) -> tuple[dict[str, dict], dict[str, dict]]:
-    """(every current ok part, those of --configs and --families)."""
+def selected_parts(settings: Settings, args: argparse.Namespace) -> tuple[dict[str, dict], dict[str, dict], list[str]]:
+    """(every current ok part, those of --configs, --families and --parts, problems with --parts).
+
+    --parts takes the part indices of one export manifest (--manifest, default the latest),
+    as ``export dispatch --parts`` does; those indices are unique across the configs and
+    families of a manifest, so several of either are fine. Indices of other configs or
+    families are left out; parts of the manifest outside --parts are ignored entirely. An index of
+    the selection without a current ok sentinel for that export attempt is a problem."""
     configs = [c.strip() for c in args.configs.split(",") if c.strip()]
     for config in configs:
         settings.config(config)
@@ -278,22 +288,51 @@ def selected_parts(settings: Settings, args: argparse.Namespace) -> tuple[dict[s
     unknown = [f for f in families or [] if f not in FAMILIES]
     if unknown:
         raise SystemExit("unknown families {}; choose from {}".format(unknown, ", ".join(FAMILIES)))
-    parts = finalize.current_parts(finalize.export_sentinels(settings))
+    sentinels = finalize.export_sentinels(settings)
+    parts = finalize.current_parts(sentinels)
     selected = {p: r for p, r in parts.items()
                 if r["config"] in configs and (families is None or r["family"] in families)}
-    if not selected:
+    problems: list[str] = []
+    if getattr(args, "manifest", None) and not getattr(args, "parts", None):
+        raise SystemExit("--manifest only applies with --parts")
+    if getattr(args, "parts", None):
+        manifest = Path(args.manifest) if getattr(args, "manifest", None) else export._latest_manifest(settings)
+        lines, indices = export.manifest_parts(manifest, args.parts)
+        attempts = {(r.get("plan"), r.get("part")): r for _, r in sentinels}
+        wanted = [line for line in lines if line["part"] in set(indices)
+                  and line["config"] in configs and (families is None or line["family"] in families)]
+        selected = {}
+        for line in wanted:
+            sentinel = attempts.get((line["plan"], line["part"]))
+            if sentinel is None or sentinel.get("status") != "ok":
+                problems.append("part {} of {} has no ok sentinel ({}): {}".format(
+                    line["part"], manifest.name, sentinel.get("status") if sentinel else "not exported", line["path"]))
+            elif sentinel.get("path") is None:
+                continue  # ok, every trajectory failed QC: no file to publish
+            elif parts.get(sentinel["path"]) is not sentinel:
+                problems.append("part {} of {} is superseded by a later export of {} (select it from that "
+                                "manifest)".format(line["part"], manifest.name, sentinel["path"]))
+            else:
+                selected[sentinel["path"]] = sentinel
+        print("--parts {} of {}: {} in the range, {} of {} ({}), {} with a file".format(
+            format_array(indices), manifest.name, len(indices), len(wanted), ",".join(configs),
+            ",".join(families or ["all families"]), len(selected)))
+        if not wanted:
+            raise SystemExit("no part of {} in --parts {} is of {} ({})".format(
+                manifest.name, args.parts, ",".join(configs), ",".join(families or ["all families"])))
+    elif not selected:
         raise SystemExit("no ok export parts of {} ({})".format(",".join(configs), ",".join(families or ["all families"])))
-    return parts, selected
+    return parts, selected, problems
 
 
 def cmd_verify(settings: Settings, args: argparse.Namespace) -> dict:
     """Compare the Hub's data/<config>/<family>/ with the ok sentinels; record the matches."""
-    parts, selected = selected_parts(settings, args)
+    parts, selected, problems = selected_parts(settings, args)
     prefixes = sorted({"data/{}/{}".format(r["config"], r["family"]) for r in selected.values()})
-    info = api_call(settings, "files", extra=(json.dumps(prefixes),))
+    info = api_call(settings, "files", extra=(json.dumps(prefixes),)) if prefixes else {"files": [], "sha": None}
     remote = {f["path"]: f for f in info["files"]}
     already = published.published_parts(settings, parts)
-    problems, matched, new = [], [], []
+    matched, new = [], []
     for path, part in sorted(selected.items()):
         entry, local = remote.get(path), settings.repo_dir / path
         if entry is None:
@@ -310,12 +349,14 @@ def cmd_verify(settings: Settings, args: argparse.Namespace) -> dict:
         matched.append(path)
         if path not in already:
             new.append(published.record(settings, part, entry, info.get("sha")))
+    # Every current ok part counts, inside --parts or not: a later slice uploaded early is not stale.
     stale = sorted(p for p in remote if p not in parts)
     problems += ["on the Hub without a current ok part (stale or a duplicate; remove it by hand): {}".format(p)
                  for p in stale]
     published.append(settings, new)
     append_jsonl(settings.ledger, {"at": now(), "stage": "hub.verify", "repo_id": settings.repo_id,
-                                   "revision": info.get("sha"), "prefixes": prefixes, "matched": len(matched),
+                                   "revision": info.get("sha"), "prefixes": prefixes,
+                                   "parts": getattr(args, "parts", None), "matched": len(matched),
                                    "recorded": len(new), "problems": len(problems)})
     print("{}: {} of {} part(s) match the Hub at {} ({}; {} newly recorded in {})".format(
         settings.repo_id, len(matched), len(selected), info.get("sha"),
@@ -330,10 +371,10 @@ def cmd_verify(settings: Settings, args: argparse.Namespace) -> dict:
 
 def cmd_prune(settings: Settings, args: argparse.Namespace) -> dict:
     """Delete local part files that build/published.jsonl publishes; dry run unless --yes."""
-    parts, selected = selected_parts(settings, args)
+    parts, selected, problems = selected_parts(settings, args)
     on_hub = published.published_parts(settings, parts)
     data = (settings.repo_dir / "data").resolve()
-    problems, doomed, gone = [], [], 0
+    doomed, gone = [], 0
     for path, part in sorted(selected.items()):
         local = settings.repo_dir / path
         if not local.exists():
@@ -370,7 +411,7 @@ def cmd_prune(settings: Settings, args: argparse.Namespace) -> dict:
         local.unlink()
     append_jsonl(settings.ledger, {"at": now(), "stage": "hub.prune", "repo_id": settings.repo_id,
                                    "configs": args.configs, "families": args.families,
-                                   "deleted": len(doomed), "bytes": total})
+                                   "parts": getattr(args, "parts", None), "deleted": len(doomed), "bytes": total})
     print("deleted {} part(s), {}".format(len(doomed), _gb(total)))
     return {"deleted": len(doomed), "bytes": total}
 
@@ -400,6 +441,9 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         action = stage.add_parser(name, help=text)
         action.add_argument("--configs", required=True, help="comma-separated exported configs, e.g. expression_1s")
         action.add_argument("--families", help="comma-separated families (default: all)")
+        action.add_argument("--parts", help="only these part indices of the export manifest, the syntax of "
+                                            "`export dispatch --parts` (0-161,170); the rest is ignored")
+        action.add_argument("--manifest", help="with --parts: the export manifest (default: the latest)")
         if name == "prune":
             action.add_argument("--yes", action="store_true", help="delete (default: list what would be deleted)")
         action.set_defaults(func=func)

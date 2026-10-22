@@ -36,5 +36,9 @@ from `build/schemas/` when a config has none left.
 `hub verify` and `hub prune` are new; prune is a dry run unless `--yes` and deletes only
 part files under `repo/data/<config>/<family>/` whose record, sentinel and local size agree.
 Nothing deletes remotely. A re-exported part (a new sentinel) no longer matches its record
-and must be uploaded and verified again. The local copies of the 1 s tier are gone after
+and must be uploaded and verified again. A family larger than the disk is a batch of
+slices: `export dispatch --parts`, then `hub verify` and `hub prune` with the same
+`--parts` (manifest part indices), which ignore the rest of the family and stay strict
+inside the range; `export reconcile` reports the slices not yet dispatched as such, not as
+lost. The local copies of the 1 s tier are gone after
 publication: re-reading them means downloading from the Hub.

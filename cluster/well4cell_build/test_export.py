@@ -3,10 +3,17 @@
     PYTHONPATH=cluster python -m pytest cluster/well4cell_build/test_export.py
 """
 
+import argparse
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from well4cell_build.export import n_rows_after_stride, pack, qc_trajectory, stride_rows
+from well4cell_build import export
+from well4cell_build.export import n_rows_after_stride, pack, parse_parts, qc_trajectory, stride_rows
+from well4cell_build.ledger import format_array
+from well4cell_build.test_finalize import make_settings
 from well4cell_build.settings import MATRIX_CHANNELS, SCALAR_CHANNELS
 from well4cell_build.stats import Moments
 
@@ -180,3 +187,77 @@ def test_moments_ignore_nan_and_merge(tmp_path):
     assert c.data["g"]["sumsq"].tolist() == [14]
     assert c.data["m"]["min"].tolist() == [1, -6] and c.data["m"]["max"].tolist() == [5, 4]
     assert c.summary("g")["mean"].tolist() == [2.0]
+
+
+# -- --parts, sliced dispatch and reconcile ---------------------------------------
+
+def test_parse_parts_takes_indices_and_ranges():
+    assert parse_parts("3") == [3]
+    assert parse_parts("0-2,5, 7-8,1") == [0, 1, 2, 5, 7, 8]
+    assert format_array(parse_parts("0-161")) == "0-161"
+    for bad in ("", "a", "1-", "-1", "3-1", "1..2"):
+        with pytest.raises(SystemExit):
+            parse_parts(bad)
+
+
+def _sliced_manifest(settings, n_parts: int = 8) -> Path:
+    plan = "export_20261020_000000_slice"
+    manifest = settings.manifest_dir / (plan + ".jsonl")
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("".join(json.dumps({
+        "plan": plan, "part": i, "config": "metabolism_1s", "family": "single_knockout",
+        "path": "data/metabolism_1s/single_knockout/part-{:05d}.parquet".format(i), "samples": []}) + "\n"
+        for i in range(n_parts)))
+    return manifest
+
+
+def test_dispatch_parts_takes_ranges_and_refuses_unknown_indices(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    manifest = _sliced_manifest(settings)
+    submitted = []
+    monkeypatch.setattr(export, "squeue_names", lambda prefix: [])
+    monkeypatch.setattr(export, "sbatch", lambda settings_, stage, manifest_, indices, *a, **k:
+                        submitted.append(indices) or ("123", "acct"))
+    args = argparse.Namespace(manifest=str(manifest), parts="0-3", concurrency=None, time=None, mem=None, force=False,
+                              dry_run=False)
+    export.cmd_dispatch(settings, args)
+    assert submitted == [[0, 1, 2, 3]]
+    with pytest.raises(SystemExit, match="has no part"):
+        export.cmd_dispatch(settings, argparse.Namespace(**{**vars(args), "parts": "6-8"}))
+
+
+def test_reconcile_tells_not_dispatched_from_lost_and_running_after_a_sliced_dispatch(tmp_path, monkeypatch, capsys):
+    settings = make_settings(tmp_path, monkeypatch)
+    manifest = _sliced_manifest(settings)
+    sdir = manifest.with_name(manifest.stem + ".sentinels")
+    sdir.mkdir()
+    for i in (0, 1):
+        (sdir / "{:05d}.json".format(i)).write_text(json.dumps({
+            "status": "ok", "rows": 10, "bytes": 100, "finished_at": "2026-10-20T0{}:00:00+00:00".format(i)}))
+    # slice 0-3 dispatched (array spec with its concurrency); 4-7 not yet
+    settings.dispatch_log.parent.mkdir(parents=True, exist_ok=True)
+    settings.dispatch_log.write_text(json.dumps({"at": "x", "stage": "export", "array_job_id": "111",
+                                                 "manifest": str(manifest), "indices": "0-3%50"}) + "\n")
+    monkeypatch.setattr(export, "_array_states", lambda job: {0: "COMPLETED", 1: "COMPLETED", 2: "RUNNING"})
+    monkeypatch.setattr(export, "squeue_names", lambda prefix: [])
+    report = export.cmd_reconcile(settings, argparse.Namespace())
+    assert report["added"] == 2 and report["failed"] == []
+    assert [i["part"] for i in report["running"]] == [2]
+    assert [i["part"] for i in report["lost"]] == [3] and report["lost"][0]["slurm"] is None
+    assert [i["part"] for i in report["undispatched"]] == [4, 5, 6, 7]
+    out = capsys.readouterr().out
+    assert "lost parts: 1  running/pending: 1  not dispatched yet: 4" in out
+    assert "not dispatched yet  {}: parts 4-7".format(manifest.name) in out
+    redispatch = [line for line in out.splitlines() if "re-dispatch" in line]
+    assert redispatch == ["  re-dispatch: w4c export dispatch --manifest {} --parts 3".format(manifest)]
+    # sentinel ledger lines are written once, as before
+    assert export.cmd_reconcile(settings, argparse.Namespace())["added"] == 0
+    assert [json.loads(l)["part"] for l in settings.ledger.read_text().splitlines()] == [0, 1]
+    status = export.cmd_status(settings, argparse.Namespace())[manifest.name]
+    assert status["pending"] == [2, 3] and status["not_dispatched"] == [4, 5, 6, 7] and status["ok"] == 2
+    # a manifest with no dispatch record at all: every part without a sentinel is not dispatched, none lost
+    settings.dispatch_log.unlink()
+    capsys.readouterr()
+    report = export.cmd_reconcile(settings, argparse.Namespace())
+    assert report["lost"] == [] and report["running"] == [] and len(report["undispatched"]) == 6
+    assert "re-dispatch" not in capsys.readouterr().out

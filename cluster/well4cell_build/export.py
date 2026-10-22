@@ -3,13 +3,14 @@
 ``plan``       packs the trajectories of index.parquet (in stored order) into parts of
                about W4C_FILE_TARGET_BYTES, never crossing a config or family, and writes
                the manifest (one line per part).
-``dispatch``   submits the parts that have no ok sentinel as one SLURM array.
+``dispatch``   submits the parts that have no ok sentinel (or ``--parts``) as one SLURM array.
 ``run``        (array task) builds ONE part: per trajectory read the generation group,
                apply the stride rule and the QC gates, append the rows; write the file to a
                temporary name and rename it into place; save the part's stats npz; write
                the sentinel. Skips when an ok sentinel already exists; always exits 0.
 ``status``     what the manifests, sentinels and queue say.
-``reconcile``  folds sentinels into ledger.jsonl and reports lost parts.
+``reconcile``  folds sentinels into ledger.jsonl and reports failed, lost (dispatched, gone from
+               SLURM, no sentinel), running/pending and not-yet-dispatched parts.
 
 Contract: cluster/well4cell_build/SPEC.md.
 """
@@ -33,7 +34,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from . import h5io
-from .ledger import (append_jsonl, manifest_id, now, read_json, read_jsonl, rename_into_place, sbatch,
+from .ledger import (append_jsonl, format_array, manifest_id, now, read_json, read_jsonl, rename_into_place, sbatch,
                      sentinel_dir, squeue_names, temp_path_for, write_atomic_json, write_jsonl)
 from .settings import (CONFIGS, FAMILIES, FLUX_NOISE, INT_MATRICES, INT_SCALARS, MATRIX_CHANNELS, SCALAR_CHANNELS,
                        Config, Settings)
@@ -290,11 +291,56 @@ def _latest_manifest(settings: Settings) -> Path:
     return candidates[-1]
 
 
+def parse_parts(text: str) -> list[int]:
+    """'0-161,170,175-180' -> sorted distinct part indices of a manifest (the syntax of
+    ``export dispatch --parts``, ``hub verify --parts``, ``hub prune --parts`` and of the
+    dispatch log's array specs)."""
+    indices: set[int] = set()
+    for item in text.split(","):
+        item = item.strip()
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", item)
+        if not match:
+            raise SystemExit("bad --parts item {!r}: expected N or N-M, comma-separated (e.g. 0-161,170)".format(item))
+        start, stop = int(match.group(1)), int(match.group(2) or match.group(1))
+        if stop < start:
+            raise SystemExit("bad --parts range {!r}: the end is below the start".format(item))
+        indices.update(range(start, stop + 1))
+    return sorted(indices)
+
+
+def manifest_parts(manifest: Path, text: str) -> tuple[list[dict], list[int]]:
+    """(the manifest's lines, the --parts indices); refuses an index the manifest does not have."""
+    lines = read_jsonl(manifest)
+    indices = parse_parts(text)
+    unknown = sorted(set(indices) - {line["part"] for line in lines})
+    if unknown:
+        raise SystemExit("{} has no part(s) {} (its parts: {})".format(
+            manifest.name, format_array(unknown), format_array([line["part"] for line in lines]) if lines else "none"))
+    return lines, indices
+
+
+def dispatched_parts(settings: Settings) -> dict[str, tuple[list[str], set[int] | None]]:
+    """manifest name -> (export array job ids, the part indices they were submitted for; None
+    when a dispatch record does not say, which counts as the whole manifest)."""
+    out: dict[str, tuple[list[str], set[int] | None]] = {}
+    for record in read_jsonl(settings.dispatch_log):
+        if record.get("stage") != "export":
+            continue
+        jobs, indices = out.setdefault(Path(record["manifest"]).name, ([], set()))
+        jobs.append(str(record["array_job_id"]))
+        spec = str(record.get("indices") or "").split("%", 1)[0]
+        if indices is not None and spec:
+            indices.update(parse_parts(spec))
+        else:
+            out[Path(record["manifest"]).name] = (jobs, None)
+    return out
+
+
 def cmd_dispatch(settings: Settings, args: argparse.Namespace) -> dict:
     manifest = Path(args.manifest) if args.manifest else _latest_manifest(settings)
     lines = read_jsonl(manifest)
     if args.parts:
-        indices = [int(s) for s in args.parts.split(",")]
+        indices = manifest_parts(manifest, args.parts)[1]
     else:
         indices = [line["part"] for line in lines
                    if (_read_sentinel(_sentinel_path(settings, manifest, line["part"])) or {}).get("status") != "ok"]
@@ -585,13 +631,18 @@ def _array_states(array_job_id: str) -> dict[int, str]:
     return states
 
 
-def _manifest_summary(settings: Settings, manifest: Path) -> dict:
+def _manifest_summary(settings: Settings, manifest: Path, dispatched: set[int] | None) -> dict:
+    """Counts of one manifest; ``dispatched`` holds the part indices some array was submitted
+    for (None: all of them). A part without a sentinel is pending if dispatched, else not
+    dispatched yet."""
     lines = read_jsonl(manifest)
-    summary = {"parts": len(lines), "ok": 0, "failed": 0, "pending": [], "rows": 0, "bytes": 0, "qc_failed": 0}
+    summary = {"parts": len(lines), "ok": 0, "failed": 0, "pending": [], "not_dispatched": [], "rows": 0, "bytes": 0,
+               "qc_failed": 0}
     for line in lines:
         sentinel = _read_sentinel(_sentinel_path(settings, manifest, line["part"]))
         if sentinel is None:
-            summary["pending"].append(line["part"])
+            undispatched = dispatched is not None and line["part"] not in dispatched
+            summary["not_dispatched" if undispatched else "pending"].append(line["part"])
         elif sentinel.get("status") == "ok":
             summary["ok"] += 1
             summary["rows"] += sentinel.get("rows", 0)
@@ -604,29 +655,35 @@ def _manifest_summary(settings: Settings, manifest: Path) -> dict:
 
 def cmd_status(settings: Settings, args: argparse.Namespace) -> dict:
     out = {}
+    dispatched = dispatched_parts(settings)
     for manifest in _export_manifests(settings):
-        summary = _manifest_summary(settings, manifest)
+        summary = _manifest_summary(settings, manifest, dispatched.get(manifest.name, ([], set()))[1])
         out[manifest.name] = summary
-        print("{}: {} parts  ok {}  failed {}  pending {}  rows {}  {:.2f} GB  QC-failed trajectories {}".format(
-            manifest.name, summary["parts"], summary["ok"], summary["failed"], len(summary["pending"]),
-            summary["rows"], summary["bytes"] / 1e9, summary["qc_failed"]))
+        print("{}: {} parts  ok {}  failed {}  pending {}  not dispatched {}  rows {}  {:.2f} GB  "
+              "QC-failed trajectories {}".format(
+                  manifest.name, summary["parts"], summary["ok"], summary["failed"], len(summary["pending"]),
+                  len(summary["not_dispatched"]), summary["rows"], summary["bytes"] / 1e9, summary["qc_failed"]))
     print("queued export tasks: {}".format(len(squeue_names(settings.job_prefix + "-export"))))
     return out
 
 
 def cmd_reconcile(settings: Settings, args: argparse.Namespace) -> dict:
-    """Fold every export sentinel into ledger.jsonl once; report failed and lost parts."""
+    """Fold every export sentinel into ledger.jsonl once; report failed, lost, running/pending
+    and not-yet-dispatched parts.
+
+    A part without a sentinel is running/pending while SLURM shows a live state for its task;
+    lost when an array was submitted for it (dispatch log) and SLURM no longer has it live;
+    not dispatched yet when no array was ever submitted for it (a sliced dispatch). Only lost
+    parts are offered for re-dispatch."""
     seen = {(r.get("plan"), r.get("part"), r.get("status"), r.get("finished_at"))
             for r in read_jsonl(settings.ledger) if r.get("stage") == "export"}
-    dispatched: dict[str, list[str]] = {}
-    for record in read_jsonl(settings.dispatch_log):
-        if record.get("stage") == "export":
-            dispatched.setdefault(Path(record["manifest"]).name, []).append(str(record["array_job_id"]))
-    added, failed, lost, undispatched = 0, [], [], []
+    dispatched = dispatched_parts(settings)
+    added, failed, lost, running, undispatched = 0, [], [], [], []
     for manifest in _export_manifests(settings):
         lines = read_jsonl(manifest)
+        jobs, submitted = dispatched.get(manifest.name, ([], set()))
         states: dict[int, str] = {}
-        for array_job_id in dispatched.get(manifest.name, []):
+        for array_job_id in jobs:
             for index, state in _array_states(array_job_id).items():
                 if state in _LIVE_STATES or index not in states:
                     states[index] = state
@@ -634,12 +691,13 @@ def cmd_reconcile(settings: Settings, args: argparse.Namespace) -> dict:
             sentinel = _read_sentinel(_sentinel_path(settings, manifest, line["part"]))
             if sentinel is None:
                 state = states.get(line["part"])
+                item = {"manifest": manifest.name, "part": line["part"], "path": line["path"], "slurm": state}
                 if state in _LIVE_STATES:
-                    continue
-                if manifest.name not in dispatched:
-                    undispatched.append("{}#{}".format(manifest.name, line["part"]))
+                    running.append(item)
+                elif submitted is not None and line["part"] not in submitted:
+                    undispatched.append(item)
                 else:
-                    lost.append({"manifest": manifest.name, "part": line["part"], "path": line["path"], "slurm": state})
+                    lost.append(item)
                 continue
             key = (line["plan"], line["part"], sentinel.get("status"), sentinel.get("finished_at"))
             if sentinel.get("status") != "ok":
@@ -655,20 +713,25 @@ def cmd_reconcile(settings: Settings, args: argparse.Namespace) -> dict:
             })
             seen.add(key)
             added += 1
-    print("ledger lines added: {}  failed parts: {}  lost parts: {}  never dispatched: {}".format(
-        added, len(failed), len(lost), len(undispatched)))
+    print("ledger lines added: {}  failed parts: {}  lost parts: {}  running/pending: {}  not dispatched yet: {}".format(
+        added, len(failed), len(lost), len(running), len(undispatched)))
     for item in failed[:20]:
         print("  failed {}#{} {}: {}".format(item["manifest"], item["part"], item["path"], item["error"][0]))
     for item in lost[:20]:
         print("  lost   {}#{} {} (slurm: {})".format(item["manifest"], item["part"], item["path"], item["slurm"]))
-    if lost:
-        by_manifest: dict[str, list[int]] = {}
-        for item in lost:
-            by_manifest.setdefault(item["manifest"], []).append(item["part"])
-        for name, parts in by_manifest.items():
-            print("  re-dispatch: w4c export dispatch --manifest {} --parts {}".format(
-                settings.manifest_dir / name, ",".join(str(p) for p in parts)))
-    return {"added": added, "failed": failed, "lost": lost, "undispatched": undispatched}
+    for name, parts in _by_manifest(undispatched).items():
+        print("  not dispatched yet  {}: parts {}".format(name, format_array(parts)))
+    for name, parts in _by_manifest(lost).items():
+        print("  re-dispatch: w4c export dispatch --manifest {} --parts {}".format(
+            settings.manifest_dir / name, format_array(parts)))
+    return {"added": added, "failed": failed, "lost": lost, "running": running, "undispatched": undispatched}
+
+
+def _by_manifest(items: list[dict]) -> dict[str, list[int]]:
+    out: dict[str, list[int]] = {}
+    for item in items:
+        out.setdefault(item["manifest"], []).append(item["part"])
+    return out
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -681,7 +744,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
                       help="re-export trajectories already located, numbering parts from 00000 (overwrites)")
     plan.set_defaults(func=cmd_plan)
     dispatch = stage.add_parser("dispatch")
-    dispatch.add_argument("--manifest"); dispatch.add_argument("--parts", help="comma-separated part indices")
+    dispatch.add_argument("--manifest", help="default: the latest export manifest")
+    dispatch.add_argument("--parts", help="part indices of the manifest, comma-separated, ranges allowed (0-161,170)")
     dispatch.add_argument("--concurrency", type=int); dispatch.add_argument("--time"); dispatch.add_argument("--mem")
     dispatch.add_argument("--force", action="store_true"); dispatch.add_argument("--dry-run", action="store_true")
     dispatch.set_defaults(func=cmd_dispatch)

@@ -41,7 +41,8 @@ def fake_hub(monkeypatch, settings, sizes: dict[str, int] | None = None, missing
 
 
 def hub_args(configs: str, families: str | None = None, **overrides) -> argparse.Namespace:
-    return argparse.Namespace(**{"configs": configs, "families": families, "yes": False, **overrides})
+    return argparse.Namespace(**{"configs": configs, "families": families, "yes": False, "parts": None,
+                                 "manifest": None, **overrides})
 
 
 def paths_of(settings, config: str, family: str | None = None) -> list[str]:
@@ -254,3 +255,126 @@ def test_hub_upload_takes_one_config_and_family_and_skips_pruned_configs(tmp_pat
     with pytest.raises(SystemExit, match="nothing local matches"):
         hub.cmd_upload(settings, argparse.Namespace(include="expression", families="wildtype_media", dry_run=True,
                                                     allow_public=False))
+
+
+# -- a family dispatched in slices: hub verify / prune --parts -----------------------------------
+def write_manifests(settings) -> dict[str, list[int]]:
+    """The export manifests build_tree's sentinels belong to; plan -> its part indices."""
+    out: dict[str, list[dict]] = {}
+    for _, record in finalize.export_sentinels(settings):
+        out.setdefault(record["plan"], []).append({k: record[k] for k in ("plan", "part", "config", "family", "path")})
+    for plan, lines in out.items():
+        lines.sort(key=lambda line: line["part"])
+        (settings.manifest_dir / (plan + ".jsonl")).write_text("".join(json.dumps(l) + "\n" for l in lines))
+    return {plan: [line["part"] for line in lines] for plan, lines in out.items()}
+
+
+def slices(settings) -> tuple[str, list[str], list[str]]:
+    """The expression manifest (the latest) cut in two slices: (its path, paths of parts 4-5, of 6-7)."""
+    plans = write_manifests(settings)
+    assert plans["export_20261008_000000_expression"] == [4, 5, 6, 7]
+    manifest = str(settings.manifest_dir / "export_20261008_000000_expression.jsonl")
+    by_part = {r["part"]: p for p, r in ok_parts(settings).items() if r["config"] == "expression"}
+    return manifest, [by_part[4], by_part[5]], [by_part[6], by_part[7]]
+
+
+def test_verify_parts_passes_for_an_uploaded_slice_while_a_later_one_is_not_uploaded(tmp_path, monkeypatch, capsys):
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    _, first, second = slices(settings)
+    fake_hub(monkeypatch, settings, missing=set(second))
+    # without --parts the whole selection is checked, strictly
+    with pytest.raises(SystemExit, match="2 problem"):
+        hub.cmd_verify(settings, hub_args("expression"))
+    err = capsys.readouterr().err
+    assert all("not on the Hub: " + p in err for p in second)
+    # the default manifest is the latest one (expression); the first verify recorded slice 4-5 already
+    assert hub.cmd_verify(settings, hub_args("expression", parts="4-5")) == {"matched": 2, "recorded": 0}
+    assert hub.cmd_verify(settings, hub_args("expression", parts="5,4")) == {"matched": 2, "recorded": 0}
+    assert set(published.published_parts(settings, ok_parts(settings))) == set(first)
+    ledger = json.loads(settings.ledger.read_text().splitlines()[-1])
+    assert ledger["stage"] == "hub.verify" and ledger["parts"] == "5,4" and ledger["problems"] == 0
+    # a remote file of an ok part outside the range is not stale; one of no ok part is
+    fake_hub(monkeypatch, settings, stale=["data/expression/wildtype_media/part-00099.parquet"])
+    with pytest.raises(SystemExit, match="1 problem"):
+        hub.cmd_verify(settings, hub_args("expression", parts="4-5"))
+    assert "part-00099" in capsys.readouterr().err
+
+
+def test_verify_parts_still_fails_for_a_missing_or_mismatched_part_inside_the_range(tmp_path, monkeypatch, capsys):
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    manifest, first, second = slices(settings)
+    fake_hub(monkeypatch, settings, sizes={first[0]: 7}, missing={first[1]} | set(second))
+    with pytest.raises(SystemExit, match="2 problem"):
+        hub.cmd_verify(settings, hub_args("expression", parts="4-5", manifest=manifest))
+    err = capsys.readouterr().err
+    assert "size on the Hub 7" in err and "not on the Hub: " + first[1] in err and second[0] not in err
+    assert not published.records_path(settings).exists()
+    # an index of the selection that was not exported ok is a problem too
+    (settings.manifest_dir / "export_20261008_000000_expression.sentinels" / "00005.json").unlink()
+    fake_hub(monkeypatch, settings)
+    with pytest.raises(SystemExit, match="1 problem"):
+        hub.cmd_verify(settings, hub_args("expression", parts="4-5"))
+    assert "part 5 of export_20261008_000000_expression.jsonl has no ok sentinel (not exported)" in capsys.readouterr().err
+    # an index the manifest does not have, or bad syntax, is refused outright
+    with pytest.raises(SystemExit, match="has no part"):
+        hub.cmd_verify(settings, hub_args("expression", parts="4-9"))
+    with pytest.raises(SystemExit, match="bad --parts"):
+        hub.cmd_verify(settings, hub_args("expression", parts="4..5"))
+    with pytest.raises(SystemExit, match="only applies with --parts"):
+        hub.cmd_prune(settings, hub_args("expression", manifest=manifest, yes=True))
+    # indices of another config are outside the selection
+    with pytest.raises(SystemExit, match="no part of .* is of core"):
+        hub.cmd_verify(settings, hub_args("core", parts="4-5"))
+
+
+def test_prune_parts_deletes_only_the_slice_and_refuses_problems_inside_it(tmp_path, monkeypatch, capsys):
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    _, first, second = slices(settings)
+    fake_hub(monkeypatch, settings, missing=set(second))
+    with pytest.raises(SystemExit):
+        hub.cmd_verify(settings, hub_args("expression", parts="4-6"))  # 6 is not on the Hub; 4-5 are recorded
+    capsys.readouterr()
+    # without --parts prune still refuses: the second slice has no published record
+    with pytest.raises(SystemExit, match="refusing to prune"):
+        hub.cmd_prune(settings, hub_args("expression", yes=True))
+    assert "no published record" in capsys.readouterr().err
+    # a problem inside the range refuses the whole slice
+    target = settings.repo_dir / first[0]
+    original = target.read_bytes()
+    target.write_bytes(original + b"x")
+    with pytest.raises(SystemExit, match="refusing to prune"):
+        hub.cmd_prune(settings, hub_args("expression", parts="4-5", yes=True))
+    assert "local size" in capsys.readouterr().err
+    target.write_bytes(original)
+    with pytest.raises(SystemExit, match="refusing to prune"):
+        hub.cmd_prune(settings, hub_args("expression", parts="4-6", yes=True))
+    assert "no published record" in capsys.readouterr().err
+    assert all((settings.repo_dir / p).exists() for p in first + second)
+    assert hub.cmd_prune(settings, hub_args("expression", parts="4-5"))["dry_run"]  # dry run by default
+    assert all((settings.repo_dir / p).exists() for p in first + second)
+    assert hub.cmd_prune(settings, hub_args("expression", parts="4-5", yes=True))["deleted"] == 2
+    assert not any((settings.repo_dir / p).exists() for p in first)
+    assert all((settings.repo_dir / p).exists() for p in second)
+    assert json.loads(settings.ledger.read_text().splitlines()[-1])["parts"] == "4-5"
+
+
+def test_prune_parts_of_the_last_slice_keeps_the_schema(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path, monkeypatch)
+    build_tree(settings)
+    _, first, second = slices(settings)
+    fake_hub(monkeypatch, settings, missing=set(second))
+    hub.cmd_verify(settings, hub_args("expression", parts="4-5"))
+    hub.cmd_prune(settings, hub_args("expression", parts="4-5", yes=True))
+    expected = pq.read_schema(settings.repo_dir / second[0])
+    fake_hub(monkeypatch, settings)
+    assert hub.cmd_verify(settings, hub_args("expression", parts="6-7")) == {"matched": 2, "recorded": 2}
+    published.schema_path(settings, "expression").unlink()  # as if no schema had been stored yet
+    assert hub.cmd_prune(settings, hub_args("expression", parts="6-7", yes=True))["deleted"] == 2
+    assert not list((settings.repo_dir / "data" / "expression").rglob("*.parquet"))
+    assert published.stored_schema(settings, "expression").equals(expected, check_metadata=True)
+    # every part is published-only now: the whole selection verifies, and prunes as a no-op
+    assert hub.cmd_verify(settings, hub_args("expression")) == {"matched": 4, "recorded": 0}
+    assert hub.cmd_prune(settings, hub_args("expression", yes=True))["deleted"] == 0

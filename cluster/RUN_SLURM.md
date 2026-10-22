@@ -455,7 +455,7 @@ rebuilt from termination, not taken from the database's `divided` (ADR 0005). Lo
 cluster/w4c export plan --configs core,expression,metabolism --families all
 cluster/w4c export dispatch
 cluster/w4c export status
-cluster/w4c export reconcile       # sentinels -> ledger; reports failed, lost, never-dispatched parts
+cluster/w4c export reconcile       # sentinels -> ledger; reports failed, lost, running, not-dispatched parts
 ```
 
 `--families` takes a comma-separated list of families or `all` (the default). `plan` packs
@@ -466,9 +466,13 @@ a temporary name and renamed, so a killed task leaves nothing half-written; re-r
 `dispatch` skips parts whose sentinel is `ok`. Trajectories failing a QC gate are skipped
 and reported in the sentinel (they land in `provenance/export_qc.parquet` at finalize).
 `reconcile` appends each new sentinel outcome (ok or failed: rows, bytes, QC failures) to
-`build/ledger.jsonl` exactly once, and lists failed parts, lost parts (dispatched, no
-sentinel, no longer live in SLURM) with the `export dispatch --manifest ... --parts ...`
-command that re-runs them, and parts never dispatched. A later `plan` skips trajectories
+`build/ledger.jsonl` exactly once, and lists failed parts, lost parts (an array was
+submitted for the part per `build/dispatch_log.jsonl`, no sentinel, no longer live in
+SLURM) with the `export dispatch --manifest ... --parts ...` command that re-runs them,
+parts still running or pending in SLURM, and parts not dispatched yet (no array was ever
+submitted for them, e.g. the later slices of a sliced dispatch; not lost, nothing to
+re-run). `export status` counts the last separately too. `--parts` takes indices and
+ranges, `0-161,170`. A later `plan` skips trajectories
 already written by an ok sentinel and never reuses a part number.
 
 A part task can be run in the foreground, e.g. to time one part:
@@ -642,8 +646,38 @@ that by hand); re-run `hub upload` and verify again. `hub prune` deletes only th
 part files whose record, sentinel and local size agree, refuses the whole batch otherwise,
 and is a dry run without `--yes`. Before a config's last local part goes it stores the
 config's parquet schema in `build/schemas/<config>.parquet`, which finalize reads in its
-place. A family larger than the free space is dispatched in slices (`export dispatch --parts
-...`); verify and prune take the parts that are ok so far.
+place.
+
+Without `--parts`, verify and prune take every ok part of the selection, strictly: an ok part
+not yet uploaded fails verify and blocks prune. A family larger than the free space is
+therefore dispatched in slices of the manifest's part indices, and each slice goes upload,
+verify, prune with the same `--parts` before the next slice is dispatched (here 325 parts in
+two slices; `export plan` prints the manifest, and `--manifest` defaults to the latest):
+
+```bash
+cluster/w4c export plan --configs metabolism_1s --families single_knockout
+cluster/w4c export dispatch --parts 0-161
+cluster/w4c export reconcile       # until 0-161 are ok; 162-324 show as "not dispatched yet"
+cluster/w4c hub upload --include metabolism_1s --families single_knockout
+cluster/w4c hub verify --configs metabolism_1s --families single_knockout --parts 0-161
+cluster/w4c hub prune  --configs metabolism_1s --families single_knockout --parts 0-161 --yes
+cluster/w4c export dispatch --parts 162-324
+cluster/w4c export reconcile       # until 162-324 are ok
+cluster/w4c hub upload --include metabolism_1s --families single_knockout
+cluster/w4c hub verify --configs metabolism_1s --families single_knockout --parts 162-324
+cluster/w4c hub prune  --configs metabolism_1s --families single_knockout --parts 162-324 --yes
+cluster/w4c hub verify --configs metabolism_1s --families single_knockout   # whole family, strict
+```
+
+`--parts` has the syntax of `export dispatch --parts` and names part indices of one export
+manifest (`--manifest`, default the latest), which are unique across that manifest's
+configs and families, so several of either may be selected; indices of configs or families
+outside `--configs`/`--families` are left out, and an index the manifest lacks is refused.
+Parts outside `--parts` are ignored by both commands. Inside it nothing is skipped: a part
+without an ok sentinel, missing on the Hub or of the wrong size fails verify and blocks
+prune. verify still flags a remote file in the config/family folder that is not a current ok
+part of any manifest, but not one of an ok part outside the range. The schema is stored
+before the last local part of a config goes, whichever slice that is.
 
 After the last batch of both configs:
 
