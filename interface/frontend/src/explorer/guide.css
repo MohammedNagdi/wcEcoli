@@ -1,0 +1,66 @@
+/* Existing local guide hierarchy and neutral/violet reference lock; explorer only. */
+.explorer-guide-layout{height:100%;min-height:0;min-width:0;display:flex;flex-direction:column}
+.explorer-guide-layout>.explorer-mode-note{flex-shrink:0}
+.explorer-guide{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;color:rgb(var(--color-text-primary));width:100%;max-width:1120px;margin:0 auto}
+.explorer-guide .guide-mobile-tools{display:none}
+.explorer-guide .guide-header{padding:24px 24px 16px}
+.explorer-guide h1{font-size:24px;font-weight:600;letter-spacing:-.025em}
+.explorer-guide .guide-header p,.explorer-guide .guide-muted{color:rgb(var(--color-text-secondary));font-size:13px}
+.explorer-guide .guide-header p{margin-top:6px}
+.explorer-guide .guide-nav{display:flex;flex-shrink:0;gap:2px;overflow-x:auto;border-bottom:1px solid rgb(var(--color-border-subtle));margin-inline:24px}
+.explorer-guide .guide-nav a{padding:12px 14px;white-space:nowrap;border-bottom:2px solid transparent;color:rgb(var(--color-text-secondary));font-size:13px;text-decoration:none}
+.explorer-guide .guide-nav a:hover{background:rgb(var(--color-subtle));color:rgb(var(--color-text-primary))}
+.explorer-guide .guide-nav a[aria-current=page]{border-bottom-color:rgb(var(--color-focus));color:rgb(var(--color-focus));font-weight:600}
+.explorer-guide .guide-content{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:24px}
+.explorer-guide article{max-width:100%;font-size:14px;line-height:1.75}
+.explorer-guide h2{font-size:21px;font-weight:600;line-height:1.4}
+.explorer-guide h3{font-size:16px;font-weight:600;margin:24px 0 8px;line-height:1.5}
+.explorer-guide h4{font-size:14px;font-weight:600;margin:14px 0 4px}
+.explorer-guide p{margin:8px 0 12px;max-width:88ch}
+.explorer-guide .guide-intro{color:rgb(var(--color-text-secondary));margin:12px 0 22px}
+.explorer-guide .guide-card{margin:10px 0;border:1px solid rgb(var(--color-border-subtle));border-radius:8px;background:rgb(var(--color-surface));min-width:0}
+.explorer-guide summary{cursor:pointer;padding:12px 16px;overflow-wrap:anywhere}
+.explorer-guide summary:hover{background:rgb(var(--color-subtle))}
+.explorer-guide summary>span:first-child{font-weight:500}
+.explorer-guide summary code{margin-left:10px;font-size:12px;color:rgb(var(--color-text-secondary))}
+.explorer-guide .guide-card-body{padding:4px 16px 16px;border-top:1px solid rgb(var(--color-border-subtle))}
+.explorer-guide .guide-notice{padding:12px 14px;border-left:3px solid rgb(var(--color-focus));background:rgb(var(--color-subtle));margin-block:14px}
+.explorer-guide .guide-targets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.explorer-guide .guide-target{min-width:0;border-top:1px solid rgb(var(--color-border-subtle))}
+.explorer-guide dl{font-size:13px;margin-block:12px}
+.explorer-guide dt{font-weight:500;color:rgb(var(--color-text-secondary));margin-top:10px}
+.explorer-guide dd{margin-top:2px;overflow-wrap:anywhere}
+.explorer-guide code{font-size:.9em;overflow-wrap:anywhere;white-space:normal}
+.explorer-guide .guide-options{border-block:1px solid rgb(var(--color-border-subtle));margin-block:12px}
+.explorer-guide ul{list-style:disc;padding-left:24px}
+.explorer-guide li{margin-block:6px;overflow-wrap:anywhere}
+.explorer-guide .guide-table-wrap{overflow:auto;max-width:100%;margin-block:16px;border:1px solid rgb(var(--color-border-subtle));border-radius:8px;background:rgb(var(--color-surface))}
+.explorer-guide table{border-collapse:collapse;width:100%;font-size:13px;text-align:left}
+.explorer-guide caption{text-align:left;padding:12px 14px;font-weight:600}
+.explorer-guide th,.explorer-guide td{padding:10px 14px;vertical-align:top;border-top:1px solid rgb(var(--color-border-subtle));overflow-wrap:anywhere;min-width:100px}
+.explorer-guide thead{background:rgb(var(--color-subtle));color:rgb(var(--color-text-secondary))}
+.explorer-guide th{font-weight:500}
+.explorer-guide td summary{padding:0}
+.explorer-guide .guide-links{display:flex;flex-wrap:wrap;gap:12px 24px;margin-top:28px}
+.explorer-guide .guide-action,.explorer-guide h4 a{color:rgb(var(--color-focus));text-decoration:underline;text-underline-offset:3px}
+.explorer-guide .guide-source{border-top:1px solid rgb(var(--color-border-subtle));margin-top:32px;padding-top:16px;font-size:12px;color:rgb(var(--color-text-secondary))}
+.explorer-guide .guide-topic-heading{scroll-margin-block:12px}
+.explorer-guide .guide-topic-heading:focus{outline:2px solid rgb(var(--color-focus));outline-offset:4px}
+.explorer-guide [data-guide-target=active]{animation:guide-target-flash 1600ms ease-out}
+@keyframes guide-target-flash{from{background-color:rgb(var(--color-focus)/.14)}to{background-color:transparent}}
+@media(prefers-reduced-motion:reduce){.explorer-guide [data-guide-target=active]{animation:none;background-color:rgb(var(--color-focus)/.08)}}
+.explorer-guide :is(a,button,summary,[tabindex]):focus-visible{outline:2px solid rgb(var(--color-focus));outline-offset:3px}
+.explorer-guide kbd{border:1px solid rgb(var(--color-border-subtle));border-radius:4px;padding:2px 5px;white-space:nowrap;font-size:12px}
+@media(max-width:767px){.explorer-guide .guide-header{padding:18px 16px 12px}.explorer-guide .guide-nav{margin-inline:16px}.explorer-guide .guide-content{padding:20px 16px}.explorer-guide .guide-targets{grid-template-columns:1fr}.explorer-guide summary code{display:block;margin-left:0}.explorer-guide .guide-card-body{padding-inline:12px}}
+/* The native shell has no mobile guide route. Adapt only this explorer subtree. */
+@media(max-width:639px){
+  .app-shell:has(.explorer-guide-layout)>aside{display:none}
+  .app-shell:has(.explorer-guide-layout)>main{padding:0;overflow:hidden}
+  .explorer-guide .guide-mobile-tools{display:flex;align-items:center;gap:12px;flex-shrink:0;padding:12px 16px;border-bottom:1px solid rgb(var(--color-border-subtle))}
+  .explorer-guide .guide-wordmark{font-weight:600;margin-right:auto}
+  .explorer-guide .guide-site-menu{position:relative}
+  .explorer-guide .guide-site-menu>summary{padding:6px;font-size:13px}
+  .explorer-guide .guide-site-menu nav{position:absolute;top:100%;right:0;z-index:50;min-width:200px;max-height:50vh;overflow:auto;padding:6px;background:rgb(var(--color-surface));border:1px solid rgb(var(--color-border-subtle));border-radius:8px;box-shadow:0 8px 24px #0002}
+  .explorer-guide .guide-site-menu nav a{display:block;padding:8px 12px;font-size:13px;border-radius:4px}
+  .explorer-guide .guide-site-menu nav a:hover{background:rgb(var(--color-subtle))}
+}
