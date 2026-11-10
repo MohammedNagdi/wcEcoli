@@ -427,6 +427,8 @@ def rollback_space(api, receipt, base):
     target = ROOT / forward.get("baseline_bundle", "")
     if target.resolve().parent != (ROOT / "interface/.explorer/bundles").resolve():
         raise ReleaseError("Rollback target must be the retained forward baseline")
+    if target.is_symlink() or any(p.is_symlink() for p in target.rglob("*")):
+        raise ReleaseError("Rollback packages cannot contain symlinks")
     baseline = json.loads((target / "evidence/package.json").read_text())
     if baseline["source_sha256"] != forward.get("baseline_package_sha256"):
         raise ReleaseError("Rollback target fingerprint mismatch")
@@ -489,7 +491,8 @@ def main(argv=None):
                     for kind, repo in (("dataset", DATASET), ("space", SPACE)):
                         remote = info(api, kind, repo)
                         repos[kind] = dict(repository=repo, exists=remote is not None,
-                                           private=remote.private if remote else None)
+                                           private=remote.private if remote else None,
+                                           visibility=getattr(remote, "visibility", None) if remote else None)
                     phase = "local Git provenance"
                     git_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
                     dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True).stdout)

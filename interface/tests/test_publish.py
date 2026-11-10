@@ -505,3 +505,11 @@ def test_rollback_resume_does_not_create_another_commit(update_release,monkeypat
     monkeypatch.setattr(publish,'remote_inventory',lambda *a:baseline['space_inventory'])
     publish.rollback_space(api,receipt,base)
     assert calls==[]
+
+
+def test_update_rejects_hardware_drift(update_release,monkeypatch):
+    receipt,base,baseline,api,calls=update_release
+    api.get_space_runtime=lambda _:SimpleNamespace(hardware='cpu-upgrade')
+    with pytest.raises(publish.ReleaseError,match='hardware'):
+        publish.update_space(api,receipt,base)
+    assert calls==[]
