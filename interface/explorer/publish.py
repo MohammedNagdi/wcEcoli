@@ -385,7 +385,7 @@ def _update_space(api, receipt, base, plan, *, rollback=False):
     if api.get_space_runtime(SPACE).hardware != "cpu-basic":
         raise ReleaseError("Existing Space hardware differs from CPU Basic")
     with tempfile.TemporaryDirectory(prefix="update-check-", dir=STATE) as cache:
-        actual = remote_inventory(api, "space", SPACE, observed.sha, after, Path(cache))
+        actual = remote_inventory(api, "space", SPACE, observed.sha, {**before, **after}, Path(cache))
     if actual != after:
         if actual != before or observed.sha != plan.get("baseline_revision"):
             raise ReleaseError("Space changed since update approval; refusing overwrite")

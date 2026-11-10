@@ -472,7 +472,13 @@ def test_rollback_reverses_only_reviewed_additions_and_replacements(update_relea
     prepare_rollback(receipt, base, baseline)
     monkeypatch.setattr(publish, 'info', lambda api, kind, repo: SimpleNamespace(private=True, visibility='protected', sha='f'*40 if kind=='dataset' else 'c'*40))
     inventories=iter([receipt['space_inventory'],baseline['space_inventory']])
-    monkeypatch.setattr(publish,'remote_inventory',lambda *a:next(inventories))
+    def inspect_inventory(api,kind,repo,revision,expected,cache):
+        actual=next(inventories)
+        # The pre-rollback inventory must permit the reviewed additions that
+        # this transaction will delete; post-commit checks remain exact.
+        assert not (set(actual)-set(expected))
+        return actual
+    monkeypatch.setattr(publish,'remote_inventory',inspect_inventory)
     assert publish.rollback_space(api,receipt,base)==dict(ready=True)
     assert calls[0]['parent_commit']=='c'*40
     assert sorted(o.path_in_repo for o in calls[0]['operations'])==['README.md','added-by-this-release.txt']
