@@ -29,6 +29,9 @@
       ],
       "@deployment/persistence": [
         "src/deployment/persistence-local.ts"
+      ],
+      "@deployment/assistant": [
+        "src/deployment/assistant-local.tsx"
       ]
     }
   },

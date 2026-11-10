@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import { getDataSummary, getFeatures, getFeaturesCSVUrl, trainModel } from '../../api/client'
 import { HelpTip } from '../common/HelpTip'
 import { makeAssistantContextKey, truncateText } from '../../utils/assistantContext'

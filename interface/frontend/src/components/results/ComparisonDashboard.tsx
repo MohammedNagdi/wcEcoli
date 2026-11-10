@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import { compareExperiments, compareBatch, getExperiments, getBatches, createExperiment } from '../../api/client'
 import { makeAssistantContextKey } from '../../utils/assistantContext'
 import type { ComparisonResponse, ComparisonExperiment, ComparisonDelta, Experiment, BatchSummary, WildtypeSuggestion } from '../../types'

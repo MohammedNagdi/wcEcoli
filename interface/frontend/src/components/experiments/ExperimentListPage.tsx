@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import { getExperiments, deleteExperiment, getExperiment } from '../../api/client'
 import { variantLabel, statusLabel } from '../../utils/labels'
 import { ExperimentDetailPanel } from './ExperimentDetailPanel'

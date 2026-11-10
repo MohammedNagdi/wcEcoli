@@ -2,7 +2,7 @@ import {PublishedControls} from '../../explorer/PublishedControls'
 import { IS_EXPLORER } from '../../explorer/mode'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import { makeAssistantContextKey } from '../../utils/assistantContext'
 import { Line } from 'react-chartjs-2'
 import {

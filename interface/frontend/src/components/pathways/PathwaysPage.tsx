@@ -5,7 +5,7 @@ import { getAAPathways, getDesignOverview, getEssentiality } from '../../api/cli
 import type { AAPathway, DesignOverview, EssentialityStats } from '../../types'
 import { AAPathwayDiagram } from './AAPathwayDiagram'
 import { EssentialityHeatmap } from './EssentialityHeatmap'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import { ASSISTANT_PATHWAY_SAMPLE_LIMIT, makeAssistantContextKey, summarizeAAPathway, truncateText } from '../../utils/assistantContext'
 
 type ViewMode = 'heatmap' | 'pathway'

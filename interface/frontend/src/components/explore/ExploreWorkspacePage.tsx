@@ -10,7 +10,7 @@ import { CategoryBadge, DirectionBadge } from '../common/Badge'
 import { getAAPathways } from '../../api/client'
 import { useGeneDetail } from '../../hooks/useGenes'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import {
   ASSISTANT_PATHWAY_SAMPLE_LIMIT,
   makeAssistantContextKey,

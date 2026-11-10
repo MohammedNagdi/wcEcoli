@@ -1,7 +1,7 @@
 import {CatalogChecks} from '../../explorer/CatalogChecks'
 import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useNavigate, useSearchParams, Link, useLocation } from 'react-router-dom'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import {
   getVariants, getVariantDetail, getConditions, getMediaRecipes,
   createExperiment, searchGenes, getGene, getExperiment,

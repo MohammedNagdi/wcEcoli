@@ -11,7 +11,7 @@ import { CategoryBadge } from '../common/Badge'
 import { GeneDetailPanel } from './GeneDetailPanel'
 import { categoryLabel } from '../../utils/labels'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import {
   ASSISTANT_GENE_SAMPLE_LIMIT,
   makeAssistantContextKey,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import { useRegisterAssistantContext } from '@deployment/assistant'
 import { useMediaQuery } from '../workspace/useMediaQuery'
 import { categoryLabel } from '../../utils/labels'
 import { ASSISTANT_GENE_SAMPLE_LIMIT, summarizeKOSummary, truncateText } from '../../utils/assistantContext'

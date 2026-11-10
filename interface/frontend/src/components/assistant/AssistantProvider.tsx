@@ -22,7 +22,6 @@ import {
   dismissAssistantToolCall,
 } from '../../api/client'
 import type { AssistantMemory } from '../../api/client'
-import {IS_EXPLORER} from '../../explorer/mode'
 import type {
   AssistantConversation,
   AssistantContext,
@@ -41,12 +40,8 @@ export interface ToolResultEntry {
   result: Record<string, unknown>
 }
 
-export interface PageAssistantRegistration {
-  context: Partial<AssistantContext>
-  suggestedPrompt?: string
-  enabled?: boolean
-  contextKey?: string
-}
+import type {PageAssistantRegistration} from '../../deployment/assistant'
+export type {PageAssistantRegistration} from '../../deployment/assistant'
 
 function assistantRegistrationFallbackKey(registration: PageAssistantRegistration): string {
   const pageState = registration.context.page_state && typeof registration.context.page_state === 'object'
@@ -196,14 +191,9 @@ export interface AssistantContextValue {
 }
 
 const AssistantCtx = createContext<AssistantContextValue | null>(null)
-// Explorer pages reuse context-registration hooks but never mount the provider.
-const disabledAssistant = Object.freeze({isOpen:false,status:null,context:{},providerConfigs:[],providerModelOptions:[],
-  runtimeReady:false,providerConfigured:false,selectionAvailable:false,registerContext:()=>{},clearContext:()=>{},
-  openAssistant:()=>{},closeAssistant:()=>{},registerLeaveGuard:()=>{}}) as unknown as AssistantContextValue
 
 export function useAssistant(): AssistantContextValue {
   const value = useContext(AssistantCtx)
-  if(IS_EXPLORER) return disabledAssistant
   if (!value) throw new Error('useAssistant must be used within <AssistantProvider>')
   return value
 }
