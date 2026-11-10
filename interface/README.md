@@ -586,3 +586,75 @@ approved completed update using its retained baseline; it can delete only files
 introduced by that release. Both commands require the prepared package-bound
 approval records and secure deployment credentials. Do not manually edit those
 records or use rollback against an unrelated remote revision.
+
+## Reproducible explorer releases
+
+Explorer and publication commands now run in pinned Linux AMD64 Docker tooling.
+The host needs Git, Bash and Docker; release packaging needs no host Python,
+virtual environment, `node_modules`, pilot data or Hugging Face credentials.
+Commit maintained release inputs first: the launcher builds and executes their
+Git snapshot, never an uncommitted working-tree copy.
+
+```bash
+./platform.sh explorer bundle --output-dir /path/to/packages --state-dir /path/to/build-state
+```
+
+The returned `explorer-package-v2` artifact contains `space/` and a deterministic
+`evidence/package.json`, with the committed source revision, tooling checksums,
+application inventory and pinned release descriptor. It contains no Dataset.
+Reproducibility means identical files/manifests for identical inputs; Docker image
+IDs and build attestations need not be identical. Existing v1 bundles remain
+readable when explicitly supplied for legacy operations.
+
+Scientific validation is separate. Configure a private Dataset read credential
+as `HF_TOKEN` or `HF_DATASET_READ_TOKEN` in the invoking shell, then run:
+
+```bash
+./platform.sh explorer fetch-data --cache-dir /path/to/data-cache
+./platform.sh explorer verify --bundle /path/to/packages/PACKAGE_ID --release /path/to/data-cache/releases/DATA_ID
+./platform.sh explorer up --bundle /path/to/packages/PACKAGE_ID --release /path/to/data-cache/releases/DATA_ID -d --build
+```
+
+Use the exact release path returned by `fetch-data`. The descriptor fixes the
+Dataset commit and manifest checksum; mutable revisions and synthetic substitutes
+are not accepted. A complete verified cache can be reused without credentials.
+A missing/corrupt cache fails explicitly. Preview startup never generates data or
+implicitly downloads it. Application data is mounted read-only.
+
+For a fresh publication environment, configure read-only `HF_VERIFY_TOKEN` access
+to the Space source and Dataset metadata. No previous `.publication` receipts or
+local rollback bundle are required:
+
+```bash
+./platform.sh publish prepare-update --bundle /path/to/packages/PACKAGE_ID --state-dir /path/to/release-state
+./platform.sh publish check --bundle /path/to/packages/PACKAGE_ID --state-dir /path/to/release-state
+```
+
+Preparation reads the current Protected Space, CPU Basic hardware, pinned Dataset
+and approved runtime variables. It downloads the exact application baseline and
+produces forward/inverse operation lists. It does not approve or publish anything.
+If the application inventory is identical, it reports `no_update_required` and no
+new hosted revision or write credential is necessary.
+
+A changed release requires explicit authorization and real build/startup evidence:
+
+```bash
+./platform.sh publish approve --bundle /path/to/packages/PACKAGE_ID --state-dir /path/to/release-state --authorization /path/to/authorization.json --evidence /path/to/verification.json
+./platform.sh publish update-space --bundle /path/to/packages/PACKAGE_ID --state-dir /path/to/release-state
+```
+
+The authorization must record the user's confirmation, scope, evidence reference
+and exact `plan_sha256`. Verification must bind `source_sha256`, manifest checksum,
+actual build/startup success and its evidence reference. Missing or stale approval
+blocks publication. Do not invent successful verification or authorization.
+`HF_PUBLISH_TOKEN` is required only for an approved mutation and is never installed
+as a runtime secret. Runtime secrets, hardware, visibility and Dataset settings
+are preserved. `rollback-space` uses the same explicit bundle/state arguments and
+may reverse only this release. Interrupted commit responses resume by verifying
+the exact intended inventory; unrelated remote changes fail closed.
+
+State, output and cache paths may be external to the checkout. Generated default
+locations remain Git-ignored. Token values are passed only through explicitly
+selected runtime environment variables, never build arguments or artifacts.
+Initial/Dataset publication requires an explicit v1 package; an application-only
+artifact can never be treated as a Dataset upload.
