@@ -27,12 +27,7 @@ MODE="${1:-}"
 case "$MODE" in
     publish)
         shift
-        PYTHON="$SCRIPT_DIR/.explorer/venv/bin/python"
-        if [[ ! -x "$PYTHON" ]]; then
-            echo "Publication requires the isolated HF-07 Python environment; see the HF-08 guide." >&2
-            exit 2
-        fi
-        exec "$PYTHON" "$SCRIPT_DIR/explorer/publish.py" "$@"
+        exec "$SCRIPT_DIR/explorer/release.sh" publish "$@"
         ;;
     -h|--help)
         usage
@@ -40,7 +35,7 @@ case "$MODE" in
         ;;
     explorer)
         shift
-        exec python3 "$SCRIPT_DIR/explorer/host.py" "$@"
+        exec "$SCRIPT_DIR/explorer/release.sh" explorer "$@"
         ;;
     pilot)
         shift

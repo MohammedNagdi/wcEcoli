@@ -50,7 +50,7 @@ def inventory(directory):
             for p in sorted(directory.rglob("*")) if p.is_file()}
 
 
-def notices():
+def notices(dependency_root=None):
     """Preserve installed, locked frontend runtime package license texts."""
     lock = json.loads((FRONTEND / "package-lock.json").read_text())
     parts = ["Third-party frontend dependency notices\n\n"
@@ -59,7 +59,7 @@ def notices():
     for name, info in sorted(lock["packages"].items()):
         if not name or info.get("dev"):
             continue
-        directory = FRONTEND / name
+        directory = (dependency_root or FRONTEND) / name
         package = directory / "package.json"
         if not package.exists():
             raise ValueError("Run npm ci before packaging; missing runtime dependency " + name)
@@ -179,7 +179,7 @@ def bundle():
     return receipt
 
 
-def compose_config(receipt, env):
+def compose_config(receipt, env, release=None):
     mode = env.get("EXPLORER_DATA_MODE", "local")
     if mode not in {"local", "hub"}:
         raise ValueError("EXPLORER_DATA_MODE must be local or hub")
@@ -195,7 +195,7 @@ def compose_config(receipt, env):
             EXPLORER_DATASET_REPO=env.get("EXPLORER_DATASET_REPO", ""),
             EXPLORER_DATASET_REVISION=env.get("EXPLORER_DATASET_REVISION", ""),
             EXPLORER_DATASET_DIR="release", HF_TOKEN="${HF_TOKEN:-}"),
-        volumes=[dict(type="bind", source=str(base / "dataset/release"), target="/published", read_only=True),
+        volumes=[dict(type="bind", source=str(release if release is not None else base / "dataset/release"), target="/published", read_only=True),
                  dict(type="volume", source="cache", target="/data")],
     )), volumes=dict(cache=dict(name=PROJECT + "_cache")))
 

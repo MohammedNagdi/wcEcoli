@@ -1,0 +1,16 @@
+{
+  "schema_version": "explorer-release-v1",
+  "account": "Safrot",
+  "space": {
+    "repository": "Safrot/wcecoli-explorer",
+    "visibility": "protected",
+    "hardware": "cpu-basic"
+  },
+  "dataset": {
+    "repository": "Safrot/wcecoli-demo-v1",
+    "revision": "a4c3032c37f9bc08a002ed529b1b4f9f84b7eda6",
+    "directory": "release",
+    "manifest_sha256": "5ec44906b5ef88152261a77676959e624fa7cb4ba65dc3bcd517799373228a18"
+  },
+  "platform": "linux/amd64"
+}
