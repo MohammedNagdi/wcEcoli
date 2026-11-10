@@ -22,6 +22,7 @@ import {
   dismissAssistantToolCall,
 } from '../../api/client'
 import type { AssistantMemory } from '../../api/client'
+import {IS_EXPLORER} from '../../explorer/mode'
 import type {
   AssistantConversation,
   AssistantContext,
@@ -195,9 +196,14 @@ export interface AssistantContextValue {
 }
 
 const AssistantCtx = createContext<AssistantContextValue | null>(null)
+// Explorer pages reuse context-registration hooks but never mount the provider.
+const disabledAssistant = Object.freeze({isOpen:false,status:null,context:{},providerConfigs:[],providerModelOptions:[],
+  runtimeReady:false,providerConfigured:false,selectionAvailable:false,registerContext:()=>{},clearContext:()=>{},
+  openAssistant:()=>{},closeAssistant:()=>{},registerLeaveGuard:()=>{}}) as unknown as AssistantContextValue
 
 export function useAssistant(): AssistantContextValue {
   const value = useContext(AssistantCtx)
+  if(IS_EXPLORER) return disabledAssistant
   if (!value) throw new Error('useAssistant must be used within <AssistantProvider>')
   return value
 }

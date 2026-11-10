@@ -1,8 +1,14 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
-export default defineConfig({
+export default defineConfig(({mode}) => {
+  const env = {...loadEnv(mode, process.cwd(), ''), ...process.env}
+  const profile = env.VITE_DEPLOYMENT_MODE || 'local'
+  if (!['local', 'explorer'].includes(profile)) throw new Error('Unknown deployment profile')
+  if (profile === 'explorer' && env.VITE_PILOT_PREVIEW === '1') throw new Error('Conflicting explorer and pilot profiles')
+  return {
+  publicDir: profile === 'explorer' ? 'public-explorer' : 'public',
   plugins: [react()],
   resolve: {
     alias: {
@@ -14,9 +20,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL || 'http://localhost:8000',
+        target: env.VITE_API_URL || 'http://localhost:8000',
         changeOrigin: true,
       },
     },
   },
-})
+}})

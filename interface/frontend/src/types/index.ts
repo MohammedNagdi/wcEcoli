@@ -74,7 +74,7 @@ export interface Timeline {
 }
 
 export interface MediaRecipe {
-  id: number
+  id: number | string
   media_id: string          // key used in timeline event strings, e.g. "minimal_acetate"
   base_media: string        // base stock, e.g. "MIX0-57"
   added_media: string       // supplemental stock, e.g. "5X_supplement_EZ"
@@ -91,7 +91,7 @@ export interface UserTimeline {
 export type BuilderDraftSection = 'media' | 'mediaRecipe' | 'condition' | 'tfCondition' | 'timeline'
 
 export interface BuilderDraft {
-  id: number
+  id: number | string
   section: BuilderDraftSection
   name: string
   payload: Record<string, unknown>
@@ -118,7 +118,7 @@ export interface BuilderPublishPreviewChange {
 
 export interface BuilderPublishPreview {
   section: BuilderDraftSection
-  draft_id: number
+  draft_id: number | string
   draft_name: string
   changes: BuilderPublishPreviewChange[]
   warnings: string[]

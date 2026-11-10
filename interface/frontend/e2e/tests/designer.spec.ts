@@ -20,6 +20,15 @@ async function setup(page: Page) {
   await page.route(/\/api\/genes\/[^/?]+$/, r => r.fulfill({ json: genes.find(g => g.symbol === r.request().url().split('/').pop()) || genes[0] }))
 }
 
+test('local Documentation destination stays unchanged after selecting a type',async({page})=>{
+  await setup(page)
+  await page.goto('/experiments/new?variant=wildtype')
+  const documentation=page.getByRole('link',{name:'Documentation',exact:true})
+  await expect(documentation).toHaveAttribute('href','/guide')
+  await page.getByLabel('Experiment type',{exact:true}).selectOption('gene_knockout')
+  await expect(documentation).toHaveAttribute('href','/guide')
+})
+
 test('single gene suggestions support keyboard, Escape, focus, and unchanged save payload', async ({ page }) => {
   await setup(page)
   let body: any
@@ -72,9 +81,11 @@ for (const variant of variants) {
   test(`section order and existing flow: ${variant}`, async ({ page }) => {
     await setup(page); await page.goto(`/experiments/new?variant=${variant}`)
     await expect(page.getByLabel('Experiment type', { exact: true })).toHaveValue(variant)
-    await expect.poll(() => page.locator('.designer-layout > div > section > h2, .designer-layout > div > section > div > h2').allTextContents().then(values => values.map(value => value.replace(/\?/g, '').trim()))).toEqual([
+    await expect.poll(() => page.locator('.designer-layout > div > section > h2, .designer-layout > div > section > div > h2').allTextContents().then(values => values.map(value => value.replace(/\?/g, '').replace(/^\s*\d+\s*/, '').trim()))).toEqual([
       'Experiment type', ...(variant === 'gene_knockout' ? ['Target gene'] : variant === 'multi_gene_knockout' ? ['Target genes'] : variant === 'wildtype' || variant === 'timelines' ? [] : [variant === 'tf_activity' ? 'TF state' : 'Variant parameter']), 'Simulation parameters', 'Media protocol', 'Experiment details',
     ])
+    const badges = page.locator('.designer-layout > div:first-child .designer-step-badge')
+    await expect(badges).toHaveText(Array.from({ length: variant === 'wildtype' || variant === 'timelines' ? 4 : 5 }, (_, i) => String(i + 1)))
     await expect(page.getByRole('heading', { name: 'Run summary' })).toBeVisible()
     if (variant === 'tf_activity') await expect(page.getByText('Why media is locked', { exact: true })).toBeVisible()
   })

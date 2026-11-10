@@ -1,3 +1,4 @@
+import {IS_EXPLORER} from '../../explorer/mode'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Line } from 'react-chartjs-2'
 import {
@@ -299,7 +300,7 @@ function MoleculeChart({ datasets, unit }: { datasets: any[]; unit: string }) {
           scales: {
             x: {
               type: 'linear' as const,
-              title: { display: true, text: 'Time (min)', font: { size: 13 }, color: chartTheme.muted },
+              title: { display: true, text: IS_EXPLORER?'Elapsed lineage time (min)':'Time (min)', font: { size: 13 }, color: chartTheme.muted },
               grid: { color: chartTheme.grid },
               ticks: { font: { size: 13 }, color: chartTheme.muted },
             },
@@ -658,6 +659,7 @@ export function MoleculeExplorer({
   const [selected, setSelected] = useState<SelectedMolecule[]>([])
   const [timeseries, setTimeseries] = useState<MoleculeTimeseries[]>([])
   const [loadingTs, setLoadingTs] = useState(false)
+  const [tsError,setTsError]=useState('')
   const [typesLoading, setTypesLoading] = useState(true)
   const [explorerOpen, setExplorerOpen] = useState(false)
   const [browseType, setBrowseType] = useState<string | null>(null)
@@ -752,7 +754,8 @@ export function MoleculeExplorer({
       setTimeseries([])
       return
     }
-    setLoadingTs(true)
+    setLoadingTs(true);setTsError('');setTimeseries([])
+    let active=true
     const grouped = selected.reduce<Record<string, string[]>>((acc, item) => {
       if (!acc[item.molecule_type]) acc[item.molecule_type] = []
       acc[item.molecule_type].push(item.id)
@@ -763,12 +766,13 @@ export function MoleculeExplorer({
       Object.entries(grouped).map(([moleculeType, ids]) =>
         getMoleculeTimeseries(jobId, moleculeType, ids)
           .then((res) => res.molecules)
-          .catch(() => [])
+          .catch(error => {if(active)setTsError(error.message||'Selected output is unavailable');return []})
       )
     )
-      .then((responses) => setTimeseries(responses.flat()))
-      .catch(() => setTimeseries([]))
-      .finally(() => setLoadingTs(false))
+      .then((responses) => {if(active)setTimeseries(responses.flat())})
+      .catch(error => {if(active){setTsError(error.message);setTimeseries([])}})
+      .finally(() => {if(active)setLoadingTs(false)})
+    return()=>{active=false}
   }, [jobId, selected])
 
   const toggleSelect = (item: SelectedMolecule) => {
@@ -847,7 +851,7 @@ export function MoleculeExplorer({
         </div>
 
         {explorerOpen && (
-          <div id="result-molecule-body" className="p-4">
+          <div id="result-molecule-body" className="p-4">{tsError&&<p role="alert" className="text-red-700 p-2">{tsError}</p>}
             <div className="mb-3 rounded-lg border border-gray-200 bg-slate-50 px-3 py-3">
               <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -883,6 +887,8 @@ export function MoleculeExplorer({
                   key={t.molecule_type}
                   type="button"
                   onClick={() => {
+                    setBrowseIds([])
+                    setBrowseLoading(true)
                     setBrowseType(t.molecule_type)
                     setBrowseSearch('')
                   }}
@@ -961,6 +967,7 @@ export function MoleculeExplorer({
                               <button
                                 key={key}
                                 type="button"
+                                aria-pressed={isSelected}
                                 onClick={() => canSelect && toggleSelect(item)}
                                 disabled={!canSelect}
                                 className={'rounded-full border px-2 py-1 font-mono text-[11px] transition-colors ' + (

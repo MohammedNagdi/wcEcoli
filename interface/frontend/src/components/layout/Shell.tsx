@@ -4,6 +4,7 @@ import { CommandSearch } from '../common/CommandSearch'
 import { useAssistant } from '../assistant/AssistantProvider'
 import { WorkspaceWidthContext } from '../workspace/useMediaQuery'
 import { AssistantDock } from '../assistant/AssistantDock'
+import {IS_EXPLORER} from '../../explorer/mode'
 import { ThemeToggle } from '../theme/ThemeToggle'
 import { useMediaQuery } from '../workspace/useMediaQuery'
 import '../../styles/workspace.css'
@@ -239,6 +240,7 @@ export function Shell({ children }: { children: ReactNode }) {
       )}
       <aside
         ref={sidebarRef}
+          onClickCapture={event=>{if(mobileWorkspace&&(event.target as HTMLElement).closest('a'))setDrawerOpen(false)}}
         id={workspaceRoute ? 'workspace-navigation' : undefined}
         role={mobileWorkspace && drawerOpen ? 'dialog' : undefined}
         aria-modal={mobileWorkspace && drawerOpen ? true : undefined}
@@ -247,7 +249,7 @@ export function Shell({ children }: { children: ReactNode }) {
             ? location.pathname === '/genome'
               ? 'Genome Map navigation'
               : location.pathname === '/experiments' ? 'Experiments navigation' : 'Workspace navigation'
-            : undefined
+            : 'Application navigation'
         }
         aria-hidden={mobileWorkspace && !drawerOpen ? true : undefined}
         {...(modalAssistant || (mobileWorkspace && !drawerOpen) ? { inert: '' } : {})}
@@ -294,7 +296,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
 
         <nav aria-label="Platform navigation" className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS.filter(group=>!IS_EXPLORER||group.id!=='assistant').map(group=>IS_EXPLORER?{...group,label:group.id==='simulate'?'Design':group.label,items:group.items.filter(item=>item.path!=='/ml')}:group).map((group) => (
             <div key={group.id} className="mb-4">
               {!labelsHidden && group.label && (
                 <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
@@ -349,13 +351,13 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <main
         ref={mainRef}
-        className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4"
+        className={`min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 ${IS_EXPLORER && ['/results', '/experiments'].includes(location.pathname) ? 'explorer-published-scroll' : ''}`}
         {...(modalAssistant || (mobileWorkspace && drawerOpen) ? { inert: '' } : {})}
       >
         <WorkspaceWidthContext.Provider value={workspaceWidth}>{children}</WorkspaceWidthContext.Provider>
       </main>
       <CommandSearch open={commandSearchOpen} onClose={() => setCommandSearchOpen(false)} />
-      <AssistantDock besideWorkspace={besideWorkspace} />
+      {!IS_EXPLORER && <AssistantDock besideWorkspace={besideWorkspace} />}
     </div>
   )
 }

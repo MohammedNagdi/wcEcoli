@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef } from 'react'
+import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 type ConfirmDialogProps = {
   open: boolean
+  children?: ReactNode
   title: string
   message: string
   confirmLabel?: string
@@ -15,6 +17,7 @@ type ConfirmDialogProps = {
 
 export function ConfirmDialog({
   open,
+  children,
   title,
   message,
   confirmLabel = 'Confirm',
@@ -64,6 +67,7 @@ export function ConfirmDialog({
       <div ref={panel} role="alertdialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} tabIndex={-1} className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-5 shadow-xl">
         <h2 id={`${id}-title`} className="text-base font-semibold text-gray-900">{title}</h2>
         <p id={`${id}-description`} className="mt-2 text-sm leading-6 text-gray-500">{message}</p>
+        {children}
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"

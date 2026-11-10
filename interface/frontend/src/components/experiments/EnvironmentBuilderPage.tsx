@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
+import {IS_EXPLORER} from '../../explorer/mode'
+import {downloadDrafts,getDraft,makeDraft,referenceLabel} from '../../explorer/drafts'
 import { makeAssistantContextKey, summarizeText } from '../../utils/assistantContext'
 import {
   createBuilderDraft,
@@ -373,7 +375,7 @@ function compactRows<T>(rows: T[], predicate: (row: T) => boolean) {
 }
 
 function toComposerMediaRecipes(catalog: ConditionCatalog | null, draftRecipe: MediaRecipeRecord | null): MediaRecipe[] {
-  const baseRecipes = (catalog?.media_recipes || []).map((recipe, index) => ({
+  const baseRecipes:MediaRecipe[] = (catalog?.media_recipes || []).map((recipe, index) => ({
     id: index + 1,
     media_id: recipe.media_id,
     base_media: recipe.base_media,
@@ -485,7 +487,7 @@ function SectionSaveActions({
           disabled={publishDisabled || publishing || saving}
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {publishing ? 'Reviewing...' : 'Publish'}
+          {publishing ? 'Reviewing...' : IS_EXPLORER?'Use in my drafts':'Publish'}
         </button>
       )}
       <button
@@ -494,7 +496,7 @@ function SectionSaveActions({
         disabled={saving || publishing}
         className="builder-primary rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {saving ? 'Saving...' : 'Save'}
+        {saving ? 'Saving...' : IS_EXPLORER?'Save in this browser':'Save'}
       </button>
     </div>
   )
@@ -909,7 +911,10 @@ export function EnvironmentBuilderPage() {
       .then((collection) => {
         if (!alive) return
         const latestDrafts = latestDraftsBySection(collection)
+        const requested=IS_EXPLORER?new URLSearchParams(location.search).get('draft'):null
+        if(requested)for(const section of MAIN_SECTION_KEYS){const selected=collection[section].find(d=>String(d.id)===requested);if(selected)latestDrafts[section]=selected}
         hydrateDraftState(latestDrafts)
+        if(IS_EXPLORER)for(const section of MAIN_SECTION_KEYS){const d=latestDrafts[section];if(d?.status==='applied')selectApplied(section,d.published_name)}
         setBuilderDrafts(latestDrafts)
         setSavedSnapshots((current) => {
           const next = { ...current }
@@ -1446,6 +1451,41 @@ export function EnvironmentBuilderPage() {
     timelineMode,
   ])
 
+  const pendingBrowserBaseline=useRef(new Set<SaveSectionKey>())
+  useEffect(()=>{
+    if(!pendingBrowserBaseline.current.size)return
+    const keys=[...pendingBrowserBaseline.current];pendingBrowserBaseline.current.clear()
+    setSavedSnapshots(current=>({...current,...Object.fromEntries(keys.map(key=>[key,sectionSnapshots[key]]))}))
+  },[sectionSnapshots])
+  const hydratedTfOverlay=useRef('')
+  useEffect(()=>{
+    const draft=builderDrafts.tfCondition
+    if(!IS_EXPLORER||!catalog||draft?.status!=='applied'||hydratedTfOverlay.current===String(draft.id))return
+    const rows=(draft.payload.draft||[]) as TfConditionRecord[]
+    const keys=catalog.tf_conditions.filter(row=>rows.some(saved=>tfRuleKey(row)===tfRuleKey(saved))).map(tfRuleKey)
+    if(!keys.length)return
+    hydratedTfOverlay.current=String(draft.id);pendingBrowserBaseline.current.add('tfCondition')
+    setTfConditionMode('existing');setSelectedExistingTfKeys(keys)
+  },[catalog,builderDrafts.tfCondition])
+  function selectApplied(section:SaveSectionKey,ref:string,nextCatalog=catalog){
+    pendingBrowserBaseline.current.add(section)
+    if(section==='media'){setMediaMode('existing');setSelectedMediaStockName(ref)}
+    if(section==='mediaRecipe'){setMediaRecipeMode('existing');setSelectedMediaRecipeId(ref)}
+    if(section==='condition'){setConditionMode('existing');setSelectedConditionName(ref)}
+    if(section==='tfCondition'){setTfConditionMode('existing');setSelectedExistingTfKeys((nextCatalog?.tf_conditions||[]).filter(r=>r.active_nutrients===currentMediaRecipeId||r.inactive_nutrients===currentMediaRecipeId).map(tfRuleKey))}
+    if(section==='timeline'){setTimelineMode('existing');setSelectedTimelineId(ref)}
+  }
+  async function downloadEnvironment(){
+    try{
+      const records=await Promise.all(MAIN_SECTION_KEYS.map(async section=>{
+        const saved=builderDrafts[section]
+        if(saved?.status==='applied'&&!isDirty(section))return getDraft(String(saved.id))
+        return makeDraft(section,getSectionDraftName(section,saved)||SECTION_LABELS[section],JSON.parse(sectionSnapshots[section]),saved?String(saved.id):undefined)
+      }))
+      await downloadDrafts(records)
+    }catch(e:any){setActionMessage({type:'error',text:e.message})}
+  }
+
   function hydrateDraftState(drafts: Partial<Record<SaveSectionKey, BuilderDraft>>) {
     const mediaDraft = drafts.media?.payload
     if (mediaDraft) {
@@ -1583,7 +1623,7 @@ export function EnvironmentBuilderPage() {
     const existingDraft = builderDrafts[section] || null
     const payload = JSON.parse(sectionSnapshots[section]) as Record<string, unknown>
     const name = getSectionDraftName(section, existingDraft)
-    const nextDraft = existingDraft && existingDraft.status !== 'published'
+    const nextDraft = existingDraft && existingDraft.status !== 'published' && (!IS_EXPLORER||existingDraft.status!=='applied')
       ? await updateBuilderDraft(section, existingDraft.id, name, payload)
       : await createBuilderDraft(section, name, payload)
 
@@ -1596,7 +1636,7 @@ export function EnvironmentBuilderPage() {
       [section]: sectionSnapshots[section],
     }))
     if (!options?.quiet) {
-      setActionMessage({ type: 'success', text: `Saved ${SECTION_LABELS[section]} draft to backend storage.` })
+      setActionMessage({ type: 'success', text: `Saved ${SECTION_LABELS[section]} draft ${IS_EXPLORER?'in this browser':'to backend storage'}.` })
     }
     return nextDraft
   }
@@ -1656,13 +1696,14 @@ export function EnvironmentBuilderPage() {
       const publishedDraft = await publishBuilderDraft(section, pendingPublishDraft.id)
       const nextCatalog = await getConditionCatalog()
       setCatalog(nextCatalog)
+      if(IS_EXPLORER)selectApplied(section,publishedDraft.published_name,nextCatalog)
       setBuilderDrafts((current) => ({
         ...current,
         [section]: publishedDraft,
       }))
       setActionMessage({
         type: 'success',
-        text: `Published ${SECTION_LABELS[section]} as ${publishedDraft.published_name || publishedDraft.name}.`,
+        text: IS_EXPLORER?`Applied ${SECTION_LABELS[section]} to your personal draft workspace. Published references are unchanged.`:`Published ${SECTION_LABELS[section]} as ${publishedDraft.published_name || publishedDraft.name}.`,
       })
       setPreviewSection(null)
       setPublishPreview(null)
@@ -2201,7 +2242,7 @@ export function EnvironmentBuilderPage() {
                 label="Stock medium"
                 tooltip="Medium stock names come from files under condition/media. They are usually uppercase names such as MIX0-57 or MIX0-844."
               />
-              <select
+              <select aria-label="Stock medium"
                 value={selectedMediaStockName}
                 onChange={(event) => setSelectedMediaStockName(event.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2210,7 +2251,7 @@ export function EnvironmentBuilderPage() {
                   const status = mediaStockStatus(stock)
                   return (
                     <option key={stock.name} value={stock.name}>
-                      {stock.name} - {status.role} · {status.detail}
+                      {referenceLabel(stock.name)} - {status.role} · {status.detail}
                     </option>
                   )
                 })}
@@ -2255,7 +2296,7 @@ export function EnvironmentBuilderPage() {
                 label="New medium stock name"
                 tooltip="Use the file stem only, without .tsv. Repo convention here is usually uppercase names such as MY_NEW_MIX."
               />
-              <input
+              <input aria-label="New medium stock name"
                 type="text"
                 value={draftMediaStockName}
                 onChange={(event) => {
@@ -2266,7 +2307,7 @@ export function EnvironmentBuilderPage() {
                 placeholder="MY_NEW_MIX"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
-              <p className="mt-1 text-xs leading-5 text-slate-500">This creates a raw stock file under <span className="font-mono">condition/media</span>. It is not experiment-selectable until a media recipe uses it.</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{IS_EXPLORER?<>This defines a personal browser stock. Apply it, then reference it from a personal media recipe; no files are written to the server.</>:<>This creates a raw stock file under <span className="font-mono">condition/media</span>. It is not experiment-selectable until a media recipe uses it.</>}</p>
             </label>
 
             <div>
@@ -2442,7 +2483,7 @@ export function EnvironmentBuilderPage() {
               >
                 {compatibleMediaRecipes.map((recipe) => (
                   <option key={recipe.media_id} value={recipe.media_id}>
-                    {recipe.media_id} - {mediaRecipeStatus(recipe).join(' · ')}
+                    {referenceLabel(recipe.media_id)} - {mediaRecipeStatus(recipe).join(' · ')}
                   </option>
                 ))}
               </select>
@@ -2493,7 +2534,7 @@ export function EnvironmentBuilderPage() {
                 label="Recipe ID"
                 tooltip="Use lowercase snake_case for named recipe IDs, for example minimal_acetate or my_new_media."
               />
-              <input
+              <input aria-label="Recipe ID"
                 type="text"
                 value={draftMediaRecipe.media_id}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, media_id: event.target.value }))}
@@ -2506,7 +2547,7 @@ export function EnvironmentBuilderPage() {
                 label="Base medium"
                 tooltip="This should match a medium stock file name such as MIX0-57 or MY_NEW_MIX."
               />
-              <select
+              <select aria-label="Base medium"
                 value={draftMediaRecipe.base_media}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, base_media: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2514,21 +2555,21 @@ export function EnvironmentBuilderPage() {
                 {!!stockOptionsByRole.base.length && (
                   <optgroup label="Base stocks">
                     {stockOptionsByRole.base.map(({ name, status }) => (
-                      <option key={name} value={name}>{name} - {status.detail}</option>
+                      <option key={name} value={name}>{referenceLabel(name)} - {status.detail}</option>
                     ))}
                   </optgroup>
                 )}
                 {!!stockOptionsByRole.supplement.length && (
                   <optgroup label="Supplement stocks">
                     {stockOptionsByRole.supplement.map(({ name, status }) => (
-                      <option key={name} value={name}>{name} - {status.detail}</option>
+                      <option key={name} value={name}>{referenceLabel(name)} - {status.detail}</option>
                     ))}
                   </optgroup>
                 )}
                 {!!stockOptionsByRole.other.length && (
                   <optgroup label="Other or draft stocks">
                     {stockOptionsByRole.other.map(({ name, status }) => (
-                      <option key={name} value={name}>{name} - {status.role}</option>
+                      <option key={name} value={name}>{referenceLabel(name)} - {status.role}</option>
                     ))}
                   </optgroup>
                 )}
@@ -2540,7 +2581,7 @@ export function EnvironmentBuilderPage() {
                 label="Base medium volume (L)"
                 tooltip="Relative mixing volume for the base stock. Use 1.0 when this recipe uses only the base stock."
               />
-              <input
+              <input aria-label="Base medium volume (L)"
                 type="text"
                 value={draftMediaRecipe.base_media_volume}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, base_media_volume: event.target.value }))}
@@ -2553,7 +2594,7 @@ export function EnvironmentBuilderPage() {
                 label="Added medium"
                 tooltip="Select an existing stock medium to mix with the base medium at the specified volume ratio, or choose None."
               />
-              <select
+              <select aria-label="Added medium"
                 value={draftMediaRecipe.added_media}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, added_media: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2562,21 +2603,21 @@ export function EnvironmentBuilderPage() {
                 {!!stockOptionsByRole.supplement.length && (
                   <optgroup label="Supplement stocks">
                     {stockOptionsByRole.supplement.map(({ name, status }) => (
-                      <option key={name} value={name}>{name} - {status.detail}</option>
+                      <option key={name} value={name}>{referenceLabel(name)} - {status.detail}</option>
                     ))}
                   </optgroup>
                 )}
                 {!!stockOptionsByRole.base.length && (
                   <optgroup label="Base stocks, valid but uncommon as mix-ins">
                     {stockOptionsByRole.base.map(({ name, status }) => (
-                      <option key={name} value={name}>{name} - {status.detail}</option>
+                      <option key={name} value={name}>{referenceLabel(name)} - {status.detail}</option>
                     ))}
                   </optgroup>
                 )}
                 {!!stockOptionsByRole.other.length && (
                   <optgroup label="Other or draft stocks">
                     {stockOptionsByRole.other.map(({ name, status }) => (
-                      <option key={name} value={name}>{name} - {status.role}</option>
+                      <option key={name} value={name}>{referenceLabel(name)} - {status.role}</option>
                     ))}
                   </optgroup>
                 )}
@@ -2588,7 +2629,7 @@ export function EnvironmentBuilderPage() {
                 label="Added medium volume (L)"
                 tooltip="Relative mixing volume for the added stock. Use 0 when no added stock is selected."
               />
-              <input
+              <input aria-label="Added medium volume (L)"
                 type="text"
                 value={draftMediaRecipe.added_media_volume}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, added_media_volume: event.target.value }))}
@@ -2602,7 +2643,7 @@ export function EnvironmentBuilderPage() {
                 tooltip={'Write ingredients as a JSON-style list of molecule IDs, for example ["GLC"] or ["OXYGEN-MOLECULE"].'}
               />
               <div className="mb-2 grid gap-2 md:grid-cols-[minmax(0,1fr),auto]">
-                <select
+                <select aria-label="Ingredients"
                   value={selectedIngredientId}
                   onChange={(event) => setSelectedIngredientId(event.target.value)}
                   className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2636,7 +2677,7 @@ export function EnvironmentBuilderPage() {
                   ))}
                 </div>
               )}
-              <textarea
+              <textarea aria-label="Ingredients"
                 value={draftMediaRecipe.ingredients}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, ingredients: event.target.value }))}
                 rows={2}
@@ -2671,7 +2712,7 @@ export function EnvironmentBuilderPage() {
                 label="Ingredient weight edits (g)"
                 tooltip="Model-style bracketed list aligned with Ingredients. Use numbers, Infinity, or -Infinity."
               />
-              <textarea
+              <textarea aria-label="Ingredient weight edits (g)"
                 value={draftMediaRecipe.ingredients_weight}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, ingredients_weight: event.target.value }))}
                 rows={2}
@@ -2687,7 +2728,7 @@ export function EnvironmentBuilderPage() {
                 label="Ingredient count edits (mmol)"
                 tooltip="Model-style bracketed list aligned with Ingredients. Use this for mmol additions/removals when weight is not appropriate."
               />
-              <textarea
+              <textarea aria-label="Ingredient count edits (mmol)"
                 value={draftMediaRecipe.ingredients_counts}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, ingredients_counts: event.target.value }))}
                 rows={2}
@@ -2703,7 +2744,7 @@ export function EnvironmentBuilderPage() {
                 label="Ingredient volume edits (L)"
                 tooltip="Model-style bracketed list aligned with Ingredients. Use [] for zero added volume, or one volume value per ingredient."
               />
-              <textarea
+              <textarea aria-label="Ingredient volume edits (L)"
                 value={draftMediaRecipe.ingredients_volume}
                 onChange={(event) => setDraftMediaRecipe((current) => ({ ...current, ingredients_volume: event.target.value }))}
                 rows={2}
@@ -2786,20 +2827,20 @@ export function EnvironmentBuilderPage() {
                 label="Growth condition name"
                 tooltip="Use lowercase snake_case, for example acetate, with_aa, or my_condition."
               />
-              <input
+              <input aria-label="Growth condition name"
                 type="text"
                 value={draftCondition.condition}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, condition: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
-              <p className="mt-1 text-xs leading-5 text-slate-500">This name appears in experiment condition dropdowns after publish.</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{IS_EXPLORER?<>This name becomes available to your browser drafts after Use in my drafts.</>:<>This name appears in experiment condition dropdowns after publish.</>}</p>
             </label>
             <label className="block">
               <FieldLabel
                 label="Nutrients / recipe ID"
                 tooltip="This should match the media recipe ID used by the growth condition, usually the recipe selected above."
               />
-              <select
+              <select aria-label="Nutrients / recipe ID"
                 value={draftCondition.nutrients}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, nutrients: event.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2815,7 +2856,7 @@ export function EnvironmentBuilderPage() {
                 label="Doubling time (min)"
                 tooltip="Measured or literature-supported expected doubling time in minutes. This is catalog metadata, not inferred by the builder."
               />
-              <input
+              <input aria-label="Doubling time (min)"
                 type="text"
                 value={draftCondition.doubling_time}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, doubling_time: event.target.value }))}
@@ -2830,7 +2871,7 @@ export function EnvironmentBuilderPage() {
               />
               {stateIdSuggestions.length > 0 && (
                 <div className="mb-2 grid gap-2 md:grid-cols-[minmax(0,1fr),auto]">
-                  <select
+                  <select aria-label="Genotype perturbations"
                     value={selectedConditionStateId}
                     onChange={(event) => setSelectedConditionStateId(event.target.value)}
                     className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2850,7 +2891,7 @@ export function EnvironmentBuilderPage() {
                   </button>
                 </div>
               )}
-              <textarea
+              <textarea aria-label="Genotype perturbations"
                 value={draftCondition.genotype_perturbations}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, genotype_perturbations: event.target.value }))}
                 rows={2}
@@ -2864,7 +2905,7 @@ export function EnvironmentBuilderPage() {
                 tooltip={'JSON-style list of TF complex IDs that are active relative to basal, for example ["CPLX0-226"]. Use [] when none are specified.'}
               />
               <div className="mb-2 grid gap-2 md:grid-cols-[minmax(0,1fr),auto]">
-                <select
+                <select aria-label="Active TF complexes"
                   value={selectedConditionActiveTfId}
                   onChange={(event) => setSelectedConditionActiveTfId(event.target.value)}
                   className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2897,7 +2938,7 @@ export function EnvironmentBuilderPage() {
                   ))}
                 </div>
               )}
-              <textarea
+              <textarea aria-label="Active TF complexes"
                 value={draftCondition.active_tfs}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, active_tfs: event.target.value }))}
                 rows={3}
@@ -2911,7 +2952,7 @@ export function EnvironmentBuilderPage() {
                 tooltip={'JSON-style list of TF complex IDs that are inactive relative to basal, for example ["CPLX0-7669"]. Use [] when none are specified.'}
               />
               <div className="mb-2 grid gap-2 md:grid-cols-[minmax(0,1fr),auto]">
-                <select
+                <select aria-label="Inactive TF complexes"
                   value={selectedConditionInactiveTfId}
                   onChange={(event) => setSelectedConditionInactiveTfId(event.target.value)}
                   className="min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -2944,7 +2985,7 @@ export function EnvironmentBuilderPage() {
                   ))}
                 </div>
               )}
-              <textarea
+              <textarea aria-label="Inactive TF complexes"
                 value={draftCondition.inactive_tfs}
                 onChange={(event) => setDraftCondition((current) => ({ ...current, inactive_tfs: event.target.value }))}
                 rows={3}
@@ -3050,7 +3091,7 @@ export function EnvironmentBuilderPage() {
                       label="TF gene symbol"
                       tooltip="Short transcription-factor gene symbol, for example crp, fnr, or arcA."
                     />
-                    <select
+                    <select aria-label="TF gene symbol"
                       value={row.tf}
                       onChange={(event) => updateTfDraftRow(row.id, 'tf', event.target.value)}
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -3070,7 +3111,7 @@ export function EnvironmentBuilderPage() {
                       label="Active TF complex"
                       tooltip="Model complex or monomer ID for the active regulatory form."
                     />
-                    <select
+                    <select aria-label="Active TF complex"
                       value={row.active_tf}
                       onChange={(event) => updateTfDraftRow(row.id, 'active_tf', event.target.value)}
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -3090,7 +3131,7 @@ export function EnvironmentBuilderPage() {
                       label="Active nutrient recipe"
                       tooltip="Recipe context where this TF complex is considered active."
                     />
-                    <select
+                    <select aria-label="Active nutrient recipe"
                       value={row.active_nutrients}
                       onChange={(event) => updateTfDraftRow(row.id, 'active_nutrients', event.target.value)}
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -3106,7 +3147,7 @@ export function EnvironmentBuilderPage() {
                       label="Inactive nutrient recipe"
                       tooltip="Contrasting recipe context where this TF complex is considered inactive."
                     />
-                    <select
+                    <select aria-label="Inactive nutrient recipe"
                       value={row.inactive_nutrients}
                       onChange={(event) => updateTfDraftRow(row.id, 'inactive_nutrients', event.target.value)}
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -3123,7 +3164,7 @@ export function EnvironmentBuilderPage() {
                       tooltip={'JSON-style object for genotype constraints required by the active state. Use {} when none apply.'}
                     />
                     {stateIdSuggestions.length > 0 && (
-                      <select
+                      <select aria-label="Active genotype context"
                         defaultValue=""
                         onChange={(event) => {
                           const stateId = event.target.value
@@ -3139,7 +3180,7 @@ export function EnvironmentBuilderPage() {
                         ))}
                       </select>
                     )}
-                    <textarea
+                    <textarea aria-label="Active genotype context"
                       value={row.active_genotype_perturbations}
                       onChange={(event) => updateTfDraftRow(row.id, 'active_genotype_perturbations', event.target.value)}
                       rows={2}
@@ -3154,7 +3195,7 @@ export function EnvironmentBuilderPage() {
                       tooltip={'JSON-style object for genotype constraints required by the inactive state. Use {} when none apply.'}
                     />
                     {stateIdSuggestions.length > 0 && (
-                      <select
+                      <select aria-label="Inactive genotype context"
                         defaultValue=""
                         onChange={(event) => {
                           const stateId = event.target.value
@@ -3170,7 +3211,7 @@ export function EnvironmentBuilderPage() {
                         ))}
                       </select>
                     )}
-                    <textarea
+                    <textarea aria-label="Inactive genotype context"
                       value={row.inactive_genotype_perturbations}
                       onChange={(event) => updateTfDraftRow(row.id, 'inactive_genotype_perturbations', event.target.value)}
                       rows={2}
@@ -3186,7 +3227,7 @@ export function EnvironmentBuilderPage() {
                       label="TF rule class"
                       tooltip="0CS = no sensor chemistry; 1CS = one-component sensor; 2CS = two-component phosphorelay."
                     />
-                    <select
+                    <select aria-label="TF rule class"
                       value={row.tf_type}
                       onChange={(event) => updateTfDraftRow(row.id, 'tf_type', event.target.value)}
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
@@ -3294,7 +3335,7 @@ export function EnvironmentBuilderPage() {
                   label="Protocol ID"
                   tooltip="Protocol IDs usually start with a numeric prefix and then a short snake_case name, for example 000028_add_aa_long."
                 />
-                <input
+                <input aria-label="Protocol ID"
                   type="text"
                   value={draftTimelineName}
                   onChange={(event) => setDraftTimelineName(event.target.value)}
@@ -3306,7 +3347,7 @@ export function EnvironmentBuilderPage() {
                   label="Protocol view range (hr)"
                   tooltip="Controls the editable timeline horizon shown in this composer. The published catalog row stores event times in seconds, but users should set the range in hours."
                 />
-                <input
+                <input aria-label="Protocol view range (hr)"
                   type="number"
                   min={0.25}
                   step={0.25}
@@ -3333,12 +3374,12 @@ export function EnvironmentBuilderPage() {
 
             <TimelineComposer
               restrained
-              key={`${timelineSeedVersion}-${currentMediaRecipeId || 'minimal'}`}
+              key={`${timelineSeedVersion}-${currentMediaRecipeId || 'minimal'}-${IS_EXPLORER?builderDrafts.timeline?.updated_at||'':''}`}
               mediaRecipes={builderMediaRecipes}
               conditions={builderConditions}
               onChange={setDraftTimelineEvents}
               maxSec={timelineDurationSec}
-              initialDefinition={recommendedTimelineStart}
+              initialDefinition={IS_EXPLORER?draftTimelineEvents||recommendedTimelineStart:recommendedTimelineStart}
               showLibrarySave={false}
               entryNounSingular="media protocol"
               entryNounPlural="media protocols"
@@ -3373,7 +3414,7 @@ export function EnvironmentBuilderPage() {
                 </svg>
               </span>
               <div>
-                <p className="builder-header-kicker">Simulate</p>
+                <p className="builder-header-kicker">{IS_EXPLORER?'Design':'Simulate'}</p>
                 <h1 className="text-2xl font-semibold tracking-tight">Conditions Builder</h1>
               </div>
             </div>
@@ -3390,12 +3431,13 @@ export function EnvironmentBuilderPage() {
               <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 10h12m-5-5 5 5-5 5" /></svg>
             </Link>
             <span className="builder-header-badge inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-              drafts saved in backend
+              {IS_EXPLORER?'drafts saved in this browser':'drafts saved in backend'}
             </span>
           </div>
         </div>
       </section>
 
+      {IS_EXPLORER&&<section className="rounded-lg border border-brand-200 bg-brand-50 p-4 text-sm"><p><strong>Personal environment workspace.</strong> Save sections in this browser, then use them only in your drafts. Catalog checks do not establish runtime readiness.</p><button type="button" className="explorer-button mt-3" onClick={()=>void downloadEnvironment()}>Download current environment drafts</button><Link className="ml-4 text-brand-600" to="/experiments?view=drafts">My drafts and JSON import</Link></section>}
       {loadError && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <BuilderNoticeIcon />{loadError}
@@ -3413,7 +3455,7 @@ export function EnvironmentBuilderPage() {
 
       {previewSection && (publishPreview || previewError) && (
         <div className="builder-modal fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-8">
-          <div role="dialog" aria-modal="true" aria-label="Publish review" className="builder-dialog flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          <div role="dialog" aria-modal="true" aria-label={IS_EXPLORER?'Personal overlay review':'Publish review'} className="builder-dialog flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
             <div className="border-b border-slate-100 px-5 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -3421,7 +3463,7 @@ export function EnvironmentBuilderPage() {
                   <h2 className="mt-1 text-lg font-semibold text-slate-950">{SECTION_LABELS[previewSection]}</h2>
                   <p className="mt-1 text-sm text-slate-500">
                     {publishPreview
-                      ? <>Review the reconstruction rows that will be written for draft <span className="font-mono text-slate-700">{publishPreview.draft_name}</span>.</>
+                      ? <>{IS_EXPLORER?'Review your personal overlay for draft':'Review the reconstruction rows that will be written for draft'} <span className="font-mono text-slate-700">{publishPreview.draft_name}</span>.</>
                       : 'Review failed before any reconstruction write was attempted.'}
                   </p>
                 </div>
@@ -3461,7 +3503,7 @@ export function EnvironmentBuilderPage() {
                       <div>
                         <p className="font-mono text-sm font-semibold text-slate-900">{change.file}</p>
                         <p className="mt-0.5 text-xs text-slate-400">
-                          {change.rows.length} row{change.rows.length === 1 ? '' : 's'} staged for publish
+                          {change.rows.length} row{change.rows.length === 1 ? '' : 's'} {IS_EXPLORER?'for personal review':'staged for publish'}
                         </p>
                       </div>
                       <span className={`rounded-full border px-2.5 py-1 text-xs font-medium uppercase tracking-wide ${publishActionClasses(change.action)}`}>
@@ -3481,7 +3523,7 @@ export function EnvironmentBuilderPage() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
               <p className="text-sm text-slate-500">
                 {publishPreview
-                  ? 'Confirming publishes these rows into the local reconstruction catalog and refreshes dropdown options.'
+                  ? (IS_EXPLORER?'Confirming applies this overlay only in your browser. Shared reference data remains immutable.':'Confirming publishes these rows into the local reconstruction catalog and refreshes dropdown options.')
                   : 'Fix the draft inputs or dependency chain, then review publish again.'}
               </p>
               <div className="flex items-center gap-2">
@@ -3499,7 +3541,7 @@ export function EnvironmentBuilderPage() {
                   disabled={Boolean(publishingSection) || previewLoading || !publishPreview}
                   className="builder-primary rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {publishingSection ? 'Publishing...' : 'Confirm publish'}
+                  {publishingSection ? 'Applying...' : IS_EXPLORER?'Use in my drafts':'Confirm publish'}
                 </button>
               </div>
             </div>

@@ -2,6 +2,14 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, ty
 import { createPortal } from 'react-dom'
 
 /** Local presentation helpers; scientific state and actions remain with their owners. */
+export function ExperimentStepBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="designer-step-badge inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-600 text-[11px] font-semibold text-white">
+      {children}
+    </span>
+  )
+}
+
 export function ExperimentScrollRegion({ label, children, className = 'experiment-table-wrap', enabled = true, labelWhenDisabled = false }: {
   label: string; children: ReactNode; className?: string; enabled?: boolean; labelWhenDisabled?: boolean
 }) {

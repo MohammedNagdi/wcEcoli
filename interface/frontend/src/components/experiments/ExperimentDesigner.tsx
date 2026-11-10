@@ -1,3 +1,4 @@
+import {CatalogChecks} from '../../explorer/CatalogChecks'
 import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useNavigate, useSearchParams, Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
@@ -14,6 +15,11 @@ import { variantLabel } from '../../utils/labels'
 import { makeAssistantContextKey } from '../../utils/assistantContext'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import { TimelineComposer } from './TimelineComposer'
+import { ExperimentStepBadge } from './ExperimentPresentation'
+import {IS_EXPLORER} from '../../explorer/mode'
+import {guideVariantHref} from '../../explorer/guideLinks'
+import {getDraft,saveDraft} from '../../explorer/drafts'
+import {DraftNotice} from '../../explorer/DraftNotice'
 import './designer.css'
 
 type TimelineBehavior = 'composer' | 'internal_override' | 'internal_conditional_override'
@@ -1116,7 +1122,12 @@ export function ExperimentDesigner() {
   } = useUrlWorkspaceState()
 
   // Pre-fill from URL params or the shared workspace selection.
-  const duplicateId = searchParams.get('duplicate')
+  const personalSource = IS_EXPLORER ? searchParams.get('draft') : null
+  const duplicateId = searchParams.get('duplicate') || personalSource
+  const [personalId,setPersonalId]=useState<string|undefined>(personalSource||undefined)
+  const [personalSaved,setPersonalSaved]=useState<string>()
+  const [draftWarnings,setDraftWarnings]=useState<string[]>([])
+  useEffect(()=>{if(IS_EXPLORER&&personalSaved&&personalId&&personalSource!==personalId)navigate(`/experiments/new?draft=${personalId}`,{replace:true})},[personalSaved,personalId,personalSource,navigate])
   const prefillVariant = duplicateId ? '' : searchParams.get('variant') || ''
   const prefillGene = duplicateId ? '' : searchParams.get('gene') || selectedGene || ''
   const prefillCondition = duplicateId ? 'basal' : searchParams.get('condition') || selectedCondition || 'basal'
@@ -1168,9 +1179,16 @@ export function ExperimentDesigner() {
     let cancelled = false
     setDuplicateReady(false); setDuplicateError(null)
     const load = async () => {
-      const id = Number(duplicateId)
-      if (!Number.isSafeInteger(id) || id < 1) throw new Error('The source experiment identifier is invalid.')
-      const source = await getExperiment(id)
+      let source:any
+      if(personalSource){
+        const draft=await getDraft(personalSource)
+        if(draft.kind!=='experiment')throw new Error('This draft is not a single experiment')
+        source={...draft.payload,name:draft.name};if(cancelled)return;setPersonalId(draft.id);setDraftWarnings(draft.warnings);setPersonalSaved(draft.updated_at)
+      }else{
+        const id = Number(duplicateId)
+        if (!Number.isSafeInteger(id) || id < 1) throw new Error('The source experiment identifier is invalid.')
+        source = await getExperiment(id)
+      }
       const params: unknown = JSON.parse(source.sim_params || '{}')
       if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('Source simulation parameters must be a JSON object.')
       const values = params as Record<string, unknown>
@@ -1181,14 +1199,14 @@ export function ExperimentDesigner() {
       if (typeof seedCount !== 'number' || !Number.isInteger(seedCount) || seedCount < 1 || typeof gen !== 'number' || !Number.isInteger(gen) || gen < 1 || typeof length !== 'number' || !Number.isFinite(length) || length <= 0) throw new Error('Source simulation settings are invalid.')
       let targets: Gene[] = []
       if (source.variant_type === 'multi_gene_knockout') {
-        const metadata = values.multi_gene_knockout as { gene_symbols?: unknown } | undefined
+        const metadata = (values.multi_gene_knockout || {gene_symbols:source.gene_symbols}) as { gene_symbols?: unknown } | undefined
         if (!metadata || !Array.isArray(metadata.gene_symbols) || metadata.gene_symbols.length < 2 || metadata.gene_symbols.some((gene) => typeof gene !== 'string')) throw new Error('Source multi-gene targets are missing or invalid.')
-        targets = await Promise.all(metadata.gene_symbols.map((symbol) => getGene(String(symbol))))
+        targets = personalSource && source._targets ? source._targets : await Promise.all(metadata.gene_symbols.map((symbol) => getGene(String(symbol))))
       }
       if (cancelled) return
       duplicateParams.current = { ...values }
       duplicateControls.current = { seeds: seedCount, generations: gen, lengthSec: length }
-      setName(`${source.name} (copy)`); setDescription(source.description)
+      setName(personalSource?source.name:`${source.name} (copy)`); setDescription(source.description||'')
       setVariantType(source.variant_type); setVariantIndex(source.variant_index)
       setCondition(source.condition); setTimeline(source.timeline)
       setGeneSymbol(source.variant_type === 'gene_knockout' ? source.gene_symbol : '')
@@ -1198,10 +1216,14 @@ export function ExperimentDesigner() {
     }
     void load().catch((reason: unknown) => { if (!cancelled) setDuplicateError(reason instanceof Error ? reason.message : 'Could not load source experiment.') })
     return () => { cancelled = true }
-  }, [duplicateId, duplicateAttempt])
+  }, [duplicateId, duplicateAttempt,personalSource])
 
   const timelineBehavior = getTimelineBehavior(variantDetail)
   const hideVariantIndex = Boolean(variantDetail?.parameter_hints.hide_index)
+  const hasGeneSection = variantType === 'gene_knockout' || variantType === 'multi_gene_knockout'
+  const hasParameterSection = Boolean(variantType && variantType !== 'gene_knockout' && variantDetail && !hideVariantIndex)
+  const parameterSectionNumber = 2 + Number(hasGeneSection)
+  const simulationSectionNumber = parameterSectionNumber + Number(hasParameterSection)
   const timelineNotice = variantDetail?.parameter_hints.timeline_notice || ''
   const selectedVariantGroup = variantType ? VARIANT_TO_GROUP.get(variantType) : undefined
   const conditionalOverrideActive = isConditionalOverrideActive(variantType, variantIndex)
@@ -1549,8 +1571,24 @@ export function ExperimentDesigner() {
     },
   }
 
+  const personalParams:Record<string,unknown>={...duplicateParams.current,seeds,generations,length_sec:lengthSec,
+    initial_condition:duplicateId?condition:effectiveExperimentEnvironment.condition}
+  if(seeds!==duplicateControls.current.seeds){delete personalParams.seed;delete personalParams.seed_values}
+  const personalPayload={name:name.trim()||'Untitled experiment',description:description.trim(),variant_type:variantType,
+    variant_index:variantIndex,condition:duplicateId?condition:effectiveExperimentEnvironment.condition,
+    timeline:duplicateId?timeline:effectiveExperimentEnvironment.timeline,gene_symbol:geneSymbol,
+    gene_symbols:selectedGenes.map(g=>g.symbol),_targets:selectedGenes,sim_params:JSON.stringify(personalParams)}
   const handleSave = async () => {
     if (duplicateId && !duplicateReady) return
+    if(IS_EXPLORER){
+      setSaving(true);setError(null)
+      try{
+        const saved=await saveDraft('experiment',name.trim()||'Untitled experiment',personalPayload,personalId)
+        setPersonalId(saved.id);setPersonalSaved(saved.updated_at)
+      }catch(e:any){setError(e.message||'Browser save failed; download your design')}
+      finally{setSaving(false)}
+      return
+    }
     if (!name.trim()) { setError('Name is required'); return }
     if (!variantType) { setError('Select an experiment type'); return }
     if (variantType === 'gene_knockout' && !geneSymbol) { setError('Select a gene to knock out'); return }
@@ -1610,10 +1648,13 @@ export function ExperimentDesigner() {
           <h1 className="text-xl font-semibold text-gray-900">Design experiment</h1>
           <p className="mt-1 text-sm text-gray-500">
             Choose the perturbation, environment source, and run size.
-            {' '}<Link to="/guide" className="text-brand-600 hover:text-brand-700 hover:underline">Documentation</Link>
+            {' '}<Link to={IS_EXPLORER?guideVariantHref(variantType):'/guide'} className="text-brand-600 hover:text-brand-700 hover:underline">Documentation</Link>
           </p>
         </div>
       </header>
+
+      {IS_EXPLORER&&<CatalogChecks payload={personalPayload}/>}
+      {IS_EXPLORER&&<DraftNotice kind="experiment" name={name} payload={personalPayload} saved={personalSaved} draftId={personalId} warnings={draftWarnings}/>}
 
       {error && (
         <div id="designer-save-error" role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
@@ -1626,8 +1667,9 @@ export function ExperimentDesigner() {
         {/* --- Experiment type --- */}
         <section className="bg-white rounded-lg border border-gray-200 p-4">
           <h2 id="designer-type-label" className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+            <ExperimentStepBadge>1</ExperimentStepBadge>
             Experiment type
-            <HelpTip text="Each experiment type modifies the simulation in a specific way. 'Gene knockout' sets a gene's RNA expression to zero - the cell must grow without the protein it encodes. Other variants alter media composition, kinetic parameters, or regulatory logic." />
+            <HelpTip text={IS_EXPLORER?"These are unrun model configurations. Gene expression perturbations target an RNA/transcription unit and may co-target other genes. Catalog checks do not establish runtime readiness.":"Each experiment type modifies the simulation in a specific way. 'Gene knockout' sets a gene's RNA expression to zero - the cell must grow without the protein it encodes. Other variants alter media composition, kinetic parameters, or regulatory logic."} />
           </h2>
           <select
             aria-label="Experiment type"
@@ -1708,6 +1750,7 @@ export function ExperimentDesigner() {
         {variantType === 'gene_knockout' && (
           <section className="bg-white rounded-lg border border-gray-200 p-4">
             <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+              <ExperimentStepBadge>2</ExperimentStepBadge>
               Target gene
               <HelpTip text="The knockout sets this gene's RNA expression to zero. The model tracks all 4,749 genes, but only ~1,500 have mechanistic downstream effects (metabolic enzymes, transcription factors, ribosomal proteins). Knocking out a 'passenger' gene will show its protein declining to zero, but may not affect growth." />
             </h2>
@@ -1757,6 +1800,7 @@ export function ExperimentDesigner() {
         {variantType === 'multi_gene_knockout' && (
           <section className="bg-white rounded-lg border border-gray-200 p-4">
             <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+              <ExperimentStepBadge>2</ExperimentStepBadge>
               Target genes
               <HelpTip text="Select genes that resolve to at least two unique wcEcoli knockout targets. Genes sharing one RNA or transcription-unit target count as one target." />
             </h2>
@@ -1851,7 +1895,10 @@ export function ExperimentDesigner() {
         {/* --- Parameter index (for non-gene-knockout) --- */}
         {variantType && variantType !== 'gene_knockout' && variantDetail && !hideVariantIndex && (
           <section className="bg-white rounded-lg border border-gray-200 p-4">
-            <h2 className="text-sm font-medium text-gray-700 mb-3">{parameterSectionTitle}</h2>
+            <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+              <ExperimentStepBadge>{parameterSectionNumber}</ExperimentStepBadge>
+              {parameterSectionTitle}
+            </h2>
             {hasSemanticParameterControls ? (
               <SemanticParameterControls
                 variantType={variantType}
@@ -1906,6 +1953,7 @@ export function ExperimentDesigner() {
         {/* --- Simulation parameters --- */}
         <section className="bg-white rounded-lg border border-gray-200 p-4">
           <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+            <ExperimentStepBadge>{simulationSectionNumber}</ExperimentStepBadge>
             Simulation parameters
             <HelpTip text="Seeds are independent random replicates - each starts from a different initial state. Generations control how many cell divisions are simulated sequentially. More seeds give statistical power; more generations reveal long-term dynamics and potential lethality." />
           </h2>
@@ -1957,6 +2005,7 @@ export function ExperimentDesigner() {
         <section className="bg-white rounded-lg border border-gray-200 p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+              <ExperimentStepBadge>{simulationSectionNumber + 1}</ExperimentStepBadge>
               Media protocol
               <HelpTip text="Select the starting medium and optional scheduled medium changes. A one-event protocol is a static medium, not a shift. The protocol is passed to the model as ordered time/media events." />
             </h2>
@@ -2014,6 +2063,8 @@ export function ExperimentDesigner() {
               mediaRecipes={mediaRecipes}
               conditions={conditions}
               onChange={setTimeline}
+              initialDefinition={IS_EXPLORER?timeline:undefined}
+              showLibrarySave={!IS_EXPLORER}
               maxSec={protocolHorizonSec}
             />
           )}
@@ -2021,7 +2072,10 @@ export function ExperimentDesigner() {
 
         {/* --- Name & description --- */}
         <section className="bg-white rounded-lg border border-gray-200 p-4">
-          <h2 className="text-sm font-medium text-gray-700 mb-3">Experiment details</h2>
+          <h2 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+            <ExperimentStepBadge>{simulationSectionNumber + 2}</ExperimentStepBadge>
+            Experiment details
+          </h2>
           <div className="space-y-3">
             <div>
               <label htmlFor="designer-name" className="text-xs text-gray-400 block mb-1">Name</label>
@@ -2111,7 +2165,7 @@ export function ExperimentDesigner() {
           </dl>
           <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
               <div>
-                <dt className="text-xs uppercase tracking-wide text-slate-400">Replicates</dt>
+                <dt className="text-xs uppercase tracking-wide text-slate-400">{IS_EXPLORER?'Seeds × sequential generations':'Replicates'}</dt>
                 <dd className="mt-1 text-slate-900">{seeds} x {generations} gen</dd>
               </div>
               <div>
@@ -2125,10 +2179,10 @@ export function ExperimentDesigner() {
             <button
               onClick={handleSave}
               aria-describedby={error ? "designer-save-error" : undefined}
-              disabled={saveBlocked}
+              disabled={IS_EXPLORER?saving||Boolean(duplicateId&&!duplicateReady):saveBlocked}
               className="w-full px-5 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {saving ? 'Saving...' : 'Save experiment'}
+              {saving ? 'Saving...' : IS_EXPLORER?'Save in this browser':'Save experiment'}
             </button>
             <button
               onClick={() => navigate('/experiments')}

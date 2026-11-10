@@ -1,4 +1,6 @@
 import type { AssistantStreamDone } from '../types'
+import {IS_EXPLORER} from '../explorer/mode'
+import * as personal from '../explorer/drafts'
 /**
  * Typed API client for the wcEcoli backend.
  * All calls go through /api which Vite proxies to the FastAPI backend.
@@ -37,6 +39,9 @@ export class ApiError extends Error {
 }
 
 async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  if (IS_EXPLORER && init?.method && !['GET','HEAD','OPTIONS'].includes(init.method.toUpperCase())) {
+    throw new Error('The public explorer cannot execute work or change shared data. Save a personal browser draft instead.')
+  }
   const res = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
     throw new ApiError(res.status, `API error ${res.status}: ${await res.text()}`)
@@ -134,26 +139,39 @@ export async function getAAPathways(): Promise<AAPathway[]> {
 // --- Conditions, Timelines, Variants ---
 
 export async function getConditions(signal?: AbortSignal): Promise<Condition[]> {
+  if (IS_EXPLORER) {
+    const [published,catalog]=await Promise.all([fetchJSON<Condition[]>('/conditions',{signal}),getConditionCatalog()])
+    return [...published,...catalog.conditions.filter(c=>c.condition.startsWith('draft:')).map(c=>({name:c.condition,nutrients:c.nutrients,doubling_time:c.doubling_time&&Number.isFinite(Number(c.doubling_time))?Number(c.doubling_time):null}))]
+  }
   return fetchJSON('/conditions', { signal })
 }
 
 export async function getTimelines(): Promise<Timeline[]> {
+  if(IS_EXPLORER) return (await getConditionCatalog()).timelines.map(t=>({name:t.timeline,definition:t.events}))
   return fetchJSON('/timelines')
 }
 
 export async function getMediaRecipes(): Promise<MediaRecipe[]> {
+  if(IS_EXPLORER) {
+    const published=await fetchJSON<MediaRecipe[]>('/media-recipes')
+    const extras=(await getConditionCatalog()).media_recipes.filter(r=>r.media_id.startsWith('draft:'))
+    return [...published,...extras.map(r=>({id:r.media_id.slice('draft:'.length),...r}))]
+  }
   return fetchJSON('/media-recipes')
 }
 
 export async function getConditionCatalog(): Promise<ConditionCatalog> {
-  return fetchJSON('/condition-catalog')
+  const base=await fetchJSON<ConditionCatalog>('/condition-catalog')
+  return IS_EXPLORER?personal.overlayCatalog(base):base
 }
 
 export async function getUserTimelines(): Promise<UserTimeline[]> {
+  if(IS_EXPLORER) return []
   return fetchJSON('/user-timelines')
 }
 
 export async function saveUserTimeline(name: string, definition: string): Promise<UserTimeline> {
+  if(IS_EXPLORER) throw new Error('Save this timeline in Conditions Builder to keep it in your browser drafts')
   return fetchJSON('/user-timelines', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -162,6 +180,7 @@ export async function saveUserTimeline(name: string, definition: string): Promis
 }
 
 export async function getBuilderDrafts(): Promise<BuilderDraftCollection> {
+  if(IS_EXPLORER) return personal.builderDrafts()
   return fetchJSON('/builder-drafts')
 }
 
@@ -170,6 +189,7 @@ export async function createBuilderDraft(
   name: string,
   payload: Record<string, unknown>,
 ): Promise<BuilderDraft> {
+  if(IS_EXPLORER) return personal.builderRecord(await personal.saveDraft(section,name,payload))
   return fetchJSON(`/builder-drafts/${section}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -179,10 +199,11 @@ export async function createBuilderDraft(
 
 export async function updateBuilderDraft(
   section: BuilderDraftSection,
-  draftId: number,
+  draftId: number | string,
   name: string,
   payload: Record<string, unknown>,
 ): Promise<BuilderDraft> {
+  if(IS_EXPLORER) return personal.builderRecord(await personal.saveDraft(section,name,payload,String(draftId)))
   return fetchJSON(`/builder-drafts/${section}/${draftId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -192,8 +213,9 @@ export async function updateBuilderDraft(
 
 export async function publishBuilderDraft(
   section: BuilderDraftSection,
-  draftId: number,
+  draftId: number | string,
 ): Promise<BuilderDraft> {
+  if(IS_EXPLORER) return personal.applyDraft(String(draftId),await getConditionCatalog())
   return fetchJSON(`/builder-drafts/${section}/${draftId}/publish`, {
     method: 'POST',
   })
@@ -201,8 +223,12 @@ export async function publishBuilderDraft(
 
 export async function previewBuilderDraft(
   section: BuilderDraftSection,
-  draftId: number,
+  draftId: number | string,
 ): Promise<BuilderPublishPreview> {
+  if(IS_EXPLORER) {
+    const d=await personal.getDraft(String(draftId))
+    return {section,draft_id:d.id,draft_name:d.name,changes:[{file:'Personal browser overlay',action:'apply',rows:[JSON.stringify(d.payload,null,2)]}],warnings:['Planning only: catalog checks do not establish runtime readiness. No shared reference data will change.']}
+  }
   return fetchJSON(`/builder-drafts/${section}/${draftId}/preview`)
 }
 

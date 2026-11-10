@@ -1,3 +1,4 @@
+import {IS_EXPLORER} from '../../explorer/mode'
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
@@ -71,7 +72,7 @@ function PhenotypeBadge({
 }) {
   const summary = phenotypeMap.get(symbol)
   if (!summary?.phenotype) {
-    return <span className="text-xs text-gray-300">-</span>
+    return <span className="text-xs text-gray-500">{IS_EXPLORER?'Unclassified':'-'}</span>
   }
 
   const styles: Record<string, string> = {
@@ -169,6 +170,7 @@ export function GeneCatalogPage({
   const categories = useCategories()
 
   useEffect(() => {
+    if(IS_EXPLORER)return
     getDesignOverview()
       .then((data) => {
         const map = new Map<string, GeneKOSummary>()
@@ -515,7 +517,7 @@ export function GeneCatalogPage({
                   >
                     Mechanistic <span>{mechCount.toLocaleString()}</span>
                   </button>
-                  <WorkspaceHelp label="Mechanistic">{WORKSPACE_HELP.mechanistic}</WorkspaceHelp>
+                  <WorkspaceHelp label="Mechanistic" guideTopic="mechanistic">{WORKSPACE_HELP.mechanistic}</WorkspaceHelp>
                 </span>
                 <span className="workspace-filter-with-help">
                   <button
@@ -529,7 +531,7 @@ export function GeneCatalogPage({
                   >
                     Expression-only <span>{(totalCount - mechCount).toLocaleString()}</span>
                   </button>
-                  <WorkspaceHelp label="Expression-only">{WORKSPACE_HELP.expression}</WorkspaceHelp>
+                  <WorkspaceHelp label="Expression-only" guideTopic="expression-only">{WORKSPACE_HELP.expression}</WorkspaceHelp>
                 </span>
               </div>
               <label className="workspace-category-label">
@@ -725,7 +727,7 @@ export function GeneCatalogPage({
                 </SortHeader>
                 {showEssentiality && (
                   <th className="px-4 py-2.5 font-medium text-gray-500 w-24 text-left">
-                    Essentiality
+                    {IS_EXPLORER?'Campaign evidence':'Essentiality'}
                   </th>
                 )}
                 <SortHeader

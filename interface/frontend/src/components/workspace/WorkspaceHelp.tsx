@@ -1,6 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
+import {IS_EXPLORER} from '../../explorer/mode'
+import {guideTopicHref,type GuideTopicId} from '../../explorer/guideLinks'
 
 export const WORKSPACE_HELP = {
   mechanistic:
@@ -14,7 +16,7 @@ export const WORKSPACE_HELP = {
 }
 
 /** Short hints follow the Origin UI tooltip pattern; pinned help also works on touch. */
-export function WorkspaceHelp({ label, children }: { label: string; children: string }) {
+export function WorkspaceHelp({ label, children, guideTopic }: { label: string; children: string; guideTopic?:GuideTopicId }) {
   const id = useId()
   const root = useRef<HTMLSpanElement>(null)
   const panel = useRef<HTMLSpanElement>(null)
@@ -167,7 +169,7 @@ export function WorkspaceHelp({ label, children }: { label: string; children: st
         >
           <strong>{label}</strong>
           <span>{children}</span>
-          <Link to="/guide">Read the guide →</Link>
+          <Link to={IS_EXPLORER&&guideTopic?guideTopicHref(guideTopic):'/guide'}>Read the guide →</Link>
         </span>,
         document.body,
       )}

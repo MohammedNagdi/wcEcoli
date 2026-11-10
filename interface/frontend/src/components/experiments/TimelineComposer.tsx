@@ -1,3 +1,4 @@
+import {referenceLabel} from '../../explorer/drafts'
 import { useId, useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import type { Condition, MediaRecipe, Timeline, UserTimeline } from '../../types'
 import { getTimelines, getUserTimelines, saveUserTimeline } from '../../api/client'
@@ -37,6 +38,7 @@ function fmtSec(sec: number): string {
 }
 
 function humanize(id: string): string {
+  if(id.startsWith('draft:'))return referenceLabel(id)
   return id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 

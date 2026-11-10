@@ -1,6 +1,9 @@
-import { ExperimentScrollRegion } from './ExperimentPresentation'
+import { ExperimentScrollRegion, ExperimentStepBadge } from './ExperimentPresentation'
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import {IS_EXPLORER} from '../../explorer/mode'
+import {getDraft,saveDraft} from '../../explorer/drafts'
+import {DraftNotice} from '../../explorer/DraftNotice'
 import { createBatchExperiments, getConditions, getGenes, getMediaRecipes, getVariantDetail, getVariants } from '../../api/client'
 import type { Condition, Gene, MediaRecipe, Variant, VariantDetail } from '../../types'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
@@ -240,14 +243,6 @@ function payloadRecord(record: PreviewRecord) {
   return rest
 }
 
-function StepBadge({ children }: { children: string }) {
-  return (
-    <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-600 text-[11px] font-semibold text-white">
-      {children}
-    </span>
-  )
-}
-
 function StatusChip({
   label,
   value,
@@ -331,6 +326,26 @@ export function TypedBatchBuilder() {
   const [rowOverrides, setRowOverrides] = useState<Record<string, RowOverride>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [searchParams]=useSearchParams()
+  const [personalId,setPersonalId]=useState<string|undefined>(searchParams.get('draft')||undefined)
+  const [personalSaved,setPersonalSaved]=useState<string>()
+  const [draftWarnings,setDraftWarnings]=useState<string[]>([])
+  const hydratingRecipe=useRef(false)
+  useEffect(()=>{
+    if(!IS_EXPLORER||!searchParams.get('draft'))return
+    void getDraft(searchParams.get('draft')!).then(d=>{
+      if(d.kind!=='batch')throw new Error('This is not a batch draft')
+      const r=d.payload.recipe||{};hydratingRecipe.current=true
+      setName(d.name);setDescription(r.description||'');setVariantType(r.variantType||'gene_knockout')
+      setIncludeWildtype(Boolean(r.includeWildtype));setSelectedGenes(r.selectedGenes||[]);setVariantIndex(r.variantIndex??0);setSelectedIndexes(r.selectedIndexes||[0])
+      setComposedTimelineName(r.composedTimelineName||'timeline_1');setComposedTimelineEvents(r.composedTimelineEvents||'')
+      setBatchTimelines(r.batchTimelines||[]);setSelectedTimelineIds(r.selectedTimelineIds||[])
+      setSeedText(r.seedText||'0');setGenerations(r.generations||1);setLengthSec(r.lengthSec||10800)
+      setRemovedRows(new Set(r.removedRows||[]));setRowOverrides(r.rowOverrides||{})
+      setPersonalId(d.id);setPersonalSaved(d.updated_at);setDraftWarnings(d.warnings)
+    }).catch(e=>setSubmitError(String(e.message)))
+  },[searchParams.get('draft')])
+  useEffect(()=>{if(IS_EXPLORER&&personalSaved&&personalId&&searchParams.get('draft')!==personalId)navigate(`/experiments/batch?draft=${personalId}`,{replace:true})},[personalId,personalSaved,navigate,searchParams])
 
   useEffect(() => {
     Promise.all([
@@ -360,6 +375,7 @@ export function TypedBatchBuilder() {
   }, [variantType])
 
   useEffect(() => {
+    if(IS_EXPLORER&&hydratingRecipe.current){hydratingRecipe.current=false;return}
     setRemovedRows(new Set())
     setRowOverrides({})
   }, [variantType, selectedGenes, selectedIndexes, selectedTimelineIds, batchTimelines, seedText, generations, lengthSec])
@@ -474,6 +490,7 @@ export function TypedBatchBuilder() {
     for (const variation of variationItems) {
       for (const timeline of timelineChoicesForExpansion) {
         for (const seed of seedParse.values) {
+          if(IS_EXPLORER&&records.length>=1000)return records
           const rowId = [
             variantType,
             variation.variant_index,
@@ -763,11 +780,20 @@ export function TypedBatchBuilder() {
     }))
   }
 
+  const plannedDesignCount=variationCount*timelineCount*seedCount
+  const plannedControlCount=includeWildtype&&variantType!=='wildtype'&&variationCount>0?timelineCount*seedCount:0
+  const personalPayload={recipe:{name,description,variantType,includeWildtype,selectedGenes,variantIndex,selectedIndexes,
+    composedTimelineName,composedTimelineEvents,batchTimelines,selectedTimelineIds,seedText,generations,lengthSec,
+    removedRows:[...removedRows],rowOverrides},planned_count:plannedDesignCount+plannedControlCount,planned_design_count:plannedDesignCount,planned_control_count:plannedControlCount,runtime_ready:false}
   async function submitBatch() {
-    if (formErrors.length > 0) return
+    if (!IS_EXPLORER&&formErrors.length > 0) return
     setSubmitting(true)
     setSubmitError(null)
     try {
+      if(IS_EXPLORER){
+        const saved=await saveDraft('batch',name.trim()||'Untitled batch',personalPayload,personalId)
+        setPersonalId(saved.id);setPersonalSaved(saved.updated_at);return
+      }
       const response = await createBatchExperiments(payload)
       const params = new URLSearchParams({
         view: 'batches',
@@ -820,6 +846,9 @@ export function TypedBatchBuilder() {
         </div>
       </header>
 
+      {IS_EXPLORER&&<DraftNotice kind="batch" name={name} payload={personalPayload} saved={personalSaved} draftId={personalId} warnings={draftWarnings}/>}
+      {IS_EXPLORER&&personalPayload.planned_count>1000&&<p role="status" className="mb-4 text-amber-800">Showing at most 1,000 preview rows of {plannedDesignCount.toLocaleString()} requested designs, plus {plannedControlCount.toLocaleString()} shared wildtype control plans. Total planned: {personalPayload.planned_count.toLocaleString()}. Downloads preserve the full batch recipe.</p>}
+
       {loadError && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {loadError}
@@ -830,7 +859,7 @@ export function TypedBatchBuilder() {
       <div className="space-y-4">
         <section className="rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
-            <StepBadge>1</StepBadge>
+            <ExperimentStepBadge>1</ExperimentStepBadge>
             Batch details
             <HelpTip text="These values are submitted with the generated batch records." />
           </h2>
@@ -874,7 +903,7 @@ export function TypedBatchBuilder() {
 
         <section className="rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
-            <StepBadge>2</StepBadge>
+            <ExperimentStepBadge>2</ExperimentStepBadge>
             Experiment type
             <HelpTip text="A typed batch is homogeneous: all records use this one variant type." />
           </h2>
@@ -939,7 +968,7 @@ export function TypedBatchBuilder() {
         {['gene_knockout', 'multi_gene_knockout'].includes(variantType) ? (
           <section className="rounded-lg border border-gray-200 bg-white p-4">
             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
-              <StepBadge>3</StepBadge>
+              <ExperimentStepBadge>3</ExperimentStepBadge>
               {variantType === 'multi_gene_knockout' ? 'Target gene set' : 'Gene variations'}
               <HelpTip text={variantType === 'multi_gene_knockout'
                 ? 'Add genes that resolve to at least two unique wcEcoli knockout targets. The selected targets run together as one combined knockout.'
@@ -1058,7 +1087,7 @@ export function TypedBatchBuilder() {
         ) : (
           <section className="rounded-lg border border-gray-200 bg-white p-4">
             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
-              <StepBadge>3</StepBadge>
+              <ExperimentStepBadge>3</ExperimentStepBadge>
               Index variations
               <HelpTip text="Use the same parameter index control as the single experiment designer, then add each index to this batch." />
             </h2>
@@ -1126,7 +1155,7 @@ export function TypedBatchBuilder() {
         <section className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-            <StepBadge>4</StepBadge>
+            <ExperimentStepBadge>4</ExperimentStepBadge>
               Media protocol
               <HelpTip text="Compose a media protocol, then add it to the batch. Add multiple protocols to create all combinations across variations and seeds." />
             </h2>
@@ -1142,6 +1171,8 @@ export function TypedBatchBuilder() {
               mediaRecipes={mediaRecipes}
               conditions={conditions}
               onChange={setComposedTimelineEvents}
+              key={IS_EXPLORER?`${personalId||'new'}-${personalSaved||''}`:undefined}
+              initialDefinition={IS_EXPLORER?composedTimelineEvents:undefined}
               onPresetLoad={(preset) => {
                 const presetName = preset.label || preset.name
                 setComposedTimelineName(presetName)
@@ -1202,7 +1233,7 @@ export function TypedBatchBuilder() {
 
         <section className="rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
-            <StepBadge>5</StepBadge>
+            <ExperimentStepBadge>5</ExperimentStepBadge>
             Simulation parameters
             <HelpTip text="Seeds are explicit values, not a count. Enter multiple seeds with commas." />
           </h2>
@@ -1249,7 +1280,7 @@ export function TypedBatchBuilder() {
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                <StepBadge>6</StepBadge>
+                <ExperimentStepBadge>6</ExperimentStepBadge>
                 Preview records
               </h2>
               <p className="text-xs text-gray-400">
@@ -1435,11 +1466,11 @@ export function TypedBatchBuilder() {
               type="button"
               aria-describedby={formErrors.length ? 'batch-blocking-reason' : undefined}
               onClick={submitBatch}
-              disabled={submitting || formErrors.length > 0}
+              disabled={submitting || (!IS_EXPLORER&&formErrors.length > 0)}
               className="w-full rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
               title={formErrors[0] || 'Create batch experiments'}
             >
-              {submitting ? 'Creating...' : 'Create batch'}
+              {submitting ? 'Saving...' : IS_EXPLORER?'Save in this browser':'Create batch'}
             </button>
             <Link
               to="/experiments"

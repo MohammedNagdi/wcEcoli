@@ -1,3 +1,4 @@
+import {IS_EXPLORER} from '../../explorer/mode'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import type { AAPathway, GeneKOSummary } from '../../types'
@@ -28,7 +29,7 @@ interface NodeInfo {
   name: string
   pathway: AAPathway | null
   enzymes: string[]
-  severity: 'essential' | 'growth_defect' | 'neutral'
+  severity: 'essential' | 'growth_defect' | 'neutral' | 'unknown'
   x: number
   y: number
 }
@@ -44,6 +45,7 @@ const NODE_R = 22
 const SEVERITY_STYLE = {
   essential: { fill: '#fee2e2', stroke: '#ef4444' },
   growth_defect: { fill: '#fef3c7', stroke: '#f59e0b' },
+  unknown: { fill: '#f1f5f9', stroke: '#94a3b8' },
   neutral: { fill: '#dcfce7', stroke: '#22c55e' },
 }
 
@@ -440,7 +442,7 @@ function enzymeSeverity(
   const phenotypes = enzymes.map((enzyme) => phenotypeByGene.get(enzyme.toLowerCase()))
   if (phenotypes.includes('essential')) return 'essential'
   if (phenotypes.includes('growth_defect')) return 'growth_defect'
-  return 'neutral'
+  return IS_EXPLORER ? 'unknown' : 'neutral'
 }
 
 function edgePath(source: NodeInfo, target: NodeInfo): string {

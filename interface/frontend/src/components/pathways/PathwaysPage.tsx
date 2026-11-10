@@ -1,3 +1,4 @@
+import {IS_EXPLORER} from '../../explorer/mode'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { getAAPathways, getDesignOverview, getEssentiality } from '../../api/client'
@@ -29,7 +30,7 @@ export function PathwaysPage({ embedded = false, onAssistantSnapshot }: Pathways
   useEffect(() => {
     setLoading(true)
     setError(null)
-    Promise.all([getEssentiality(), getDesignOverview(), getAAPathways()])
+    Promise.all([IS_EXPLORER?Promise.resolve([]):getEssentiality(), IS_EXPLORER?Promise.resolve(null):getDesignOverview(), getAAPathways()])
       .then(([essentialityData, overviewData, pathwayData]) => {
         setEssentiality(essentialityData)
         setOverview(overviewData)
@@ -133,6 +134,7 @@ export function PathwaysPage({ embedded = false, onAssistantSnapshot }: Pathways
     )
   }
 
+  if(IS_EXPLORER)return <div className="mx-auto max-w-7xl space-y-6"><h1 className="text-2xl font-semibold">Pathways</h1><p>Frozen amino-acid pathway relationships. Genome-wide essentiality is unavailable: this campaign has three requested gene perturbations and cannot classify the other genes.</p><div className="rounded-xl border border-gray-100 bg-white p-6"><AAPathwayDiagram pathways={pathways} genes={[]}/></div></div>
   if (!overview) return null
 
   return (

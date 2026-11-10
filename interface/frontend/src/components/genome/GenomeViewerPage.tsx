@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
+import {IS_EXPLORER} from '../../explorer/mode'
+import {guideTopicHref} from '../../explorer/guideLinks'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
 import { getAllGenes } from '../../api/client'
 import type { Gene } from '../../types'
@@ -327,7 +329,7 @@ export function GenomeViewerPage({
             <h1>Genome Map</h1>
             <p>Explore chromosome positions, functional categories, and neighboring genes.</p>
           </div>
-          <Link to="/guide" className="workspace-guide-link">
+          <Link to={IS_EXPLORER?guideTopicHref('model-coverage'):'/guide'} className="workspace-guide-link">
             Guide <span aria-hidden="true">↗</span>
           </Link>
         </header>
@@ -643,7 +645,7 @@ export function GenomeViewerPage({
                   <div>
                     <dt>
                       Knockout index{' '}
-                      <WorkspaceHelp label="Knockout index">
+                      <WorkspaceHelp label="Knockout index" guideTopic="knockout-index">
                         {WORKSPACE_HELP.knockout}
                       </WorkspaceHelp>
                     </dt>

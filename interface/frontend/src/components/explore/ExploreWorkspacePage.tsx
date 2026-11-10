@@ -1,4 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
+import {IS_EXPLORER} from '../../explorer/mode'
+import {guideTopicHref} from '../../explorer/guideLinks'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent, ReactNode } from 'react'
 import { GeneCatalogPage } from '../genes/GeneCatalogPage'
@@ -200,7 +202,7 @@ export function ExploreWorkspacePage() {
           <h1>Gene workspace</h1>
           <p>Find a gene, inspect its biological context, then design an experiment.</p>
         </div>
-        <Link to="/guide" className="workspace-guide-link">
+        <Link to={IS_EXPLORER?guideTopicHref('model-coverage'):'/guide'} className="workspace-guide-link">
           Guide <span aria-hidden="true">↗</span>
         </Link>
       </header>
@@ -412,7 +414,7 @@ function SelectedGeneSummary({
         >
           Inspect dnaA <span aria-hidden="true">→</span>
         </button>
-        <Link to="/guide" className="workspace-guide-link">
+        <Link to={IS_EXPLORER?guideTopicHref('model-coverage'):'/guide'} className="workspace-guide-link">
           Learn how the model works
         </Link>
       </div>
@@ -464,7 +466,7 @@ function SelectedGeneSummary({
               <Fact
                 label="Knockout index"
                 help={
-                  <WorkspaceHelp label="Knockout index">{WORKSPACE_HELP.knockout}</WorkspaceHelp>
+                  <WorkspaceHelp label="Knockout index" guideTopic="knockout-index">{WORKSPACE_HELP.knockout}</WorkspaceHelp>
                 }
               >
                 <span className="font-mono">
@@ -490,7 +492,7 @@ function SelectedGeneSummary({
             summary={`${stateCount} identifier${stateCount === 1 ? '' : 's'}`}
             open={sections.state}
             onToggle={() => toggle('state')}
-            help={<WorkspaceHelp label="Model state IDs">{WORKSPACE_HELP.state}</WorkspaceHelp>}
+            help={<WorkspaceHelp label="Model state IDs" guideTopic="model-state-ids">{WORKSPACE_HELP.state}</WorkspaceHelp>}
           >
             {stateCount ? (
               <ModelStateSection gene={gene} pathways={aaPathways} />

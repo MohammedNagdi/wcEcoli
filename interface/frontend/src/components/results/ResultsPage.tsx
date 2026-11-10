@@ -1,3 +1,5 @@
+import {PublishedControls} from '../../explorer/PublishedControls'
+import { IS_EXPLORER } from '../../explorer/mode'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useRegisterAssistantContext } from '../assistant/AssistantProvider'
@@ -134,12 +136,14 @@ function formatTimeline(value: string | null | undefined): string {
 }
 
 function dataSourceLabel(job: SimulationJob, isMock: boolean): string {
+  if(IS_EXPLORER)return 'Verified published HDF5 artifact'
   if (isMock) return 'Preview or fallback data'
   if (job.sim_dir) return 'Simulation output'
   return 'Result summary only'
 }
 
 function dataSourceDescription(job: SimulationJob, isMock: boolean): string {
+  if(IS_EXPLORER)return 'Real saved scientific values from the validated serving release. Raw simulation output was removed after exact export verification; no synthetic fallback is used.'
   if (isMock) {
     return 'These curves are not confirmed as extracted outputs from a completed simulation directory. Use them for UI inspection, not biological interpretation.'
   }
@@ -268,12 +272,14 @@ function statusTone(status: string): string {
 
 // Chart component
 
-function TimeseriesChart({
+export function TimeseriesChart({
   channel,
   series,
+  timeAxisLabel,
 }: {
   channel: string
   series: TimeseriesData[]
+  timeAxisLabel?: string
 }) {
   const { resolvedTheme } = useTheme()
   const chartTheme = resolvedTheme === 'dark'
@@ -340,7 +346,7 @@ function TimeseriesChart({
             scales: {
               x: {
                 type: 'linear',
-                title: { display: true, text: 'Time (min)', font: { size: 13 }, color: chartTheme.muted },
+                title: { display: true, text: timeAxisLabel || (IS_EXPLORER ? 'Elapsed lineage time (min)' : 'Time (min)'), font: { size: 13 }, color: chartTheme.muted },
                 grid: { color: chartTheme.grid },
                 ticks: { font: { size: 13 }, color: chartTheme.muted },
               },
@@ -381,6 +387,7 @@ export function ResultsPage() {
   useEffect(() => {
     if (!jobId) return
     const id = parseInt(jobId, 10)
+    let cancelled=false
     setLoading(true)
     setError(null)
     setExperiment(null)
@@ -389,6 +396,7 @@ export function ResultsPage() {
 
     Promise.all([getJob(id), getJobTimeseries(id)])
       .then(async ([jobData, tsData]) => {
+        if(cancelled)return
         setJob(jobData)
         setResults(tsData)
 
@@ -412,6 +420,7 @@ export function ResultsPage() {
           } catch { /* best-effort */ }
         }
 
+        if(cancelled)return
         const focusGeneSymbol = singleGeneSymbol(geneSymbol)
         setResolvedGeneSymbol(geneSymbol)
         setWorkspaceUrlState(
@@ -426,14 +435,15 @@ export function ResultsPage() {
         )
 
         // Fetch WT delta for comparison cards
-        if (experimentId && jobData.status === 'done') {
+        if (!IS_EXPLORER && experimentId && jobData.status === 'done') {
           getWtDelta(experimentId)
             .then(setWtDelta)
             .catch(() => {}) // optional: no delta if no WT
         }
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false))
+      .catch((err) => {if(!cancelled)setError(err.message)})
+      .finally(() => {if(!cancelled)setLoading(false)})
+    return()=>{cancelled=true}
   }, [jobId])
 
   const toggleChannel = (ch: string) => {
@@ -465,7 +475,7 @@ export function ResultsPage() {
   const hasWildtype = Boolean(wtDelta?.has_wildtype)
   const comparisonMetricRows = useMemo(() => comparisonRows(primarySummary, wtDelta), [primarySummary, wtDelta])
   const comparisonPresets = useMemo(() => suggestedComparisonPresets(wtDelta), [wtDelta])
-  const isMock = job ? (!job.sim_dir || job.status !== 'done') : false
+  const isMock = !IS_EXPLORER && (job ? (!job.sim_dir || job.status !== 'done') : false)
   const resultPageState = useMemo(() => ({
     kind: 'result_detail',
     surface: 'results',
@@ -677,14 +687,14 @@ export function ResultsPage() {
                   deltaPct={hasWildtype ? wtDelta?.division_time_pct : undefined}
                 />
                 <SummaryCard
-                  label="Final mass"
+                  label="Final mass" explorerLabel="Final saved mass"
                   value={primarySummary.final_mass_fg != null ? primarySummary.final_mass_fg.toFixed(1) + ' fg' : '-'}
                   help="Final simulated cell mass. Large changes can indicate broad biomass allocation effects even when division still occurs."
                   deltaPct={hasWildtype ? wtDelta?.final_mass_pct : undefined}
                 />
                 <SummaryCard
-                  label="Growth rate"
-                  value={primarySummary.growth_rate != null ? (primarySummary.growth_rate * 1000).toFixed(2) + ' x10^-3 /s' : '-'}
+                  label="Growth rate" explorerLabel="Final saved growth rate"
+                  value={IS_EXPLORER?`${results.timeseries.growth_rate?.find(s=>(s as any).generation===primarySummary.generation)?.points.slice(-1)[0]?.value??'unavailable'} /s`:primarySummary.growth_rate != null ? (primarySummary.growth_rate * 1000).toFixed(2) + ' x10^-3 /s' : '-'}
                   help="Specific growth rate near the end of the simulation. This is often the first phenotype to compare against WT."
                   deltaPct={hasWildtype ? wtDelta?.growth_rate_pct : undefined}
                 />
@@ -696,11 +706,11 @@ export function ResultsPage() {
                 />
               </div>
             )}
-            <NextStepCallout
+            {!IS_EXPLORER&&<NextStepCallout
               strongestWtDelta={strongestWtDelta}
               hasWildtype={hasWildtype}
               focusGeneSymbol={focusGeneSymbol}
-            />
+            />}{IS_EXPLORER&&<p className="mt-3 text-sm text-gray-500">Summary: seed {primarySummary?.seed}, actual generation {primarySummary?.generation}. Missing metrics remain unavailable; see recorded outcomes and controls below.</p>}
           </div>
           <aside className="result-run-context rounded-lg border border-gray-200 bg-slate-50 p-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Run context</h3>
@@ -720,14 +730,14 @@ export function ResultsPage() {
         </div>
       </section>
 
-      <ComparisonBaseline
+      {IS_EXPLORER?<PublishedControls experimentId={job.experiment_id}/>:<ComparisonBaseline
         experiment={experiment}
         wtDelta={wtDelta}
         rows={comparisonMetricRows}
         suggestions={comparisonPresets}
         channels={channels}
         onSelectPreset={(preset) => applyPreset(preset, channels)}
-      />
+      />}
 
       <section id="timeseries" className="mb-8 rounded-lg border border-gray-200 bg-white p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -890,7 +900,7 @@ export function ResultsPage() {
             <span>
               <span className="block text-sm font-semibold text-gray-900">Per-generation diagnostics</span>
               <span className="mt-0.5 block text-xs text-gray-500">
-                {results.summary.length} summary rows. Open this when checking replicate or generation-level differences.
+                {results.summary.length} {IS_EXPLORER?<>summary rows. Sequential generations from one seed are not independent replicates.</>:<>summary rows. Open this when checking replicate or generation-level differences.</>}
               </span>
             </span>
             <span className="text-xs font-medium text-gray-500">{showRunTable ? 'Hide table' : 'Show table'}</span>
@@ -951,7 +961,7 @@ function AnalysisPath({
 }) {
   const items = [
     { href: '#phenotype', label: 'Phenotype', detail: 'growth summary' },
-    { href: '#comparison', label: 'WT baseline', detail: hasWildtype ? 'available' : 'missing' },
+    { href: '#comparison', label: IS_EXPLORER?'Published references':'WT baseline', detail: IS_EXPLORER?'manifest controls':hasWildtype ? 'available' : 'missing' },
     { href: '#timeseries', label: 'Time-series', detail: `${visibleChannels}/${totalChannels} channels` },
     { href: '#model-outputs', label: 'Model outputs', detail: hasModelOutputs ? 'available' : 'pending' },
   ]
@@ -1012,13 +1022,13 @@ function NextStepCallout({
   )
 }
 
-function SummaryCard({ label, value, help, deltaPct }: {
-  label: string; value: string; help?: string; deltaPct?: number | null
+function SummaryCard({ label, explorerLabel, value, help, deltaPct }: {
+  explorerLabel?: string; label: string; value: string; help?: string; deltaPct?: number | null
 }) {
   return (
     <div className="result-summary-metric bg-white rounded-lg border border-gray-200 px-4 py-3">
       <p className="text-xs text-gray-400 mb-0.5 flex items-center gap-1">
-        {label}
+        {IS_EXPLORER&&explorerLabel?explorerLabel:label}
         {help && <HelpTip text={help} position="bottom" />}
       </p>
       <p className="text-lg font-semibold text-gray-900">{value}</p>
