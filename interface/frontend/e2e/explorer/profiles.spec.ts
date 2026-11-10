@@ -33,6 +33,18 @@ test('pre-refactor browser drafts reopen and update without a storage migration'
   await expect(page.getByLabel('Name',{exact:true})).toHaveValue(legacy.name)
   await page.getByLabel('Name',{exact:true}).fill(legacy.name+' updated')
   await page.getByRole('button',{name:'Save in this browser',exact:true}).click()
+  // Saving is asynchronous. Assert the durable record before intentionally
+  // reloading; a click alone does not wait for an IndexedDB commit.
+  await expect.poll(()=>page.evaluate(id=>new Promise<string>((resolve,reject)=>{
+   const open=indexedDB.open('wcecoli-explorer-drafts-v1')
+   open.onerror=()=>reject(open.error)
+   open.onsuccess=()=>{
+    const db=open.result,tx=db.transaction('drafts','readonly'),request=tx.objectStore('drafts').get(id)
+    request.onsuccess=()=>resolve(request.result?.name||'')
+    request.onerror=()=>reject(request.error)
+    tx.oncomplete=tx.onabort=()=>db.close()
+   }
+  }),legacy.id),{timeout:15_000}).toBe(legacy.name+' updated')
   await page.reload();await expect(page.getByLabel('Name',{exact:true})).toHaveValue(legacy.name+' updated')
   expect(new URL(page.url()).searchParams.get('draft')).toBe(legacy.id)
  }finally{await context.close()}

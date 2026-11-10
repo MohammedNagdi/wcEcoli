@@ -226,7 +226,7 @@ def test_isolated_compose_and_secret_placeholder():
 def test_launcher_paths_overrides_exit_code_and_argument_boundaries(tmp_path):
     host = load_host()
     root = tmp_path / "checkout with spaces"
-    for name in ("platform.sh", "interface/platform.sh", "interface/explorer/host.py"):
+    for name in ("platform.sh", "interface/platform.sh", "interface/explorer/release.sh"):
         dest = root / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(host.ROOT / name, dest)
@@ -234,6 +234,8 @@ def test_launcher_paths_overrides_exit_code_and_argument_boundaries(tmp_path):
     state.mkdir()
     (state / "current.json").write_text(json.dumps(dict(
         bundle="interface/.explorer/bundles/fixture", image="wcecoli-explorer:fixture", manifest_sha256="a" * 64)))
+    (state / "compose.json").write_text("{}")
+    (state / "empty.env").write_text("# no credentials\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     capture = tmp_path / "invocation.json"
@@ -256,6 +258,15 @@ def test_launcher_paths_overrides_exit_code_and_argument_boundaries(tmp_path):
             assert "dummy-never-print" not in result.stdout + result.stderr + (state / "compose.json").read_text()
     result = subprocess.run([str(root / "platform.sh"), "explorer", "stop"], env=dict(env, EXIT_CODE="37"))
     assert result.returncode == 37
+    custom = tmp_path / "external preview state"
+    custom.mkdir()
+    (custom / "compose.json").write_text("{}")
+    (custom / "empty.env").write_text("# no credentials\n")
+    result = subprocess.run([str(root / "platform.sh"), "explorer", "logs", "--state-dir", str(custom), "--tail=5", "web"], env=env, capture_output=True)
+    assert result.returncode == 0
+    call = json.loads(capture.read_text())
+    assert call["argv"][-3:] == ["logs", "--tail=5", "web"]
+    assert str(custom / "compose.json") in call["argv"]
     capture.unlink()
     for args in (["config"], ["up", "worker"], ["stop", "-v"], ["logs", "a b;$literal"], ["down", "-v"]):
         result = subprocess.run([str(root / "platform.sh"), "explorer", *args], env=env, capture_output=True)

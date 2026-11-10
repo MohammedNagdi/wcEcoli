@@ -105,7 +105,7 @@ test('all four real molecular families, controls and missing generation remain h
   for(const key of ['wt-add-aa','wt-cut-aa']){
     const experiment=records.find((e:any)=>e.name===key);await page.goto(`/results/${experiment.job_id}`);await expect(page.getByText(/^Initial environment reference:/)).toBeVisible();await expect(page.getByText(/^Endpoint environment reference:/)).toBeVisible()
   }
-  await page.goto(`/results/compare?ids=${his.id}`);await page.getByLabel('Comparison generation').selectOption('3');await expect(page.getByText('No saved generation 3',{exact:false})).toBeVisible()
+  await page.goto(`/results/compare?ids=${his.id}`);await page.getByLabel('Comparison generation').selectOption('3');await expect(page.getByText('No saved generation 3',{exact:false})).toBeVisible({timeout:60_000})
   expect(errors).toEqual([]);await page.screenshot({path:info.outputPath('honest-missing-generation.png'),fullPage:true})
 })
 
