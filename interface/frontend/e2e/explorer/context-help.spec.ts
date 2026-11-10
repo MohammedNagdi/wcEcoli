@@ -46,8 +46,11 @@ test('workspace and genome help open their exact explanations',async({page})=>{
     await page.goto(path);await page.locator('main a.workspace-guide-link').first().click()
     await expectTopic(page,'model-coverage','Model coverage and gene context')
   }
+  // The empty inspector is behind the responsive pane switch. Wait for that
+  // control explicitly rather than checking isVisible before hydration ends.
+  await page.setViewportSize({width:390,height:900})
   await page.goto('/explore')
-  await selectedGene(page)
+  await page.getByRole('button',{name:'Selected gene',exact:true}).click()
   await page.getByRole('link',{name:'Learn how the model works',exact:true}).click()
   await expectTopic(page,'model-coverage','Model coverage and gene context')
   expect(bad).toEqual([])
