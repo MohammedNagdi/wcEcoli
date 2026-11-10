@@ -18,7 +18,7 @@ All existing scientific copy, sections, defaults, experiment selection rules, sa
 | Menu and panel feedback | [transitions.dev](https://github.com/Jakubantalik/transitions.dev/tree/main/transitions) | 120ms colors, 180ms menus, 200ms disclosures, maximum 4px movement, reduced-motion override |
 | Muted timeline colors | Approved Genome Design palette and user constraint | Slate, rose, ochre, teal, blue and violet; neutral marker labels and matching media dots |
 
-These are manually adapted patterns. No third-party component source was copied. Existing Inspo captures/templates are available in `interface/design-references`; they do not establish a verified experiment-configuration flow.
+These are manually adapted patterns. No third-party component source was copied. Existing Inspo captures/templates are available in `docs/interface/design-references`; they do not establish a verified experiment-configuration flow.
 
 ## Implementation details
 

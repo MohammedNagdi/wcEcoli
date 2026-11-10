@@ -30,4 +30,4 @@ Implemented the approved Hex / Beautiful UI direction using wcEcoli's existing v
 
 Existing backend payloads and action approval order are preserved. Commentary, stream tool evidence and review snapshots are retained in the frontend session; stored messages, proposals, memory and audit records use the existing persistence APIs. Uncertain executions without conclusive records remain blocked rather than automatically retrying.
 
-The patterns were implemented locally for React 18 and Tailwind 3. No Beautiful UI source or paid icons were copied. The approved reference lock and rationale are in `design-references/assistant-refresh-decisions.md`.
+The patterns were implemented locally for React 18 and Tailwind 3. No Beautiful UI source or paid icons were copied. The approved reference lock and rationale are in [assistant refresh decisions](../../design-references/assistant-refresh-decisions.md).

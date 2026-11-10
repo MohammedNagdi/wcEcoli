@@ -9,7 +9,7 @@ gotcha we hit, and the fixes, so you can run local models reliably and tell user
 - A 4-bit model needs **free RAM/VRAM ≈ its size**: `~3B ≈ 3 GB`, `8B ≈ 6 GB`, `12B ≈ 8 GB`,
   `14B ≈ 10–12 GB` (+ a context cache).
 - On **Docker Desktop (WSL2 backend)** the Linux VM grabs **~50% of host RAM by default**, starving
-  Ollama. Cap it with **`%UserProfile%\.wslconfig`** (see [`.wslconfig.example`](./.wslconfig.example)).
+  Ollama. Cap it with **`%UserProfile%\.wslconfig`** (see [`.wslconfig.example`](../../interface/.wslconfig.example)).
 - The assistant now **bounds `num_ctx`** and the eval **unloads each model before the next**, so memory
   stays small and predictable.
 
@@ -32,7 +32,7 @@ management.
 ## The fix
 ### 1. Cap the WSL2 VM (frees host RAM for Ollama)
 Create `%UserProfile%\.wslconfig` (e.g. `C:\Users\<you>\.wslconfig`) from
-[`.wslconfig.example`](./.wslconfig.example):
+[`.wslconfig.example`](../../interface/.wslconfig.example):
 ```ini
 [wsl2]
 memory=12GB

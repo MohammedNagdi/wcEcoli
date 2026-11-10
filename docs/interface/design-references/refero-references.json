@@ -1,0 +1,106 @@
+[
+  {
+    "n": 1,
+    "key": "seline",
+    "name": "Seline Analytics",
+    "role": "Results overview",
+    "pattern": "Overview first, details within reach",
+    "kind": "Marketing capture with embedded dashboard",
+    "url": "https://styles.refero.design/style/7967c6d9-e50c-42b5-b4d1-74003ba41781",
+    "observed": "The embedded dashboard has a labeled left rail, filter and date controls above the data, a compact metrics strip, and two main chart panels. Tooltips in the capture attach values to specific points.",
+    "adapt": "Use this hierarchy for experiment outcomes: identify the experiment and condition first, then show key biological metrics and time series. Keep seed count, units, uncertainty, and the wildtype reference beside the metrics. Make filters apply consistently across the view.",
+    "limit": "This is a product preview, not an inspected result-comparison flow. Its decorative headline and mascot have little value in a scientific work area.",
+    "fit": "Best match for the Analyze phase.",
+    "crop": [
+      0.18,
+      0.5,
+      0.82,
+      0.98
+    ]
+  },
+  {
+    "n": 2,
+    "key": "asana",
+    "name": "Asana",
+    "role": "Run monitoring and navigation",
+    "pattern": "Persistent navigation + status summaries",
+    "kind": "Standalone dashboard screen; public thumbnail",
+    "url": "https://refero.design/pages/e949d7ef-227b-4e74-9878-0bfe619b66b6?order=trending&source=search",
+    "observed": "A persistent labeled sidebar accompanies status cards and chart panels. The capture includes an Add chart action, filter indicators under metrics, and a bottom-left Help & getting started entry.",
+    "adapt": "Translate the status overview into queued, running, completed, and failed simulation counts. Keep a labeled help entry available from every phase. Put deeper job diagnostics behind the selected run so the overview stays easy to scan.",
+    "limit": "The screen concerns tasks, not scientific jobs. A screenshot cannot establish that help, keyboard navigation, or filters work well. Inspect those behaviors in a later prototype.",
+    "fit": "Best match for Run status and always-available help.",
+    "crop": null
+  },
+  {
+    "n": 3,
+    "key": "mintlify",
+    "name": "Mintlify",
+    "role": "Guide and contextual help",
+    "pattern": "Topic navigation + search + page outline",
+    "kind": "Marketing capture with embedded documentation UI",
+    "url": "https://styles.refero.design/style/80d7ef36-ed7e-48bb-b558-f772eb40106f",
+    "observed": "The documentation preview shows a topic sidebar with Quickstart selected, Guides/API Reference/Changelog tabs, Search or ask, a central article, and an On this page outline.",
+    "adapt": "Organize the Guide around first simulation, experiment types, conditions, interpreting results, and troubleshooting. Link local help directly to the relevant section. Use short definitions and worked examples for students, with technical detail available alongside them.",
+    "limit": "Borrow the documentation structure. The illustrated marketing hero is not evidence for an in-product help flow, and an AI answer should not replace the authoritative scientific explanation.",
+    "fit": "Best match for student onboarding and academic reference.",
+    "crop": [
+      0.16,
+      0.57,
+      0.84,
+      0.99
+    ]
+  },
+  {
+    "n": 4,
+    "key": "reworkd",
+    "name": "Reworkd",
+    "role": "Experiment and batch catalog",
+    "pattern": "Filter toolbar + dense, aligned table",
+    "kind": "Archived marketing capture with embedded data table",
+    "url": "https://styles.refero.design/style/95913740-3ff7-45ec-a05b-4acf040850a0",
+    "observed": "The preview places a search field and dropdown filters directly above a table. Rows separate an ID, status, description, due field, and attachments; a selected row is visibly marked.",
+    "adapt": "Use one table for experiment or batch browsing, with name, variant, condition, seed count, status, and updated time. Place search and filters above it. Keep technical identifiers secondary to readable experiment names.",
+    "limit": "The capture announces a February 2025 product sunset. Treat it as an archived pattern reference. The table is visible, but its editing, pagination, and error behavior are not verified.",
+    "fit": "Best match for finding and organizing experiments.",
+    "crop": [
+      0.16,
+      0.51,
+      0.84,
+      0.85
+    ]
+  },
+  {
+    "n": 5,
+    "key": "grafbase",
+    "name": "Grafbase",
+    "role": "Primary visual foundation",
+    "pattern": "Neutral technical workspace + labeled rail",
+    "kind": "Marketing capture with embedded console UI",
+    "url": "https://styles.refero.design/style/1c1d3939-8d82-4907-aa3c-c9b2fcfbab4f",
+    "observed": "The capture uses a mostly white and charcoal foundation. Its embedded console has a labeled sidebar, explicit environment metadata, thin panel borders, and line charts. Refero describes Inter as the main type family.",
+    "adapt": "Use this neutral, precise foundation for the report and simulator direction. Preserve readable navigation labels, a clear heading hierarchy, and quiet separators. Let plots and run states carry meaning rather than adding decorative color throughout the interface.",
+    "limit": "The large marketing headline, banner gradient, and conversion layout belong to the marketing surface. They do not justify the layout or color semantics of scientific charts.",
+    "fit": "Best overall visual foundation; not a ready-made app template.",
+    "crop": [
+      0.52,
+      0.22,
+      0.99,
+      0.91
+    ]
+  },
+  {
+    "n": 6,
+    "key": "reown",
+    "name": "Reown",
+    "role": "Empty results and first use",
+    "pattern": "Contextual empty state with explanation",
+    "kind": "Standalone analytics screen; public thumbnail",
+    "url": "https://refero.design/pages/986c1f49-a654-4087-b43d-8786f9d2e9ab",
+    "observed": "Analytics remains a clearly selected tab while chart-shaped placeholders explain that no data is available yet and suggest setup or waiting for activity.",
+    "adapt": "Distinguish no experiments, no completed results, an active run, and no matches for the current filter. State the reason and offer the relevant next action: create an experiment, view its progress, or clear filters.",
+    "limit": "The muted placeholders offer context but are easy to mistake for loading. Use explicit text in wcEcoli, and do not imply that an empty-state action or recovery flow was verified here.",
+    "fit": "Useful supporting pattern for students and first-time users.",
+    "crop": null
+  }
+]

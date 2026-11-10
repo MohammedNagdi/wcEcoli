@@ -2,6 +2,12 @@
 
 These are the docs for a variety of topics on the Whole Cell Model.
 
+## Web interface and deployment
+
+- [Local web platform setup](../interface/README.md)
+- [Interface documentation and historical reports](interface/README.md)
+- [Hugging Face deployment task catalog](huggingface-deployment-tracker.md)
+
 ## setup
 
 
