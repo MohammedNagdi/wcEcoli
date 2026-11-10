@@ -10,9 +10,21 @@ export default defineConfig(({mode}) => {
   const entry = profile === 'explorer' ? 'explorer' : env.VITE_PILOT_PREVIEW === '1' ? 'pilot' : 'local'
   return {
   publicDir: profile === 'explorer' ? 'public-explorer' : 'public',
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'deployment-profile-boundary',
+    generateBundle(_options, bundle) {
+      const modules = Object.values(bundle).flatMap(item => item.type === 'chunk'
+        ? Object.entries(item.modules).filter(([,info]) => info.renderedLength > 0).map(([id]) => id.replaceAll('\\', '/')) : [])
+      const forbidden = profile === 'explorer'
+        ? ['/src/App.tsx', '/src/PilotPreview.tsx', '/assistant/AssistantProvider.tsx', '/assistant/AssistantDock.tsx', '/deployment/persistence-local.ts']
+        : entry === 'local' ? ['/explorer/drafts.ts', '/deployment/persistence-explorer.ts'] : []
+      for (const suffix of forbidden) if (modules.some(id => id.endsWith(suffix)))
+        throw new Error(`Profile ${entry} includes forbidden runtime module: ${suffix}`)
+    },
+  }],
   resolve: {
     alias: {
+      '@deployment/drafts': path.resolve(__dirname, profile === 'explorer' ? './src/explorer/drafts.ts' : './src/deployment/drafts-local.ts'),
       '@deployment/assistant': path.resolve(__dirname, `./src/deployment/assistant-${profile}.tsx`),
       '@deployment/persistence': path.resolve(__dirname, `./src/deployment/persistence-${profile}.ts`),
       '@deployment/entry': path.resolve(__dirname, `./src/deployment/${entry}-entry.ts`),

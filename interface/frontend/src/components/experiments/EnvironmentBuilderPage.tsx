@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useRegisterAssistantContext } from '@deployment/assistant'
 import {IS_EXPLORER} from '../../explorer/mode'
-import {downloadDrafts,getDraft,makeDraft,referenceLabel} from '../../explorer/drafts'
+import {downloadDrafts,getDraft,makeDraft} from '@deployment/drafts'
+import {referenceLabel} from '../../utils/referenceLabel'
 import { makeAssistantContextKey, summarizeText } from '../../utils/assistantContext'
 import {
   createBuilderDraft,

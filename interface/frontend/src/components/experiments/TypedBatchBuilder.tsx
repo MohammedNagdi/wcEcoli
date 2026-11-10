@@ -2,7 +2,7 @@ import { ExperimentScrollRegion, ExperimentStepBadge } from './ExperimentPresent
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {IS_EXPLORER} from '../../explorer/mode'
-import {getDraft,saveDraft} from '../../explorer/drafts'
+import {getDraft,saveDraft} from '@deployment/drafts'
 import {DraftNotice} from '../../explorer/DraftNotice'
 import { createBatchExperiments, getConditions, getGenes, getMediaRecipes, getVariantDetail, getVariants } from '../../api/client'
 import type { Condition, Gene, MediaRecipe, Variant, VariantDetail } from '../../types'

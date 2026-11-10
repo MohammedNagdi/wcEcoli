@@ -13,7 +13,8 @@
     "dev:local": "VITE_DEPLOYMENT_MODE=local vite --host 0.0.0.0",
     "dev:explorer": "VITE_DEPLOYMENT_MODE=explorer vite --host 0.0.0.0",
     "build:local": "VITE_DEPLOYMENT_MODE=local npm run build",
-    "build:explorer": "VITE_DEPLOYMENT_MODE=explorer npm run build"
+    "build:explorer": "VITE_DEPLOYMENT_MODE=explorer npm run build",
+    "test:profiles": "node scripts/test-profiles.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

@@ -1,3 +1,5 @@
+import {rememberReferenceName} from '../utils/referenceLabel'
+export {referenceLabel} from '../utils/referenceLabel'
 import {draftBinding} from './mode'
 import type {BuilderDraft, BuilderDraftCollection, BuilderDraftSection, ConditionCatalog} from '../types'
 
@@ -9,7 +11,7 @@ export type PersonalDraft = {
 }
 export type DraftDocument = {schema_version:'explorer-drafts-v1'; drafts:PersonalDraft[]}
 const sections: BuilderDraftSection[] = ['media','mediaRecipe','condition','tfCondition','timeline']
-const kinds = new Set<string>(['experiment','batch',...sections])
+const kinds = /* @__PURE__ */ new Set<string>(['experiment','batch',...sections])
 const MAX_BYTES = 5*1024*1024
 
 function connect(): Promise<IDBDatabase> {
@@ -33,9 +35,7 @@ async function transaction<T>(mode:IDBTransactionMode, action:(store:IDBObjectSt
     tx.onerror = tx.onabort = () => { db.close(); reject(new Error('Browser save failed. Your design is not saved; download a copy.')) }
   })
 }
-const names=new Map<string,string>()
-export const referenceLabel=(value:string)=>value.startsWith('draft:')?'My '+(names.get(value.slice(6))||'saved reference'):value
-export async function allDrafts(){const records=await transaction<PersonalDraft[]>('readonly',s=>s.getAll());for(const d of records)names.set(d.id,d.name);return records}
+export async function allDrafts(){const records=await transaction<PersonalDraft[]>('readonly',s=>s.getAll());for(const d of records)rememberReferenceName(d.id,d.name);return records}
 export async function getDraft(id:string) {
   const draft = await transaction<PersonalDraft | undefined>('readonly',s=>s.get(id))
   if (!draft) throw new Error('This personal draft is not saved in this browser')

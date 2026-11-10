@@ -18,7 +18,7 @@ import { TimelineComposer } from './TimelineComposer'
 import { ExperimentStepBadge } from './ExperimentPresentation'
 import {IS_EXPLORER} from '../../explorer/mode'
 import {guideVariantHref} from '../../explorer/guideLinks'
-import {getDraft,saveDraft} from '../../explorer/drafts'
+import {getDraft,saveDraft} from '@deployment/drafts'
 import {DraftNotice} from '../../explorer/DraftNotice'
 import './designer.css'
 

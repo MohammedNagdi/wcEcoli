@@ -32,6 +32,9 @@
       ],
       "@deployment/assistant": [
         "src/deployment/assistant-local.tsx"
+      ],
+      "@deployment/drafts": [
+        "src/deployment/drafts-local.ts"
       ]
     }
   },

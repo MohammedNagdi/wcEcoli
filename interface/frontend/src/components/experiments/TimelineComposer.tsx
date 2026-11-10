@@ -1,4 +1,4 @@
-import {referenceLabel} from '../../explorer/drafts'
+import {referenceLabel} from '../../utils/referenceLabel'
 import { useId, useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import type { Condition, MediaRecipe, Timeline, UserTimeline } from '../../types'
 import { getTimelines, getUserTimelines, saveUserTimeline } from '../../api/client'
