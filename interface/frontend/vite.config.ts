@@ -13,6 +13,7 @@ export default defineConfig(({mode}) => {
   plugins: [react()],
   resolve: {
     alias: {
+      '@deployment/persistence': path.resolve(__dirname, `./src/deployment/persistence-${profile}.ts`),
       '@deployment/entry': path.resolve(__dirname, `./src/deployment/${entry}-entry.ts`),
       '@': path.resolve(__dirname, './src'),
     },

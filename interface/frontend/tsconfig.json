@@ -26,6 +26,9 @@
       ],
       "@deployment/entry": [
         "src/deployment/local-entry.ts"
+      ],
+      "@deployment/persistence": [
+        "src/deployment/persistence-local.ts"
       ]
     }
   },
