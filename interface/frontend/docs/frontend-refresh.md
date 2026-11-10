@@ -16,15 +16,16 @@ The refresh adds an introduction at `/`, preserves the working workspace at `/ex
 
 ## Product previews
 
-`public/previews/` contains light/dark WebP captures of real local platform pages (1440×960), plus 720×480 variants. The results are example model output, not experimental measurements. They were captured on 2026-10-03 without saving configurations or queuing simulations.
+`public/previews/` contains updated light/dark WebP captures of real local workspace, designer, and Results browser pages at 720/1440/2400px widths. Each crop retains its own aspect ratio; generated `previewDimensions.json` reserves matching layout space. The results are example model output, not experimental measurements. The captures were refreshed on 2026-10-06 without saving configurations or queuing simulations.
 
 To reproduce with the frontend and local API running:
 
 ```sh
 node scripts/capture-previews.mjs
+python scripts/export-previews.py
 ```
 
-The default output is `/private/tmp/wcecoli-previews`. Optimize those PNGs with Pillow to RGB WebP: quality 90/method 6 at native size; quality 86/method 6 for 720×480. Place the resulting images in `public/previews/` with the same filenames. Do not commit raw PNGs. Review the results preview before refreshing it because it reflects the local session's data.
+Raw captures default to `/private/tmp/wcecoli-previews`. The exporter uses existing Pillow to create RGB WebP variants and matching layout metadata. The designer crop includes its full Run summary; the Results crop ends after three complete cards. Review the actual local records before exporting them. Raw PNGs remain outside the repository.
 
 ## Verification
 
@@ -32,3 +33,5 @@ The default output is `/private/tmp/wcecoli-previews`. Optimize those PNGs with 
 - Browser regression: `npm run e2e -- home.spec.ts theme.spec.ts smoke.spec.ts a11y.spec.ts --workers=3`.
 - Preview: `http://localhost:5173/`; working workspace: `/explore`.
 - Legacy root workspace query keys redirect with search/hash intact; normal introduction tracking parameters do not redirect.
+
+Preview refresh verification (2026-10-06): production build and whitespace checks passed; all 66 homepage/theme/accessibility checks passed in Chromium and WebKit. All 18 exported variants match their reserved dimensions and aspect ratios. Light/dark captures were visually reviewed, including a live homepage check. Capture rejects Vite error overlays; no configurations were saved and no simulations were launched.

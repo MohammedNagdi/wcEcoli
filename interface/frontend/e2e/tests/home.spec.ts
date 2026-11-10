@@ -140,7 +140,7 @@ for (const mode of ['light', 'dark'] as const) {
     // Each crop has its own aspect ratio; reserve the right space before it loads
     // and offer a sharp source for high-density screens.
     const previews = page.locator('main img')
-    for (const [index, height] of [960, 730, 835].entries()) {
+    for (const [index, height] of [960, 730, 1005].entries()) {
       const preview = previews.nth(index)
       await expect(preview).toHaveAttribute('width', '1200')
       await expect(preview).toHaveAttribute('height', String(height))

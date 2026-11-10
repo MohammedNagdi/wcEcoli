@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ThemeToggle } from '../theme/ThemeToggle'
 import { useTheme } from '../theme/ThemeProvider'
 import '../../styles/home.css'
+import previewDimensions from './previewDimensions.json'
 
 const steps = [
   {
@@ -78,7 +79,7 @@ function ProductPreview({
 }) {
   const { resolvedTheme } = useTheme()
   const mode = resolvedTheme === 'dark' ? '-dark' : ''
-  const height = { workspace: 960, experiment: 730, results: 835 }[name]
+  const { width, height } = previewDimensions[name]
   return (
     <img
       src={`/previews/${name}${mode}.webp`}
@@ -88,7 +89,7 @@ function ProductPreview({
           ? '(max-width: 380px) calc(100vw - 32px), (max-width: 1248px) calc(100vw - 48px), 1200px'
           : '(max-width: 380px) calc(100vw - 32px), (max-width: 800px) calc(100vw - 48px), (max-width: 1000px) calc((100vw - 80px) * 0.6364), (max-width: 1248px) calc((100vw - 112px) * 0.6364), 723px'
       }
-      width={1200}
+      width={width}
       height={height}
       alt={alt}
       loading={priority ? 'eager' : 'lazy'}

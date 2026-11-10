@@ -20,9 +20,13 @@ try {
       ['experiment', '/experiments/new?variant=gene_knockout&gene=dnaA'],
       ['results', '/results'],
     ]) {
+      await page.setViewportSize({ width: 1440, height: name === 'workspace' ? 960 : 1280 })
       await page.goto(baseURL + route)
       await page.waitForLoadState('networkidle')
       await page.evaluate(() => document.fonts.ready)
+      if (await page.locator('vite-error-overlay').count()) {
+        throw new Error(`Refusing to capture a development error overlay for ${name}`)
+      }
       // Keep the relevant product content readable: omit repeated global navigation
       // and the floating launcher, and end on a complete card rather than cutting one off.
       const main = page.getByRole('main')
@@ -33,17 +37,18 @@ try {
         const parameters = await main.locator('section').filter({
           has: page.getByRole('heading', { name: /^Simulation parameters/ }),
         }).boundingBox()
-        const summary = await main.getByRole('heading', { name: 'Run summary', exact: true })
-          .locator('..').boundingBox()
+        const summary = await main.locator('.designer-summary').boundingBox()
         if (!parameters || !summary) throw new Error('Experiment preview is not ready')
         bottom = Math.max(parameters.y + parameters.height, summary.y + summary.height) + 16
       } else if (name === 'results') {
-        const cards = main.locator('.space-y-4 > div').filter({ has: page.getByRole('heading', { level: 3 }) })
+        const cards = main.locator('.results-experiment-card')
+        await cards.first().waitFor({ state: 'visible' })
+        await main.locator('.results-metrics').first().waitFor({ state: 'visible' })
         const count = await cards.count()
         if (!count) throw new Error('Capture results requires existing completed example records')
         const last = await cards.nth(Math.min(count, 3) - 1).boundingBox()
         if (!last) throw new Error('Result preview is not ready')
-        bottom = last.y + last.height + 16
+        bottom = last.y + last.height + 8
       }
       const clip = { x: bounds.x, y: bounds.y, width: bounds.width, height: Math.ceil(bottom - bounds.y) }
       if (clip.height > bounds.height) throw new Error(`${name} preview does not fit the capture viewport`)
