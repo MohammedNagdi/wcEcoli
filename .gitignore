@@ -88,6 +88,7 @@ user/*
 # personal config files #
 #########################
 /*.yaml
+!/compose.yaml
 
 # Fireworks output #
 ####################
@@ -169,3 +170,10 @@ reconstruction/ecoli/scripts/nca/data/regulon-db/*.tsv
 # temporary test directories
 test/
 tmp/
+
+# Generated UI verification output (keep source fixtures and published previews).
+/output/
+.ruff_cache/
+
+# Isolated pilot frozen source, receipts and resource observations
+/interface/.pilot/

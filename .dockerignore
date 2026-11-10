@@ -117,6 +117,24 @@ reconstruction/ecoli/dataclasses/process/two_component_system_odes_fitter.py
 /build/
 /.mypy_cache/
 secrets.*
+
+# Local web-platform dependencies and generated output are not runtime source.
+**/node_modules/
+**/.venv/
+**/.pytest_cache/
+**/.ruff_cache/
+**/test-results/
+**/playwright-report/
+**/blob-report/
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+/interface/frontend/dist/
+/interface/backend/data/
+/interface/backend/eval/baselines/
+/output/
+/cache/
 reconstruction/ecoli/scripts/nca/data/regulon-db/*.tsv
 
 # LaTeX compilation files #
@@ -127,3 +145,7 @@ reconstruction/ecoli/scripts/nca/data/regulon-db/*.tsv
 *.fdb_latexmk
 *.fls
 *.synctex.gz
+
+/interface/.pilot/
+/interface/.explorer/
+/interface/.publication/

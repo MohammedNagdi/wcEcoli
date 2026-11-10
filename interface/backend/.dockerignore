@@ -1,0 +1,18 @@
+# This context is interface/backend, not the repository root.
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+.schema_version
+eval/baselines/
+.env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store

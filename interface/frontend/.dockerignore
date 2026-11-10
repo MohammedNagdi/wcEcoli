@@ -1,0 +1,12 @@
+# This context is interface/frontend, not the repository root.
+node_modules/
+dist/
+test-results/
+playwright-report/
+blob-report/
+.last-run.json
+.env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store

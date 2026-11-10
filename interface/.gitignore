@@ -29,3 +29,13 @@ sim_output/
 
 # Environment (machine-specific)
 .env
+
+# Generated backend caches and SQLite sidecars; never remove the live files to clean Git.
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/data/*.db-*
+backend/data/*.sqlite-*
+
+# Reviewed local HF-07 packages, receipts, dependency environment and build proofs.
+.explorer/
+.publication/
