@@ -130,3 +130,20 @@ details[open] > summary .builder-disclosure-chevron { transform: rotate(90deg); 
   .builder-dependency-sequence li + li::before { content: ''; position: absolute; width: 1px; top: 0; bottom: calc(50% + 15px); left: 13px; background: rgb(var(--color-border-subtle)); pointer-events: none; }
   .builder-dependency-sequence li:not(:last-child)::after { content: ''; position: absolute; width: 1px; top: calc(50% + 15px); bottom: 0; left: 13px; background: rgb(var(--color-border-subtle)); pointer-events: none; }
 }
+
+/* Match the workspace/designer reading scale without changing builder layout. */
+.environment-builder.environment-builder .builder-header h1 { font-size: 22px; line-height: 30px; }
+.environment-builder.environment-builder .builder-section-heading h2 { font-size: 16px; line-height: 24px; }
+.environment-builder.environment-builder .builder-document p,
+.environment-builder.environment-builder .builder-header-description { font-size: 14px; line-height: 22px; }
+.environment-builder.environment-builder :is(.builder-desktop-navigation h2, .builder-desktop-navigation a, .builder-desktop-navigation small, .builder-mobile-navigation label, .builder-guidance h3, .builder-stacked-label, .builder-step-number, .builder-dependency-number, .builder-header-kicker) {
+  font-size: 13px; line-height: 20px;
+}
+.environment-builder.environment-builder .builder-document :is(.builder-dependency-answer, .builder-dependency-status, .builder-section-label),
+.environment-builder.environment-builder .builder-document p.font-mono,
+.environment-builder.environment-builder :is(.builder-document, .builder-dialog, .builder-header) :is(.text-xs, [class~='text-[10px]'], [class~='text-[11px]'], .font-mono),
+.environment-builder.environment-builder .builder-reference > summary > span:last-child,
+.environment-builder.environment-builder #builder-catalog > summary > div > span {
+  font-size: 13px; line-height: 20px;
+}
+.environment-builder.environment-builder :is(input:not([type=checkbox]), select, textarea) { font-size: 14px; line-height: 22px; }
