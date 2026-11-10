@@ -10,7 +10,7 @@ Usage: ./platform.sh demo <prepare|run|status|cleanup|preview|stop>
        ./platform.sh pilot <prepare|run|status|preview|stop>
        ./platform.sh local <docker compose arguments...>
        ./platform.sh explorer <bundle|up|ps|logs|config|stop>
-       ./platform.sh publish <check|dataset|space|update-space|status>
+       ./platform.sh publish <check|dataset|space|update-space|rollback-space|status>
 
 Examples (from the repository root or interface directory):
   ./platform.sh local up -d --build             # full local platform

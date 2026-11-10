@@ -20,7 +20,7 @@ spec.loader.exec_module(publish)
 
 @pytest.fixture
 def release(tmp_path, monkeypatch):
-    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(CommitOperationAdd=SimpleNamespace))
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(CommitOperationAdd=SimpleNamespace, CommitOperationDelete=SimpleNamespace))
     monkeypatch.setattr(publish, "STATE", tmp_path / "state")
     monkeypatch.setattr(publish, "ROOT", tmp_path)
     base = tmp_path / "interface/.explorer/bundles" / ("a" * 20)
@@ -356,10 +356,10 @@ def update_release(release, monkeypatch):
     publish.save("dataset.json",dict(phase="verified",revision="f"*40,manifest_sha256=receipt["manifest_sha256"]))
     variables=dict(EXPLORER_DATASET_REVISION="f"*40,EXPLORER_MANIFEST_SHA256=receipt["manifest_sha256"])
     publish.save("space-settings.json",dict(variables=variables))
-    monkeypatch.setattr(publish,"info",lambda api,kind,repo:SimpleNamespace(private=True,sha="f"*40 if kind=="dataset" else "a"*40))
+    monkeypatch.setattr(publish,"info",lambda api,kind,repo:SimpleNamespace(private=True,visibility="protected",sha="f"*40 if kind=="dataset" else "a"*40))
     monkeypatch.setattr(publish,"monitor_space",lambda *a:dict(ready=True))
     calls=[]
-    api=SimpleNamespace(token="dummy",get_space_variables=lambda _: {k:SimpleNamespace(value=v) for k,v in variables.items()},
+    api=SimpleNamespace(token="dummy",get_space_runtime=lambda _:SimpleNamespace(hardware="cpu-basic"),get_space_variables=lambda _: {k:SimpleNamespace(value=v) for k,v in variables.items()},
                         create_commit=lambda *a,**kw:(calls.append(kw) or SimpleNamespace(oid="c"*40)))
     return receipt,base,baseline,api,calls
 
@@ -442,3 +442,66 @@ def test_update_space_refuses_unreviewed_changes(update_release, monkeypatch, fa
     with pytest.raises(publish.ReleaseError):
         publish.update_space(api,receipt,base)
     assert not calls
+
+@pytest.mark.parametrize('visibility', ['private', 'public', None])
+def test_update_requires_explicit_protected_visibility(update_release, monkeypatch, visibility):
+    receipt, base, baseline, api, calls = update_release
+    monkeypatch.setattr(publish, 'info', lambda api, kind, repo: SimpleNamespace(private=True, visibility=visibility, sha='f'*40 if kind=='dataset' else 'a'*40))
+    with pytest.raises(publish.ReleaseError, match='Protected'):
+        publish.update_space(api, receipt, base)
+    assert calls == []
+
+
+def prepare_rollback(receipt, base, baseline):
+    added = base / 'space/added-by-this-release.txt'
+    added.write_text('reviewed addition')
+    receipt['space_inventory'] = publish.host.inventory(base/'space')
+    (base/'evidence').mkdir(exist_ok=True)
+    (base/'evidence/package.json').write_text(json.dumps(receipt))
+    forward = publish.read('space-update.json')
+    forward.update(phase='uploaded', revision='c'*40, allowed_files=['README.md','added-by-this-release.txt'])
+    publish.save('space-update.json', forward)
+    publish.save('space-upload.json', dict(revision='c'*40))
+    publish.save('space-rollback.json', dict(approved_by_user=True,
+        forward_package_sha256=receipt['source_sha256'], package_sha256=baseline['source_sha256'],
+        allowed_files=['README.md'], allowed_deletions=['added-by-this-release.txt']))
+
+
+def test_rollback_reverses_only_reviewed_additions_and_replacements(update_release, monkeypatch):
+    receipt, base, baseline, api, calls = update_release
+    prepare_rollback(receipt, base, baseline)
+    monkeypatch.setattr(publish, 'info', lambda api, kind, repo: SimpleNamespace(private=True, visibility='protected', sha='f'*40 if kind=='dataset' else 'c'*40))
+    inventories=iter([receipt['space_inventory'],baseline['space_inventory']])
+    monkeypatch.setattr(publish,'remote_inventory',lambda *a:next(inventories))
+    assert publish.rollback_space(api,receipt,base)==dict(ready=True)
+    assert calls[0]['parent_commit']=='c'*40
+    assert sorted(o.path_in_repo for o in calls[0]['operations'])==['README.md','added-by-this-release.txt']
+    assert publish.read('space-rollback.json')['phase']=='uploaded'
+    assert publish.read('space-update.json')['package_sha256']==receipt['source_sha256']
+
+
+@pytest.mark.parametrize('failure',['unapproved','deletion','parent'])
+def test_rollback_refuses_unapproved_scope_or_remote_drift(update_release,monkeypatch,failure):
+    receipt,base,baseline,api,calls=update_release
+    prepare_rollback(receipt,base,baseline)
+    if failure=='parent':
+        monkeypatch.setattr(publish,'info',lambda api,kind,repo:SimpleNamespace(private=True,visibility='protected',sha='f'*40 if kind=='dataset' else 'd'*40))
+        monkeypatch.setattr(publish,'remote_inventory',lambda *a:receipt['space_inventory'])
+    else:
+        plan=publish.read('space-rollback.json')
+        if failure=='unapproved':plan['approved_by_user']=False
+        else:plan['allowed_deletions'].append('PUBLICATION.md')
+        publish.save('space-rollback.json',plan)
+    with pytest.raises(publish.ReleaseError):publish.rollback_space(api,receipt,base)
+    assert calls==[]
+
+
+def test_rollback_resume_does_not_create_another_commit(update_release,monkeypatch):
+    receipt,base,baseline,api,calls=update_release
+    prepare_rollback(receipt,base,baseline)
+    plan=publish.read('space-rollback.json');plan.update(phase='uploaded',revision='d'*40);publish.save('space-rollback.json',plan)
+    publish.save('space-upload.json',dict(revision='d'*40))
+    monkeypatch.setattr(publish,'info',lambda api,kind,repo:SimpleNamespace(private=True,visibility='protected',sha='f'*40 if kind=='dataset' else 'd'*40))
+    monkeypatch.setattr(publish,'remote_inventory',lambda *a:baseline['space_inventory'])
+    publish.rollback_space(api,receipt,base)
+    assert calls==[]

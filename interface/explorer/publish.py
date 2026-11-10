@@ -339,9 +339,12 @@ def monitor_space(api, uploaded, variables):
 
 
 def update_space(api, receipt, base):
-    """Apply an approved, exact-file patch to an accepted private deployment."""
-    from huggingface_hub import CommitOperationAdd
-    plan = read("space-update.json", {})
+    """Apply a reviewed forward update to the existing Protected Space."""
+    return _update_space(api, receipt, base, read("space-update.json", {}))
+
+
+def _update_space(api, receipt, base, plan, *, rollback=False):
+    from huggingface_hub import CommitOperationAdd, CommitOperationDelete
     if plan.get("package_sha256") != receipt["source_sha256"] or plan.get("approved_by_user") is not True:
         raise ReleaseError("A reviewed Space update bound to this package is required")
     prior_path = ROOT / plan.get("baseline_bundle", "")
@@ -357,7 +360,10 @@ def update_space(api, receipt, base):
     changed = {name for name in after if before.get(name) != after[name]}
     # A reviewed guide may introduce frontend modules. Permit exactly those
     # approved additions as well as replacements, but never remote deletions.
-    if not set(before).issubset(after) or changed != set(plan.get("allowed_files", [])) or not changed:
+    removed = set(before) - set(after)
+    if (changed != set(plan.get("allowed_files", [])) or not (changed or removed)
+            or (removed and not rollback)
+            or (rollback and removed != set(plan.get("allowed_deletions", [])))):
         raise ReleaseError("Space changes differ from the exact approved file list")
     dataset = read("dataset.json", {})
     if (dataset.get("phase") != "verified" or dataset.get("revision") != plan.get("dataset_revision")
@@ -374,18 +380,21 @@ def update_space(api, receipt, base):
             or any(getattr(remote_variables.get(k), "value", None) != v for k, v in variables.items())):
         raise ReleaseError("Hosted configuration differs; no settings were changed")
     observed = info(api, "space", SPACE)
-    if observed is None or not observed.private:
-        raise ReleaseError("Existing Space must remain private")
+    if observed is None or getattr(observed, "visibility", None) != "protected":
+        raise ReleaseError("Existing Space visibility must remain Protected")
+    if api.get_space_runtime(SPACE).hardware != "cpu-basic":
+        raise ReleaseError("Existing Space hardware differs from CPU Basic")
     with tempfile.TemporaryDirectory(prefix="update-check-", dir=STATE) as cache:
         actual = remote_inventory(api, "space", SPACE, observed.sha, after, Path(cache))
     if actual != after:
         if actual != before or observed.sha != plan.get("baseline_revision"):
             raise ReleaseError("Space changed since update approval; refusing overwrite")
         plan["phase"] = "commit_pending"
-        save("space-update.json", plan)
+        save("space-rollback.json" if rollback else "space-update.json", plan)
         committed = api.create_commit(SPACE, repo_type="space", parent_commit=observed.sha,
-            operations=[CommitOperationAdd(path_in_repo=name, path_or_fileobj=str(base / "space" / name)) for name in sorted(changed)],
-            commit_message="Apply reviewed explorer update", num_threads=1)
+            operations=([CommitOperationAdd(path_in_repo=name, path_or_fileobj=str(base / "space" / name)) for name in sorted(changed)]
+                        + [CommitOperationDelete(path_in_repo=name) for name in sorted(removed)]),
+            commit_message="Roll back reviewed explorer update" if rollback else "Apply reviewed explorer update", num_threads=1)
         revision = committed.oid
     else:
         # Resume after a completed commit; exact complete inventory prevents a
@@ -399,13 +408,50 @@ def update_space(api, receipt, base):
     save("space-upload.json", uploaded)
     save("space-settings.json", dict(settings, package_sha256=receipt["source_sha256"]))
     plan.update(phase="uploaded", revision=revision)
-    save("space-update.json", plan)
+    save("space-rollback.json" if rollback else "space-update.json", plan)
     return monitor_space(api, uploaded, variables)
+
+
+def rollback_space(api, receipt, base):
+    """Reverse only this reviewed release, retaining full inventory/parent guards."""
+    forward = read("space-update.json", {})
+    rollback = read("space-rollback.json", {})
+    uploaded = read("space-upload.json", {})
+    if (forward.get("package_sha256") != receipt["source_sha256"]
+            or forward.get("approved_by_user") is not True
+            or rollback.get("approved_by_user") is not True
+            or rollback.get("forward_package_sha256") != receipt["source_sha256"]
+            or forward.get("phase") != "uploaded"
+            or not re.fullmatch(r"[0-9a-f]{40}", forward.get("revision", ""))):
+        raise ReleaseError("Reviewed completed forward release and bound rollback approval required")
+    target = ROOT / forward.get("baseline_bundle", "")
+    if target.resolve().parent != (ROOT / "interface/.explorer/bundles").resolve():
+        raise ReleaseError("Rollback target must be the retained forward baseline")
+    baseline = json.loads((target / "evidence/package.json").read_text())
+    if baseline["source_sha256"] != forward.get("baseline_package_sha256"):
+        raise ReleaseError("Rollback target fingerprint mismatch")
+    for area in ("space", "dataset"):
+        if host.inventory(target / area) != baseline[area + "_inventory"]:
+            raise ReleaseError("Rollback target inventory changed")
+    before, after = receipt["space_inventory"], baseline["space_inventory"]
+    added = set(before) - set(after)
+    changed = {name for name in after if before.get(name) != after[name]}
+    if (set(rollback.get("allowed_deletions", [])) != added
+            or set(rollback.get("allowed_files", [])) != changed
+            or rollback.get("package_sha256") != baseline["source_sha256"]):
+        raise ReleaseError("Rollback operations differ from the exact reviewed inverse")
+    prior_rollback_revision = rollback.get("revision") if rollback.get("phase") == "uploaded" else None
+    if uploaded.get("revision") not in {forward["revision"], prior_rollback_revision}:
+        raise ReleaseError("Current publication receipt is not the reviewed forward release")
+    plan = dict(rollback, baseline_bundle=str(base.relative_to(ROOT)),
+                baseline_package_sha256=receipt["source_sha256"],
+                baseline_revision=forward["revision"], dataset_revision=forward["dataset_revision"])
+    return _update_space(api, baseline, target, plan, rollback=True)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["check", "dataset", "space", "update-space", "status"])
+    parser.add_argument("command", choices=["check", "dataset", "space", "update-space", "rollback-space", "status"])
     args = parser.parse_args(argv)
     phase = "local release lock"
     try:
@@ -426,8 +472,8 @@ def main(argv=None):
                 phase = "local package verification"
                 receipt, base = package()
                 phase = "local publication gates"
-                blockers = gates(receipt, base, preserve_runtime=args.command == "update-space")
-                if args.command in {"dataset", "space", "update-space"} and blockers:
+                blockers = gates(receipt, base, preserve_runtime=args.command in {"update-space", "rollback-space"})
+                if args.command in {"dataset", "space", "update-space", "rollback-space"} and blockers:
                     raise ReleaseError("; ".join(blockers))
                 from huggingface_hub import HfApi
                 phase = "Hugging Face account authentication"
@@ -459,6 +505,9 @@ def main(argv=None):
                     strict_validate(base / "dataset/release")
                     runtime_reader()  # Never start upload with an unverified credential scope.
                     result = publish_dataset(api, receipt, base)
+                elif args.command == "rollback-space":
+                    phase = "reviewed Space rollback"
+                    result = rollback_space(api, receipt, base)
                 elif args.command == "update-space":
                     phase = "reviewed Space-only update"
                     result = update_space(api, receipt, base)
