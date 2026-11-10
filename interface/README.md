@@ -14,7 +14,7 @@ This README covers the current local platform. Supporting documentation:
 - [Assistant evaluation tooling](backend/eval/README.md)
 - [Hugging Face deployment task catalog](../docs/huggingface-deployment-tracker.md)
 
-The public Hugging Face explorer is being prepared separately; it has not been deployed yet.
+The Hugging Face explorer is deployed at https://huggingface.co/spaces/Safrot/wcecoli-explorer. As verified on 10 November 2026, the Space uses Protected visibility: source code is private and the running website is publicly accessible. Its scientific Dataset remains private and pinned to a verified revision. See the deployment task catalog for current evidence and historical milestones.
 
 ---
 

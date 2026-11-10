@@ -1,6 +1,6 @@
 # Hugging Face deployment task catalog
 
-Last updated: 30 October 2026.
+Last updated: 10 November 2026.
 
 This is the working record for deployment preparation, implementation, publication and verification. Update it at the end of each working session. The research note is background; this catalog records the current decisions and actual progress.
 
@@ -632,3 +632,38 @@ mutation has occurred; publication and focused authenticated hosted checks await
 the owner's token-bearing terminal. Details:
 [contextual guide links](interface/contextual-guide-links.md).
 HF-09 remains Ready, not started.
+
+
+### Current hosted release verification — 10 November 2026
+
+Read-only checks confirm RUNNING Space revision
+`3818adacbcdcf5bfda541653cc4f14245e820e41`, matching frozen package
+`8d1073a8e767bc2a48a8`. The expanded guide and contextual links are deployed;
+earlier pending-publication notes describe historical states. Dataset revision
+`a4c3032c37f9bc08a002ed529b1b4f9f84b7eda6` and serving manifest
+`5ec44906b5ef88152261a77676959e624fa7cb4ba65dc3bcd517799373228a18`
+remain pinned. All 138 Space files and 21 Dataset files match reviewed sizes
+and SHA-256 inventories.
+
+The Space is **Protected**, explicitly confirmed by the owner as intended on
+10 November: its source repository is private, while the running website and
+read APIs are publicly accessible. The Dataset repository remains private.
+Repository `private` metadata alone does not distinguish Private from Protected;
+future release checks must inspect explicit `visibility`. The existing publisher
+was written for private staging; do not treat this verification as validation of
+a future Protected-mode publication workflow.
+
+Hosted acceptance passes all 48 experiment/family checks and 3,948 exact
+HTTP/HDF5 comparisons, plus three authenticated browser scenarios covering
+results, molecular families, personal drafts, guide navigation and contextual
+links. Local production checks independently pass the same scientific
+comparisons, 94 derived-metric comparisons and 18 requests from eight concurrent
+clients without changing release files. Execution/shared mutation requests return
+405 and excluded assistant/administrative routes return 404. Anonymous Hub
+repository access is denied; anonymous application access succeeds as expected
+for Protected visibility.
+
+No hosted code, Dataset, secrets, visibility or hardware was changed during these
+checks. HF-09 restart/cache recovery and broader operational acceptance remain
+outstanding. Implementation-phase tracking and detailed new verification evidence
+are retained outside the repository in the current Codex chat artifacts.
