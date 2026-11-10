@@ -16,7 +16,7 @@ import {useTheme} from '../components/theme/ThemeProvider'
 import {ThemeToggle} from '../components/theme/ThemeToggle'
 import {ExplorerGuide} from './ExplorerGuide'
 import {ConfirmDialog} from '../components/common/ConfirmDialog'
-import {setExplorerCapabilities,type ExplorerCapabilities} from './mode'
+import {useExplorerReadiness} from './useExplorerReadiness'
 import {allDrafts,downloadDrafts,duplicateDraft,getDraft,importDocument,removeDraft,saveDraft,type PersonalDraft} from './drafts'
 import '../styles/home.css'
 import './explorer.css'
@@ -37,12 +37,8 @@ function PublicShell(){
 }
 
 export default function ExplorerApp(){
-  const [ready,setReady]=useState(false),[error,setError]=useState(''),[attempt,setAttempt]=useState(0)
-  useEffect(()=>{let alive=true;void read<ExplorerCapabilities>('/capabilities').then(c=>{
-    if(c.schema_version!=='explorer-capabilities-v1'||c.browser_drafts!==true||!['mRNA','protein','reaction_flux','exchange_flux'].every(v=>c.molecular_views?.includes(v))||[c.campaign_sha256,c.reference_sha256,c.model_sha256,c.source_sha256].some(v=>!v||!/^[a-f0-9]{64}$/.test(v))||c.mode!=='explorer'||!c.read_only||c.execution!==false||c.shared_persistence!==false||c.assistant!==false||c.training!==false||!c.references_available)throw new Error('Explorer configuration mismatch or reference metadata missing. The local platform was not loaded.')
-    setExplorerCapabilities(c);if(alive){setReady(true);setError('')}
-  }).catch(e=>{if(alive)setError(e.message)});return()=>{alive=false}},[attempt])
-  if(!ready)return <main className="max-w-xl mx-auto p-8"><h1 className="text-xl font-semibold">Public explorer</h1><ErrorNotice message={error}/>{error?<button className="explorer-button" onClick={()=>setAttempt(n=>n+1)}>Retry configuration</button>:<p role="status">Checking the published release…</p>}</main>
+  const {ready,error,retry}=useExplorerReadiness()
+  if(!ready)return <main className="max-w-xl mx-auto p-8"><h1 className="text-xl font-semibold">Public explorer</h1><ErrorNotice message={error}/>{error?<button className="explorer-button" onClick={retry}>Retry configuration</button>:<p role="status">Checking the published release…</p>}</main>
   return <NavigationGuardProvider><WorkspaceUrlSync/><Routes>
     <Route path="/" element={<ExplorerHome/>}/>
     <Route element={<PublicShell/>}>
