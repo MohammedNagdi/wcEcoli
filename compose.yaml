@@ -1,0 +1,5 @@
+# Keep service definitions and their relative paths in the interface directory.
+name: interface
+
+include:
+  - path: ./interface/docker-compose.yml

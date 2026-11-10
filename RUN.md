@@ -4,6 +4,11 @@
 
 Run these commands from the repository root.
 
+Compose management now also works from the repository root directly. Use
+`./platform.sh local <compose arguments>` from either root or `interface/` for
+consistent environment-file loading. Existing commands below that change into
+`interface/` remain supported; see the [startup guide](docs/interface/hf02-startup.md).
+
 ### Select The CPU Allocation
 
 Check the available CPU cores:

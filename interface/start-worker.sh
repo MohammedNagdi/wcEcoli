@@ -3,6 +3,7 @@
 #
 # Prerequisites:
 #   Run from the repo root: ./interface/start-worker.sh <concurrency> [cpu-budget]
+#   Or from interface/:    ./start-worker.sh <concurrency> [cpu-budget]
 #
 # Concurrency defaults to one. CPU budget defaults to the larger of the
 # simulation demand and the Parca reservation.
@@ -61,4 +62,4 @@ fi
 if [[ "${START_WORKER_DRY_RUN:-0}" == "1" ]]; then
     exit 0
 fi
-docker compose up -d --build sim-runner worker
+exec "$SCRIPT_DIR/platform.sh" local up -d --build sim-runner worker

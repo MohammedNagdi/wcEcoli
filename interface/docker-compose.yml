@@ -1,3 +1,6 @@
+# Preserve the existing project and named volumes from either entry point.
+name: interface
+
 services:
   api:
     build:

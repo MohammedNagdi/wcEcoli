@@ -1,0 +1,333 @@
+{
+  "name": "interface",
+  "networks": {
+    "default": {
+      "ipam": {},
+      "name": "interface_default"
+    }
+  },
+  "services": {
+    "api": {
+      "build": {
+        "context": "${REPO_ROOT}/interface/backend",
+        "dockerfile": "Dockerfile"
+      },
+      "command": null,
+      "entrypoint": null,
+      "environment": {
+        "ANTHROPIC_API_KEY": "",
+        "ASSISTANT_MODEL": "",
+        "ASSISTANT_PROVIDER": "",
+        "DATABASE_PATH": "/app/data/wcecoli.db",
+        "LM_STUDIO_BASE_URL": "",
+        "MODELS_PATH": "/data/models",
+        "OLLAMA_BASE_URL": "",
+        "OPENAI_API_KEY": "",
+        "OPENROUTER_API_KEY": "",
+        "RECONSTRUCTION_PATH": "/data/reconstruction",
+        "SIM_OUTPUT_DIR": "/data/out",
+        "VLLM_BASE_URL": "",
+        "WCECOLI_ROOT": "/data"
+      },
+      "healthcheck": {
+        "interval": "5s",
+        "retries": 60,
+        "start_period": "10s",
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import json, urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)); assert data['status'] == 'ok' and data['database']"
+        ],
+        "timeout": "3s"
+      },
+      "networks": {
+        "default": null
+      },
+      "ports": [
+        {
+          "mode": "ingress",
+          "protocol": "tcp",
+          "published": "8000",
+          "target": 8000
+        }
+      ],
+      "restart": "unless-stopped",
+      "volumes": [
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/interface/backend/app",
+          "target": "/app/app",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/interface/backend/eval",
+          "target": "/app/eval",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/interface/backend/hf_export",
+          "target": "/app/hf_export",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/reconstruction",
+          "target": "/data/reconstruction",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "read_only": true,
+          "source": "${REPO_ROOT}/models",
+          "target": "/data/models",
+          "type": "bind"
+        },
+        {
+          "source": "api-db",
+          "target": "/app/data",
+          "type": "volume",
+          "volume": {}
+        },
+        {
+          "source": "sim-output",
+          "target": "/data/out",
+          "type": "volume",
+          "volume": {}
+        }
+      ]
+    },
+    "sim-runner": {
+      "build": {
+        "context": "${REPO_ROOT}",
+        "dockerfile": "docker/local/Dockerfile"
+      },
+      "command": [
+        "python",
+        "runscripts/manual/simRunner.py"
+      ],
+      "cpus": 8,
+      "entrypoint": null,
+      "environment": {
+        "MKL_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "PARCA_MAX_CONCURRENCY": "1",
+        "SIM_CPUS_PER_JOB": "1",
+        "SIM_RUNNER_CONCURRENCY": "1",
+        "SIM_RUNNER_CPU_BUDGET": "8",
+        "SIM_RUNNER_SOCKET": "/wcEcoli/out/.runner/control.sock",
+        "WORKER_SHUTDOWN_GRACE_SEC": "1800"
+      },
+      "healthcheck": {
+        "interval": "5s",
+        "retries": 12,
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import json, socket; s=socket.socket(socket.AF_UNIX); s.connect('/wcEcoli/out/.runner/control.sock'); s.sendall(b'{\"command\":\"health\"}\\n'); data=json.loads(s.recv(4096)); assert data['ok'] and data['result']['status'] == 'ok'"
+        ],
+        "timeout": "2s"
+      },
+      "image": "wcecoli-sim:latest",
+      "init": true,
+      "networks": {
+        "default": null
+      },
+      "restart": "unless-stopped",
+      "volumes": [
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "read_only": true,
+          "source": "${REPO_ROOT}/reconstruction",
+          "target": "/wcEcoli/reconstruction",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "read_only": true,
+          "source": "${REPO_ROOT}/models",
+          "target": "/wcEcoli/models",
+          "type": "bind"
+        },
+        {
+          "source": "sim-output",
+          "target": "/wcEcoli/out",
+          "type": "volume",
+          "volume": {}
+        }
+      ]
+    },
+    "web": {
+      "build": {
+        "context": "${REPO_ROOT}/interface/frontend",
+        "dockerfile": "Dockerfile"
+      },
+      "command": null,
+      "depends_on": {
+        "api": {
+          "condition": "service_started",
+          "required": true
+        }
+      },
+      "entrypoint": null,
+      "environment": {
+        "VITE_API_URL": "http://api:8000"
+      },
+      "networks": {
+        "default": null
+      },
+      "ports": [
+        {
+          "mode": "ingress",
+          "protocol": "tcp",
+          "published": "5173",
+          "target": 5173
+        }
+      ],
+      "restart": "unless-stopped",
+      "volumes": [
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/interface/frontend/src",
+          "target": "/app/src",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/interface/frontend/index.html",
+          "target": "/app/index.html",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/interface/frontend/public",
+          "target": "/app/public",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/interface/frontend/tailwind.config.js",
+          "target": "/app/tailwind.config.js",
+          "type": "bind"
+        }
+      ]
+    },
+    "worker": {
+      "build": {
+        "context": "${REPO_ROOT}/interface/backend",
+        "dockerfile": "Dockerfile"
+      },
+      "command": [
+        "python",
+        "-m",
+        "app.services.sim_worker"
+      ],
+      "depends_on": {
+        "api": {
+          "condition": "service_healthy",
+          "required": true
+        },
+        "sim-runner": {
+          "condition": "service_healthy",
+          "required": true
+        }
+      },
+      "entrypoint": null,
+      "environment": {
+        "DATABASE_PATH": "/app/data/wcecoli.db",
+        "DOCKER_IMAGE": "wcecoli-sim:latest",
+        "MODELS_PATH": "/data/models",
+        "PARCA_CPUS": "8",
+        "PARCA_MAX_CONCURRENCY": "1",
+        "RECONSTRUCTION_PATH": "/data/reconstruction",
+        "RUNNER_POLL_INTERVAL": "1",
+        "SIM_CPUS_PER_JOB": "1",
+        "SIM_OUTPUT_DIR": "/data/out",
+        "SIM_RUNNER_CONCURRENCY": "1",
+        "SIM_RUNNER_CPU_BUDGET": "8",
+        "SIM_RUNNER_SOCKET": "/data/out/.runner/control.sock",
+        "WCECOLI_ROOT": "/data",
+        "WORKER_LEASE_TIMEOUT": "300",
+        "WORKER_SHUTDOWN_GRACE_SEC": "1800"
+      },
+      "networks": {
+        "default": null
+      },
+      "restart": "unless-stopped",
+      "volumes": [
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "source": "${REPO_ROOT}/interface/backend/app",
+          "target": "/app/app",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "read_only": true,
+          "source": "${REPO_ROOT}/reconstruction",
+          "target": "/data/reconstruction",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "read_only": true,
+          "source": "${REPO_ROOT}/models",
+          "target": "/data/models",
+          "type": "bind"
+        },
+        {
+          "source": "api-db",
+          "target": "/app/data",
+          "type": "volume",
+          "volume": {}
+        },
+        {
+          "source": "sim-output",
+          "target": "/data/out",
+          "type": "volume",
+          "volume": {}
+        }
+      ]
+    }
+  },
+  "volumes": {
+    "api-db": {
+      "name": "interface_api-db"
+    },
+    "sim-output": {
+      "name": "interface_sim-output"
+    }
+  }
+}

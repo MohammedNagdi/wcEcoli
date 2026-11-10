@@ -4,6 +4,18 @@ Interactive experiment designer, simulation runner, and analysis suite for the w
 
 The platform provides a browser-based interface for designing gene knockout experiments, launching simulations inside Docker containers, visualising time-series results, training surrogate ML models, and exploring genome-wide essentiality.
 
+## Documentation
+
+This README covers the current local platform. Supporting documentation:
+
+- [Interface documentation and historical reports](../docs/interface/README.md)
+- [Local LLM setup and troubleshooting](../docs/interface/local-models.md)
+- [Dataset export tooling](backend/hf_export/README.md)
+- [Assistant evaluation tooling](backend/eval/README.md)
+- [Hugging Face deployment task catalog](../docs/huggingface-deployment-tracker.md)
+
+The public Hugging Face explorer is being prepared separately; it has not been deployed yet.
+
 ---
 
 ## Architecture
@@ -43,6 +55,7 @@ The backend API and frontend do not require Docker for browsing or experiment de
 - **Python 3.11+** (backend)
 - **Node.js 18+** and **npm** (frontend)
 - **Docker Desktop** or **Docker Engine** (simulation only — not needed to browse data or design experiments)
+- **Docker Compose v2.20.3+** for the root Compose include (the `docker compose` plugin)
 
 ---
 
@@ -108,8 +121,8 @@ Open http://localhost:5173. The Vite dev server proxies all `/api` requests to t
 Only needed if you want to run simulations (not required for browsing data or designing experiments):
 
 ```bash
-# From the repo root:
-docker build -t wcecoli-sim:latest -f docker/local/Dockerfile .
+# From the repo root or interface/:
+./platform.sh local build sim-runner
 ```
 
 This takes 10–20 minutes the first time (compiling Cython extensions). Subsequent builds use Docker layer cache.
@@ -119,8 +132,7 @@ This takes 10–20 minutes the first time (compiling Cython extensions). Subsequ
 The persistent runner and worker are designed to run through Docker Compose:
 
 ```bash
-cd interface
-SIM_RUNNER_CONCURRENCY=4 SIM_RUNNER_CPU_BUDGET=8 docker compose up -d sim-runner worker
+SIM_RUNNER_CONCURRENCY=4 SIM_RUNNER_CPU_BUDGET=8 ./platform.sh local up -d sim-runner worker
 ```
 
 Concurrency defaults to `1`. Increase it only after measuring peak memory per simulation. The Compose API, worker, and runner must use the same SQLite and output volumes.
@@ -130,6 +142,10 @@ From the repository root, the launcher accepts concurrency and an optional CPU b
 ```bash
 ./interface/start-worker.sh 4 8
 ```
+
+From `interface/`, the same helper is `./start-worker.sh 4 8`. Its existing
+capacity calculation uses positional arguments, exported shell variables, then
+built-in defaults; these computed values override corresponding `.env` defaults.
 
 Without the second argument, the budget is `max(concurrency * SIM_CPUS_PER_JOB, PARCA_CPUS)`.
 The launcher prints the requested and effective simulation capacity before starting Compose.
@@ -141,23 +157,50 @@ The launcher prints the requested and effective simulation capacity before start
 If you prefer running the backend and frontend in Docker too:
 
 ```bash
-cd interface
-docker compose up --build
+# Identical command from the repository root or interface/:
+./platform.sh local up --build
 ```
 
-This starts four containers: API, frontend, worker, and one persistent simulation runner. `docker compose up --build` builds the runner image when needed.
+This starts four containers: API, frontend, worker, and one persistent simulation runner. It builds the runner image when needed. To start only the website, use `./platform.sh local up -d --build api web`.
+
+Plain `docker compose` commands also work from either directory. Service definitions
+remain in `interface/docker-compose.yml`; the root `compose.yaml` includes that
+file. Both default to project `interface`, preserving volumes `interface_api-db`
+and `interface_sim-output`. An intentional `-p`/`--project-name` or
+`COMPOSE_PROJECT_NAME` override still creates or selects a different project.
+
+The launcher explicitly loads `interface/.env` when present, otherwise the
+commented [example](.env.example). Copy the example only when customization is
+needed; startup works without it. Exported shell variables override file values.
+Environment files are parsed by Compose, never executed as shell scripts. Raw
+Compose commands retain Docker's native environment discovery; use the launcher
+to avoid unrelated root/caller `.env` or `COMPOSE_FILE` settings.
+
+Use `./platform.sh --help` for management examples, or see the
+[startup and verification guide](../docs/interface/hf02-startup.md).
+`./platform.sh explorer bundle` creates reviewed local Space/Dataset packages.
+`./platform.sh explorer up -d --build` serves the isolated production explorer at
+[localhost:7860](http://localhost:7860). See the
+[HF-07 production guide](../docs/interface/hf07-production.md) for commands,
+verification and the publication prerequisites. No files are uploaded.
+
+`./platform.sh publish check` validates the frozen release and checks HF access
+without uploading. `publish dataset` and `publish space` enforce the pending
+permission and deployment gates. See the
+[HF-08 staging guide](../docs/interface/hf08-private-staging.md).
 
 Source code is bind-mounted into the containers (`./backend/app:/app/app` and `./frontend/src:/app/src`), so most changes are picked up automatically: the backend uses `uvicorn --reload` and the frontend uses Vite HMR. If hot reload doesn't pick up changes (new files, config changes, dependency updates), restart the relevant service:
 
 ```bash
 # Restart just the frontend:
-docker compose restart web
+./platform.sh local restart web
 
 # Restart backend + worker:
-docker compose restart api worker
+./platform.sh local restart api worker
 
 # Full rebuild (nuclear option — needed after dependency changes):
-docker compose down && docker compose up -d --build
+./platform.sh local down
+./platform.sh local up -d --build
 ```
 
 After restarting the frontend, do a hard refresh in the browser (`Ctrl+Shift+R`) to clear Vite's module cache.
@@ -495,3 +538,7 @@ cd interface
 python -m pytest tests/smoke_test_fresh_clone.py -v
 ```
 This validates that all 10 database tables are created, user-data tables are empty (no data leaks), the gene catalog is populated, API endpoints respond, and the schema version is tracked correctly.
+
+For the reviewed scrolling fix, use `./platform.sh publish update-space` from
+the terminal holding deployment access. It preserves the deployed Dataset and
+runtime secret; see the HF-08 guide for its exact-file and revision guards.
