@@ -1,0 +1,422 @@
+{
+  "schema_version": "demo-campaign-v1",
+  "campaign_id": "hf-demo-v1",
+  "time_basis": "elapsed_lineage_seconds",
+  "target_bytes": 5000000000,
+  "max_bytes": 10000000000,
+  "preserve_all_samples": true,
+  "pilot_keys": [
+    "wt-basal",
+    "hisG-basal",
+    "wt-add-aa"
+  ],
+  "experiments": [
+    {
+      "key": "wt-basal",
+      "question": "How does the unperturbed model grow in basal medium?",
+      "variant": "wildtype",
+      "gene": null,
+      "initial_condition": "basal",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal"
+        }
+      ],
+      "controls": [],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "wt-with-aa",
+      "question": "How does amino-acid supplementation change the wild-type trajectory?",
+      "variant": "wildtype",
+      "gene": null,
+      "initial_condition": "with_aa",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal_plus_amino_acids"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-basal",
+          "role": "reference"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "wt-acetate",
+      "question": "How does the model respond to acetate rather than the basal carbon source?",
+      "variant": "wildtype",
+      "gene": null,
+      "initial_condition": "acetate",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal_acetate"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-basal",
+          "role": "reference"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "wt-no-oxygen",
+      "question": "How does an oxygen-free environment change modeled growth and fluxes?",
+      "variant": "wildtype",
+      "gene": null,
+      "initial_condition": "no_oxygen",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal_minus_oxygen"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-basal",
+          "role": "reference"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "hisG-basal",
+      "question": "How does the hisG expression perturbation differ from its basal wild-type control?",
+      "variant": "gene_knockout",
+      "gene": "hisG",
+      "initial_condition": "basal",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-basal",
+          "role": "matched"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "hisG-with-aa",
+      "question": "Does amino-acid supplementation alter the modeled hisG perturbation phenotype?",
+      "variant": "gene_knockout",
+      "gene": "hisG",
+      "initial_condition": "with_aa",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal_plus_amino_acids"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-with-aa",
+          "role": "matched"
+        },
+        {
+          "key": "hisG-basal",
+          "role": "reference"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "trpA-basal",
+      "question": "How does the trpA expression perturbation differ from its basal wild-type control?",
+      "variant": "gene_knockout",
+      "gene": "trpA",
+      "initial_condition": "basal",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-basal",
+          "role": "matched"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "trpA-with-aa",
+      "question": "Does amino-acid supplementation alter the modeled trpA perturbation phenotype?",
+      "variant": "gene_knockout",
+      "gene": "trpA",
+      "initial_condition": "with_aa",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal_plus_amino_acids"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-with-aa",
+          "role": "matched"
+        },
+        {
+          "key": "trpA-basal",
+          "role": "reference"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "pgi-basal",
+      "question": "How does the pgi expression perturbation change basal growth and reaction fluxes?",
+      "variant": "gene_knockout",
+      "gene": "pgi",
+      "initial_condition": "basal",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-basal",
+          "role": "matched"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "pgi-acetate",
+      "question": "Does the modeled pgi perturbation phenotype depend on the carbon environment?",
+      "variant": "gene_knockout",
+      "gene": "pgi",
+      "initial_condition": "acetate",
+      "timeline_name": null,
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal_acetate"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-acetate",
+          "role": "matched"
+        },
+        {
+          "key": "pgi-basal",
+          "role": "reference"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "wt-add-aa",
+      "question": "How does the wild-type trajectory change after amino acids are added at 1200 lineage seconds?",
+      "variant": "wildtype",
+      "gene": null,
+      "initial_condition": "basal",
+      "timeline_name": "000002_add_aa",
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal"
+        },
+        {
+          "time_sec": 1200,
+          "media": "minimal_plus_amino_acids"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-basal",
+          "role": "initial"
+        },
+        {
+          "key": "wt-with-aa",
+          "role": "endpoint"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    },
+    {
+      "key": "wt-cut-aa",
+      "question": "How does the wild-type trajectory change after amino acids are removed at 1200 lineage seconds?",
+      "variant": "wildtype",
+      "gene": null,
+      "initial_condition": "with_aa",
+      "timeline_name": "000025_cut_aa",
+      "events": [
+        {
+          "time_sec": 0,
+          "media": "minimal_plus_amino_acids"
+        },
+        {
+          "time_sec": 1200,
+          "media": "minimal"
+        }
+      ],
+      "controls": [
+        {
+          "key": "wt-with-aa",
+          "role": "initial"
+        },
+        {
+          "key": "wt-basal",
+          "role": "endpoint"
+        }
+      ],
+      "measurements": [
+        "cell_mass",
+        "growth_rate",
+        "protein_mass",
+        "rna_mass",
+        "reaction_flux_matrix",
+        "mrna_counts_matrix",
+        "protein_counts_matrix",
+        "exchange_flux_matrix"
+      ],
+      "seed": 0,
+      "generations": 4
+    }
+  ]
+}
