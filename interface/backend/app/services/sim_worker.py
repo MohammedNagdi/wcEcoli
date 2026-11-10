@@ -786,6 +786,22 @@ def _build_sim_command(session, job, experiment, run_id, log_buffer):
         "--variant", variant_type, variant_start, variant_end,
         "--seed", str(job.seed), "--generations", str(job.generations),
     ]
+    # Explicit initialization is independent of the environmental timeline. Legacy
+    # jobs omit this field and retain the runner's existing default behavior.
+    try:
+        params = json.loads(experiment.sim_params or "{}")
+    except (TypeError, ValueError):
+        params = {}
+    if not isinstance(params, dict):
+        params = {}
+    initial_condition = params.get("initial_condition")
+    if "initial_condition" in params:
+        if not isinstance(initial_condition, str) or not initial_condition.strip():
+            raise ValueError("initial_condition must be a nonempty condition name")
+        from app.db.models import Condition
+        if not session.exec(select(Condition).where(Condition.name == initial_condition)).first():
+            raise ValueError("unknown initial_condition: " + initial_condition)
+        sim_args.extend(["--initial-condition", initial_condition])
     if multi_ko_indices:
         sim_args.extend(["--multi-ko-indices", *(str(index) for index in multi_ko_indices)])
     if _variant_manages_environment(job):

@@ -1,0 +1,62 @@
+# Only host.py supplies frozen absolute contexts and unique tags; no live mounts.
+name: wcecoli-hf-demo-v1
+services:
+  runner:
+    image: ${PILOT_RUNNER_IMAGE:?prepare required}
+    init: true
+    command: [python, runscripts/manual/simRunner.py]
+    cpus: 2
+    mem_limit: 4g
+    stop_grace_period: 1830s
+    environment:
+      SIM_RUNNER_SOCKET: /wcEcoli/out/.runner/control.sock
+      SIM_RUNNER_CONCURRENCY: 1
+      SIM_RUNNER_CPU_BUDGET: 2
+      SIM_CPUS_PER_JOB: 2
+      PARCA_MAX_CONCURRENCY: 1
+      WORKER_SHUTDOWN_GRACE_SEC: 1800
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+    volumes: ["output:/wcEcoli/out"]
+    restart: "no"
+  tools:
+    image: ${PILOT_TOOLS_IMAGE:?prepare required}
+    command: [sleep, infinity]
+    environment:
+      WCECOLI_ROOT: /wcEcoli
+      RECONSTRUCTION_PATH: /wcEcoli/reconstruction
+      MODELS_PATH: /wcEcoli/models
+      DATABASE_PATH: /pilot/catalog.sqlite
+      SIM_OUTPUT_DIR: /wcEcoli/out
+      SIM_RUNNER_SOCKET: /wcEcoli/out/.runner/control.sock
+      PILOT_STATE: /pilot
+      PILOT_RELEASE: /release
+    volumes: ["database:/pilot", "output:/wcEcoli/out", "release:/release"]
+    mem_limit: 2g
+    cpus: 1
+    restart: "no"
+  preview-api:
+    image: ${PILOT_TOOLS_IMAGE:?prepare required}
+    command: [uvicorn, hf_export.preview:app, --host, 0.0.0.0, --port, "8000"]
+    ports: ["127.0.0.1:8001:8000"]
+    volumes: ["release:/release:ro"]
+    environment:
+      PILOT_RELEASE: /release/current
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    profiles: [preview]
+  preview-web:
+    image: ${PILOT_WEB_IMAGE:?prepare required}
+    ports: ["127.0.0.1:5175:80"]
+    profiles: [preview]
+    mem_limit: 128m
+    depends_on: [preview-api]
+volumes:
+  database:
+    name: wcecoli-hf-demo-v1_database
+  output:
+    name: wcecoli-hf-demo-v1_output
+  release:
+    name: wcecoli-hf-demo-v1_release
