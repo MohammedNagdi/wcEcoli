@@ -1,5 +1,46 @@
 # wcEcoli → Hugging Face dataset export
 
+## Public explorer campaign (HF-03)
+
+The new `hf-demo-v1` campaign and `explorer-release-v1` contract are separate from
+the legacy v0 exporter documented below. See the
+[campaign and contract guide](../../../docs/interface/hf03-campaign-and-contract.md).
+
+From this directory's parent (`interface/backend/`), using the backend environment:
+
+```bash
+python -m hf_export.demo_campaign --database /absolute/path/to/checkpointed-reference.sqlite
+python -m hf_export.explorer_contract /absolute/path/to/release
+```
+
+The planner only reads a current reference snapshot; it does not initialize or
+migrate it, enqueue jobs or invoke the simulator. A successful plan is catalog-valid
+but **not runtime-ready**. Production export, model-target verification and the
+initial-condition binding are prerequisites for the HF-04 pilot.
+
+The twelve-experiment manifest uses one seed, up to four sequential generations,
+and existing experiments as shared controls. All saved samples/columns must be
+preserved; packaging stops above 10 GB. Tiny synthetic validator fixtures exist
+only in temporary test directories and require explicit opt-in for validation.
+
+## Complete explorer campaign (HF-05)
+
+Use `./platform.sh demo prepare`, then `./platform.sh demo run`, from the repository
+root or `interface/`. This reuses the isolated HF-04 preparation and runs only the
+nine remaining seed-0 designs. The detached local controller exports and verifies
+each experiment, confirms a second artifact copy, then deletes that experiment's
+raw output before proceeding. Failures retain raw data for diagnosis. No work is
+submitted to the main platform queue, and Parca is not automatically rerun.
+
+`demo status`, `demo cleanup --dry-run`, `demo preview` and `demo stop` manage this
+isolated workflow. Checkpoints permit final packaging without raw listeners;
+additional raw-channel extraction may require an explicit rerun. The completed
+upload bundle is `interface/.pilot/demo-release/`; Parca and raw output are not
+upload payloads. See the [HF-05 guide](../../../docs/interface/hf05-full-campaign.md)
+for cleanup guards, resource limits and infrequent agent monitoring.
+
+## Legacy v0 export
+
 Packages completed whole-cell simulations into the HF dataset layout ("The Well, for the cell"). See
 `HF_DATASET_DESIGN.md` (repo root) for the full design, benchmark tasks, and tiered roadmap.
 
@@ -121,3 +162,27 @@ docker exec interface-api-1 python -m pytest app/tests/test_runtime_contracts.py
 - ⏭ **M2 (HF release packaging):** dataset card, croissant metadata, canonical held-out splits,
   PyTorch dataloader (reads `/reference` ids + `(T, N)` matrices), and baselines.
 - Big `.h5` shards are git-ignored (`eval/.gitignore`) — they belong on Hugging Face, not in git.
+
+
+## Public explorer and references (HF-06)
+
+The isolated artifact API remains `uvicorn hf_export.preview:app`. It checks the
+release once at startup, bounds simultaneous response builders, opens publication
+SQLite as immutable/read-only and never initializes the normal application.
+`GET /api/capabilities` identifies this profile; all shared writes and scientific
+execution are unavailable. The React explorer requires `VITE_DEPLOYMENT_MODE=explorer`.
+
+Optional `explorer-references-v1` metadata extends the release contract without
+changing legacy exports or HDF5 values. Build it offline using
+`python -m hf_export.reference_export --base /release/full-c85e170d95082914cfa8
+--state /pilot --destination /release` inside the verified isolated tools image.
+The host `./platform.sh demo prepare` handles a completed campaign's reference
+successor and preserves the HF-05 rollback publication. No Parca or simulation
+is run by this path. `./platform.sh demo preview` serves the active validated bundle.
+
+See [HF-06 operation and evidence](../../../docs/interface/hf06-explorer.md) and
+the [browser transfer contract](../../../docs/interface/explorer-drafts-v1.md).
+The production `explorer` launcher is provided by HF-07; see the
+[production packaging guide](../../../docs/interface/hf07-production.md).
+It serves this adapter with strict full-release/reference requirements and the
+compiled React site in one container, independently of the pilot stack.
