@@ -87,8 +87,6 @@ def inputs():
         for p in sorted((FRONTEND / directory).rglob("*")):
             if p.is_file() and p.suffix in suffixes:
                 files["frontend/" + p.relative_to(FRONTEND).as_posix()] = p
-    # Replace the entry point in this frozen package only; native startup stays intact.
-    files["frontend/src/main.tsx"] = HERE / "main.tsx"
     return files
 
 

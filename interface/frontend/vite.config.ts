@@ -7,11 +7,13 @@ export default defineConfig(({mode}) => {
   const profile = env.VITE_DEPLOYMENT_MODE || 'local'
   if (!['local', 'explorer'].includes(profile)) throw new Error('Unknown deployment profile')
   if (profile === 'explorer' && env.VITE_PILOT_PREVIEW === '1') throw new Error('Conflicting explorer and pilot profiles')
+  const entry = profile === 'explorer' ? 'explorer' : env.VITE_PILOT_PREVIEW === '1' ? 'pilot' : 'local'
   return {
   publicDir: profile === 'explorer' ? 'public-explorer' : 'public',
   plugins: [react()],
   resolve: {
     alias: {
+      '@deployment/entry': path.resolve(__dirname, `./src/deployment/${entry}-entry.ts`),
       '@': path.resolve(__dirname, './src'),
     },
   },
