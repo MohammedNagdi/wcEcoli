@@ -542,3 +542,47 @@ This validates that all 10 database tables are created, user-data tables are emp
 For the reviewed scrolling fix, use `./platform.sh publish update-space` from
 the terminal holding deployment access. It preserves the deployed Dataset and
 runtime secret; see the HF-08 guide for its exact-file and revision guards.
+
+## Deployment profiles
+
+The maintained frontend bootstrap selects one application entry through Vite.
+Ordinary and packaged explorer builds use that same selection; packaging no
+longer substitutes a different frontend entry file.
+
+From `interface/frontend/`:
+
+```bash
+npm run dev:local
+npm run build:local
+npm run test:profiles
+```
+
+For explorer development, first start the restricted artifact API using the
+existing explorer/pilot tooling, then point Vite at that API. For example, when
+its API is listening on port 8001:
+
+```bash
+VITE_API_URL=http://127.0.0.1:8001 npm run dev:explorer
+npm run build:explorer
+```
+
+The default `npm run dev` and `npm run build` retain local-profile behavior when
+no profile environment variables are set. Existing `VITE_DEPLOYMENT_MODE` and
+`VITE_PILOT_PREVIEW=1` usage remains supported; invalid/conflicting profiles fail.
+Local and explorer persistence adapters preserve their existing HTTP/IndexedDB
+contracts. Shared pages use a profile-selected assistant integration: only the
+local profile includes the provider and dock. Production builds check their
+rendered module graph for forbidden cross-profile dependencies.
+
+The explorer validates `explorer-capabilities-v1` before loading workspace
+routes. It retains the `wcecoli-explorer-drafts-v1` browser database and existing
+JSON format; no draft migration is required. Its client transport rejects server
+mutations before sending them, in addition to the restricted backend policy.
+
+Reviewed updates to the existing Space require explicit **Protected** visibility,
+CPU Basic hardware, the expected parent revision, exact file inventories and an
+unchanged Dataset/configuration. `publish rollback-space` reverses only an
+approved completed update using its retained baseline; it can delete only files
+introduced by that release. Both commands require the prepared package-bound
+approval records and secure deployment credentials. Do not manually edit those
+records or use rollback against an unrelated remote revision.
