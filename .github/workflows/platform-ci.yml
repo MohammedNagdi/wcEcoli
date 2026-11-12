@@ -106,6 +106,7 @@ jobs:
       sha256: ${{ steps.package.outputs.sha256 }}
       fingerprint: ${{ steps.package.outputs.fingerprint }}
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      attempt: ${{ steps.package.outputs.attempt }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -118,6 +119,7 @@ jobs:
         shell: bash
         run: |
           work="$RUNNER_TEMP/explorer-package"
+          echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           mkdir -p "$work"
           ./platform.sh explorer bundle --state-dir "$work/state" --output-dir "$work/bundles" > "$work/bundle.json"
           bundle=$(python -c 'import json,sys; print(json.load(sys.stdin)["bundle"])' < "$work/bundle.json")
@@ -166,6 +168,11 @@ jobs:
       contents: read
       actions: read
       id-token: write
+    outputs:
+      verification-id: ${{ steps.verification.outputs.artifact-id }}
+      plan-id: ${{ steps.plan-upload.outputs.artifact-id }}
+      plan-sha256: ${{ steps.plan.outputs.plan_sha256 }}
+      review-required: ${{ steps.plan.outputs.review_required }}
     env:
       CANDIDATE_ID: ${{ needs.package.outputs.artifact-id }}
       CANDIDATE_SHA256: ${{ needs.package.outputs.sha256 }}
@@ -207,8 +214,29 @@ jobs:
             --out "$RUNNER_TEMP/explorer-verification.json"
           cat "$RUNNER_TEMP/explorer-verification.json" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        id: verification
         with:
           name: explorer-verification-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/explorer-verification.json
           if-no-files-found: error
           retention-days: 30
+      - name: Prepare the Space release
+        if: vars.EXPLORER_RELEASE_MODE != ''
+        id: plan
+        env:
+          RELEASE_MODE: ${{ vars.EXPLORER_RELEASE_MODE }}
+          PACKAGE_ATTEMPT: ${{ needs.package.outputs.attempt }}
+          VERIFICATION_ID: ${{ steps.verification.outputs.artifact-id }}
+        run: |
+          python interface/tests/ci_explorer_release.py prepare \
+            --archive "$RUNNER_TEMP/candidate/explorer-package.tar.gz" \
+            --report "$RUNNER_TEMP/explorer-verification.json" \
+            --plan "$RUNNER_TEMP/explorer-plan.json"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: steps.plan.outcome == 'success'
+        id: plan-upload
+        with:
+          name: explorer-plan-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/explorer-plan.json
+          if-no-files-found: error
+          retention-days: 90

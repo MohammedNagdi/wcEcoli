@@ -23,7 +23,8 @@ API = "http://127.0.0.1:7860"
 BASELINE_DATASET = "a4c3032c37f9bc08a002ed529b1b4f9f84b7eda6"
 
 
-def mint_dataset_token(repository):
+def mint_repo_token(kind, repository):
+    resource = {"Dataset": "datasets", "Space": "spaces"}[kind]
     try:
         url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
         separator = "&" if "?" in url else "?"
@@ -39,7 +40,7 @@ def mint_dataset_token(repository):
                 "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
                 "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
                 "subject_token": identity,
-                "resource": "datasets/" + repository,
+                "resource": resource + "/" + repository,
             }).encode(),
             headers={"Content-Type": "application/json"},
         )
@@ -48,9 +49,13 @@ def mint_dataset_token(repository):
         if not credential or any(c.isspace() for c in credential):
             raise ValueError("Invalid token")
     except (KeyError, OSError, ValueError, TypeError):
-        raise RuntimeError("Hugging Face Dataset identity exchange failed") from None
+        raise RuntimeError(f"Hugging Face {kind} identity exchange failed") from None
     print("::add-mask::" + credential, flush=True)
     return credential
+
+
+def mint_dataset_token(repository):
+    return mint_repo_token("Dataset", repository)
 
 
 def run(work, stage, command, env, *, cwd=ROOT):
