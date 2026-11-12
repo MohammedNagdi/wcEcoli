@@ -177,8 +177,14 @@ def preview_config(args):
     verify(args)
     directory=Path(args.release) if args.release else cache_release(args.cache_dir)
     config=host.compose_config(dict(receipt,bundle=str(base)),{'EXPLORER_DATA_MODE':'local'},release=directory)
+    project=os.environ.get('EXPLORER_PREVIEW_PROJECT',host.PROJECT)
+    if not re.fullmatch(r'wcecoli-explorer(?:-[a-z0-9]+)?',project):
+        raise ValueError('Invalid explorer preview project name')
+    config['name']=project
+    config['volumes']['cache']['name']=project+'_cache'
     config['services']['web']['platform']='linux/amd64'
     save(Path(args.state_dir)/'compose.json',config)
+    (Path(args.state_dir)/'preview-project').write_text(project+'\n')
     (Path(args.state_dir)/'empty.env').write_text('# No credentials.\n')
     return dict(compose=str(Path(args.state_dir)/'compose.json'))
 

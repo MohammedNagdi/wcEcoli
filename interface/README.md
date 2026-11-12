@@ -680,3 +680,59 @@ During bootstrap, push `platform` and `ci/platform-checks` and open the PR with
 for `platform` requiring a PR and the aggregate GitHub Actions check. Enforce
 the rule for admins, block force pushes and branch deletion, and rebase-merge
 the bootstrap PR to retain both commits.
+
+### Approve real-data verification
+
+Set these up before merging the bootstrap PR:
+
+- In GitHub **Settings → Environments**, create `scientific-verification`.
+  Select deployment branches and allow exactly the branch `platform`. Add
+  yourself as required reviewer, allow self-review, and disable administrator
+  bypass.
+- In the private Dataset's Hugging Face **Settings → Trusted Publishers**, add a
+  **read-only** GitHub Actions publisher. Set repository to
+  `MohammedNagdi/wcEcoli`, branch to `platform`, and workflow to
+  `platform-ci.yml`. The job uses a short-lived Dataset credential from OIDC.
+
+When a push to `platform` has passed **Platform CI required checks**, review the
+landed commit and approve **Private Dataset verification** in the Actions run.
+The job downloads the same run's package, verifies its digest and inventory,
+starts a local production container, and tests it against the pinned Dataset.
+Verification uses a dedicated Compose project and data volume.
+The resulting verification JSON is the release evidence. A rejected approval,
+failed exchange, or failing verification leaves the package ineligible. Fix the
+reported stage and rerun the failed job for the same landed commit, or run CI
+again for a new commit. Production publication is a separate Phase 5 operation.
+
+### Rehearse the release from GitHub's artifact
+
+Open the successful `platform` run and download the application archive and
+verification JSON. If a job was rerun, use the package artifact ID recorded in
+the successful verification JSON to select the archive. Check out the
+recorded source commit in a clean checkout with Python 3.11 or later. From its root, set `CANDIDATE_DIR`
+to the directory containing `explorer-package.tar.gz` and
+`explorer-verification.json`, and run:
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+verification="$CANDIDATE_DIR/explorer-verification.json"
+field() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$verification" "$1"
+}
+work="$(mktemp -d)"
+python3 interface/tests/ci_explorer_package.py unpack \
+  --archive "$CANDIDATE_DIR/explorer-package.tar.gz" --bundle "$work/bundle" \
+  --revision "$(git rev-parse HEAD)" --sha256 "$(field archive_sha256)" \
+  --fingerprint "$(field source_sha256)"
+```
+
+With the existing read-only `HF_VERIFY_TOKEN` in your shell, run the rehearsal
+only after extraction succeeds:
+
+```bash
+./platform.sh publish prepare-update --bundle "$work/bundle" --state-dir "$work/state"
+./platform.sh publish check --bundle "$work/bundle" --state-dir "$work/state"
+```
+
+The Phase 4 rehearsal expects `no_update_required: true` from both commands.
+Investigate any inventory difference before proceeding.

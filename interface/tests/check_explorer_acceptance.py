@@ -1,7 +1,9 @@
-"""Real reference/metric/immutability/concurrent-read acceptance, no server writes."""
+"""Real reference, metrics, isolation and concurrent-read acceptance."""
 
+import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from functools import partial
 import hashlib
 import json
 from pathlib import Path
@@ -22,22 +24,29 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def inventory():
+def inventory(release):
     return {
-        str(p.relative_to(RELEASE)): digest(p)
-        for p in RELEASE.rglob("*")
+        str(p.relative_to(release)): digest(p)
+        for p in release.rglob("*")
         if p.is_file()
     }
 
 
-def get(path):
-    with urllib.request.urlopen(API + "/api" + path, timeout=60) as response:
+def get_json(api, path):
+    with urllib.request.urlopen(api + "/api" + path, timeout=60) as response:
         return json.load(response)
 
 
 def main():
-    before = inventory()
-    manifest = json.loads((RELEASE / "manifest.json").read_text())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--api", default=API)
+    parser.add_argument("--release", type=Path, default=RELEASE)
+    parser.add_argument("--out", type=Path, default=PROOF / "api-acceptance.json")
+    args = parser.parse_args()
+    release = args.release.resolve()
+    get = partial(get_json, args.api.rstrip("/"))
+    before = inventory(release)
+    manifest = json.loads((release / "manifest.json").read_text())
     cap = get("/capabilities")
     assert (
         cap["mode"] == "explorer"
@@ -64,7 +73,7 @@ def main():
         assert get(path)
     comparisons = 0
     for exp in manifest["experiments"]:
-        with h5py.File(RELEASE / exp["shard"], "r") as h5:
+        with h5py.File(release / exp["shard"], "r") as h5:
             for t in exp["trajectories"]:
                 actual = get(
                     f"/explorer/comparison?ids={exp['experiment_id']}&generation={t['generation']}"
@@ -127,15 +136,31 @@ def main():
             assert error.code == 404
         else:
             raise AssertionError(path)
-    assert before == inventory()
+    for method, path in [
+        ("POST", "/experiments"),
+        ("POST", "/jobs/1/launch"),
+        ("PUT", "/conditions/1"),
+        ("PATCH", "/timelines/1"),
+        ("DELETE", "/builder-drafts/1"),
+    ]:
+        request = urllib.request.Request(
+            args.api.rstrip("/") + "/api" + path, method=method
+        )
+        try:
+            urllib.request.urlopen(request, timeout=60).close()
+        except urllib.error.HTTPError as error:
+            assert error.code == 405
+        else:
+            raise AssertionError("Explorer accepted a mutation")
+    assert before == inventory(release)
     assert (
-        not list(RELEASE.rglob("*-wal"))
-        + list(RELEASE.rglob("*-journal"))
-        + list(RELEASE.rglob("*-shm"))
+        not list(release.rglob("*-wal"))
+        + list(release.rglob("*-journal"))
+        + list(release.rglob("*-shm"))
     )
     with closing(
         sqlite3.connect(
-            (RELEASE / "catalog.sqlite").as_uri() + "?mode=ro&immutable=1", uri=True
+            (release / "catalog.sqlite").as_uri() + "?mode=ro&immutable=1", uri=True
         )
     ) as db:
         counts = {
@@ -151,7 +176,8 @@ def main():
         counts=counts,
         capabilities=cap,
     )
-    (PROOF / "api-acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report))
 
 
