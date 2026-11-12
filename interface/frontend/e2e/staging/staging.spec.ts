@@ -2,16 +2,17 @@ import {test,expect} from '@playwright/test'
 
 const origin='https://safrot-wcecoli-explorer.hf.space'
 test('private staging serves published results and personal drafts',async({page,context},info)=>{
-  test.skip(process.env.HF08_STAGING_ACCEPTANCE!=='1','Requires authorized private deployment and verification credentials')
-  const token=process.env.HF_VERIFY_TOKEN
-  expect(token,'Configure verification access securely').toBeTruthy()
-  // No global extraHTTPHeaders: fonts and other third-party requests must never
-  // receive a Hub token. Tracing/video are disabled in the staging config.
-  await context.route(origin+'/**',async route=>{
-    const request=route.request()
-    if(new URL(request.url()).origin!==origin){await route.abort();return}
-    await route.continue({headers:{...request.headers(),authorization:'Bearer '+token}})
-  })
+  const publicCheck = Boolean(process.env.EXPLORER_HOSTED_REFERENCES)
+  test.skip(!publicCheck && process.env.HF08_STAGING_ACCEPTANCE!=='1','Requires a hosted verification run')
+  if (!publicCheck) {
+    const token=process.env.HF_VERIFY_TOKEN
+    expect(token,'Configure verification access securely').toBeTruthy()
+    // Scope the verification credential to this Space. Public checks use no credentials.
+    await context.route(origin+'/**',async route=>{
+      if(new URL(route.request().url()).origin!==origin){await route.abort();return}
+      await route.continue({headers:{...route.request().headers(),authorization:'Bearer '+token}})
+    })
+  }
   const writes:string[]=[]
   page.on('request',r=>{if(r.url().startsWith(origin+'/api/')&&!['GET','HEAD','OPTIONS'].includes(r.method()))writes.push(r.method())})
   await page.goto('/experiments')
@@ -28,7 +29,7 @@ test('private staging serves published results and personal drafts',async({page,
     expect(series.molecules.length).toBeGreaterThan(0)
   }
   await page.locator('canvas').first().scrollIntoViewIfNeeded()
-  await page.screenshot({path:info.outputPath('real-result.png')})
+  if (!publicCheck) await page.screenshot({path:info.outputPath('real-result.png')})
   await page.goto('/experiments/new')
   await expect(page.getByText('Personal browser draft.',{exact:false}).first()).toBeVisible()
   await page.getByLabel('Name',{exact:true}).fill('Private staging draft')
