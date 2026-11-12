@@ -658,3 +658,25 @@ locations remain Git-ignored. Token values are passed only through explicitly
 selected runtime environment variables, never build arguments or artifacts.
 Initial/Dataset publication requires an explicit v1 package; an application-only
 artifact can never be treated as a Dataset upload.
+
+## Platform branches and CI
+
+`master` is the fork's default branch. Target platform and explorer changes at
+`platform`, which starts at the Phase 3 baseline `65a4cdc9c`. Keep work in
+short-lived branches such as `feature/explorer-draft-export`,
+`fix/platform-worker-startup`, `ci/platform-checks`, `docs/release-commands`,
+and `sync/covertlab-ecocyc-30`. The `feature/platform-explorer-baseline` branch
+records the Phase 3 handoff.
+
+**Platform CI** tests the proposed merge for every PR into `platform` and the
+actual commit for every push to it. The aggregate **Platform CI required checks**
+job requires both frontend builds and profile checks, Chromium and WebKit
+regressions, backend and launcher tests, and successful Docker packaging. Push
+runs retain the application-only archive and its digest for 30 days. Backend
+and browser test reports are retained for 14 days.
+
+During bootstrap, push `platform` and `ci/platform-checks` and open the PR with
+`platform` as the base. After the first green PR run, add an exact-branch rule
+for `platform` requiring a PR and the aggregate GitHub Actions check. Enforce
+the rule for admins, block force pushes and branch deletion, and rebase-merge
+the bootstrap PR to retain both commits.

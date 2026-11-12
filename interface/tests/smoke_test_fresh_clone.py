@@ -246,63 +246,82 @@ def test_api_endpoints():
         return
 
     try:
-        # Import the app — this triggers lifespan which builds the DB
+        from importlib import import_module
+        from unittest.mock import patch
+
+        from app.config import settings
         from app.main import app
-        client = TestClient(app)
 
-        # Health check
-        r = client.get("/api/health")
-        check("GET /api/health → 200", r.status_code == 200)
-        if r.status_code == 200:
-            data = r.json()
-            check("Health status = 'ok'", data.get("status") == "ok")
+        # The worker registers process signal handlers when imported. The
+        # TestClient lifespan runs in a thread and does not start a worker.
+        with patch("signal.signal"):
+            import_module("app.services.sim_worker")
 
-        # Gene catalog
-        r = client.get("/api/genes?limit=5")
-        check("GET /api/genes → 200", r.status_code == 200)
-        if r.status_code == 200:
-            data = r.json()
-            genes = data.get("genes", data) if isinstance(data, dict) else data
-            check("Genes returned", len(genes) > 0,
-                  f"got {len(genes)} genes")
+        # TestClient enters the ASGI lifespan only as a context manager.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.object(settings, "database_path", root / "smoke.db"),
+                patch.object(settings, "sim_output_dir", root / "out"),
+                patch.object(settings, "sim_runner_socket", root / "runner.sock"),
+                TestClient(app) as client,
+            ):
+                check_api_responses(client)
+    except Exception as exc:
+        print(f"  {FAIL} API test failed: {exc}")
+        failures.append(f"API test exception: {exc}")
 
-        # Experiments (should be empty)
-        r = client.get("/api/experiments")
-        check("GET /api/experiments → 200", r.status_code == 200)
-        if r.status_code == 200:
-            check("Experiments empty", len(r.json()) == 0,
-                  f"got {len(r.json())} — data leak?")
 
-        # Jobs (should be empty)
-        r = client.get("/api/jobs")
-        check("GET /api/jobs → 200", r.status_code == 200)
-        if r.status_code == 200:
-            check("Jobs empty", len(r.json()) == 0)
+def check_api_responses(client):
+    # Health check
+    r = client.get("/api/health")
+    check("GET /api/health → 200", r.status_code == 200)
+    if r.status_code == 200:
+        data = r.json()
+        check("Health status = 'ok'", data.get("status") == "ok")
 
-        # Failed jobs endpoint
-        r = client.get("/api/jobs/failed")
-        check("GET /api/jobs/failed → 200", r.status_code == 200)
+    # Gene catalog
+    r = client.get("/api/genes?limit=5")
+    check("GET /api/genes → 200", r.status_code == 200)
+    if r.status_code == 200:
+        data = r.json()
+        genes = data.get("genes", data) if isinstance(data, dict) else data
+        check("Genes returned", len(genes) > 0,
+              f"got {len(genes)} genes")
 
-        # Conditions
-        r = client.get("/api/conditions")
-        check("GET /api/conditions → 200", r.status_code == 200)
+    # Experiments (should be empty)
+    r = client.get("/api/experiments")
+    check("GET /api/experiments → 200", r.status_code == 200)
+    if r.status_code == 200:
+        check("Experiments empty", len(r.json()) == 0,
+              f"got {len(r.json())} — data leak?")
 
-        # Variants
-        r = client.get("/api/variants")
-        check("GET /api/variants → 200", r.status_code == 200)
+    # Jobs (should be empty)
+    r = client.get("/api/jobs")
+    check("GET /api/jobs → 200", r.status_code == 200)
+    if r.status_code == 200:
+        check("Jobs empty", len(r.json()) == 0)
 
-        # TF network
-        r = client.get("/api/tf-network")
-        check("GET /api/tf-network → 200", r.status_code == 200)
+    # Failed jobs endpoint
+    r = client.get("/api/jobs/failed")
+    check("GET /api/jobs/failed → 200", r.status_code == 200)
 
-        # Comparison endpoint (no IDs — should 422 or 400)
-        r = client.get("/api/experiments/compare?ids=")
-        check("GET /api/experiments/compare (empty) → 4xx",
-              r.status_code in (400, 422))
+    # Conditions
+    r = client.get("/api/conditions")
+    check("GET /api/conditions → 200", r.status_code == 200)
 
-    except Exception as e:
-        print(f"  {FAIL} API test failed: {e}")
-        failures.append(f"API test exception: {e}")
+    # Variants
+    r = client.get("/api/variants")
+    check("GET /api/variants → 200", r.status_code == 200)
+
+    # TF network
+    r = client.get("/api/tf-network")
+    check("GET /api/tf-network → 200", r.status_code == 200)
+
+    # Comparison endpoint (no IDs — should 422 or 400)
+    r = client.get("/api/experiments/compare?ids=")
+    check("GET /api/experiments/compare (empty) → 4xx",
+          r.status_code in (400, 422))
 
 
 # ---------------------------------------------------------------------------

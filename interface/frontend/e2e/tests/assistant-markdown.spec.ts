@@ -57,7 +57,12 @@ async function controlled(page: Page) {
     }
   })
 }
-async function push(page: Page, events: unknown[]) { await page.evaluate(events => { for (const e of events) (window as any).controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(e)}\n\n`)) }, events) }
+async function push(page: Page, events: unknown[]) {
+  await page.waitForFunction(() => !!(window as any).controller)
+  await page.evaluate(events => {
+    for (const e of events) (window as any).controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(e)}\n\n`))
+  }, events)
+}
 async function instrument(page: Page, fail = false) {
   await page.addInitScript(fail => { (window as any).formattingFailure = fail; (window as any).markdownParses = {} }, fail)
   await page.route('**/src/components/assistant/AssistantMarkdown.tsx', async r => {

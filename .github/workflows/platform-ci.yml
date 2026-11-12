@@ -1,0 +1,152 @@
+name: Platform CI
+
+on:
+  pull_request:
+    branches: [platform]
+  push:
+    branches: [platform]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend and launcher checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}/interface/backend
+      MODELS_PATH: ${{ github.workspace }}/models
+      RECONSTRUCTION_PATH: ${{ github.workspace }}/reconstruction
+      WCECOLI_ROOT: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - name: Install backend and release dependencies
+        run: python -m pip install -e 'interface/backend[dev]' -r interface/explorer/requirements.lock
+      - name: Check a fresh database
+        run: python interface/tests/smoke_test_fresh_clone.py
+      - name: Run backend, export, launcher, and publication tests
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/platform-ci.sqlite
+          SIM_OUTPUT_DIR: ${{ runner.temp }}/simulation-output
+        run: >-
+          python -m pytest interface/backend/app/tests interface/backend/eval
+          interface/backend/hf_export interface/tests
+          --junitxml="$RUNNER_TEMP/backend-results.xml"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: backend-results-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/backend-results.xml
+          retention-days: 14
+
+  frontend:
+    name: Frontend builds and profile checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: interface/frontend
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '20'
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run build:local
+      - run: npm run build:explorer
+      - run: npm run test:profiles
+
+  browser:
+    name: Browser regressions (${{ matrix.browser }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    defaults:
+      run:
+        working-directory: interface/frontend
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '20'
+          package-manager-cache: false
+      - run: npm ci
+      - name: Install browser and system dependencies
+        run: npx playwright install --with-deps "${{ matrix.browser }}"
+      - name: Run local profile browser tests
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ runner.temp }}/browser-results.xml
+        run: npm run e2e -- --project="${{ matrix.browser }}" --workers=2 --reporter=github,junit
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: browser-results-${{ matrix.browser }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/browser-results.xml
+          retention-days: 14
+
+  package:
+    name: Build explorer application package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      sha256: ${{ steps.package.outputs.sha256 }}
+      fingerprint: ${{ steps.package.outputs.fingerprint }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - name: Bundle committed application source
+        id: package
+        shell: bash
+        run: |
+          work="$RUNNER_TEMP/explorer-package"
+          mkdir -p "$work"
+          ./platform.sh explorer bundle --state-dir "$work/state" --output-dir "$work/bundles" > "$work/bundle.json"
+          bundle=$(python -c 'import json,sys; print(json.load(sys.stdin)["bundle"])' < "$work/bundle.json")
+          python interface/tests/ci_explorer_package.py pack --bundle "$bundle" \
+            --archive "$work/explorer-package.tar.gz" --revision "$GITHUB_SHA" > "$work/explorer-package.json"
+          cat "$work/explorer-package.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: github.event_name == 'push'
+        id: upload
+        with:
+          name: explorer-package-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/explorer-package/explorer-package.tar.gz
+            ${{ runner.temp }}/explorer-package/explorer-package.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30
+
+  required:
+    name: Platform CI required checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [backend, frontend, browser, package]
+    if: always()
+    steps:
+      - name: Require every prerequisite to succeed
+        if: >-
+          needs.backend.result != 'success' || needs.frontend.result != 'success' ||
+          needs.browser.result != 'success' || needs.package.result != 'success'
+        run: exit 1
+      - name: Report passing checks
+        run: echo "All required platform CI jobs passed."
