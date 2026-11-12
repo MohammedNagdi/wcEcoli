@@ -240,3 +240,71 @@ jobs:
           path: ${{ runner.temp }}/explorer-plan.json
           if-no-files-found: error
           retention-days: 90
+
+  production:
+    name: Explorer production release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    needs: [package, scientific]
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'MohammedNagdi/wcEcoli' &&
+      github.ref == 'refs/heads/platform' &&
+      needs.scientific.result == 'success' &&
+      needs.scientific.outputs.review-required == 'true'
+    environment: explorer-production
+    concurrency:
+      group: explorer-production-safrot-wcecoli-explorer
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '20'
+          package-manager-cache: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact-id }},${{ needs.scientific.outputs.verification-id }},${{ needs.scientific.outputs.plan-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-inputs
+      - name: Install locked release tooling
+        run: python -m pip install -r interface/explorer/requirements.lock
+      - name: Install hosted browser dependencies
+        working-directory: interface/frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Check approval and execute the reviewed plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_MODE: ${{ vars.EXPLORER_RELEASE_MODE }}
+          PACKAGE_ATTEMPT: ${{ needs.package.outputs.attempt }}
+          CANDIDATE_ID: ${{ needs.package.outputs.artifact-id }}
+          CANDIDATE_SHA256: ${{ needs.package.outputs.sha256 }}
+          CANDIDATE_FINGERPRINT: ${{ needs.package.outputs.fingerprint }}
+          VERIFICATION_ID: ${{ needs.scientific.outputs.verification-id }}
+          PLAN_ID: ${{ needs.scientific.outputs.plan-id }}
+          PLAN_SHA256: ${{ needs.scientific.outputs.plan-sha256 }}
+        run: |
+          inputs="$RUNNER_TEMP/release-inputs"
+          python interface/tests/ci_explorer_release.py deploy \
+            --archive "$inputs/explorer-package.tar.gz" \
+            --report "$inputs/explorer-verification.json" \
+            --plan "$inputs/explorer-plan.json" \
+            --receipt "$RUNNER_TEMP/explorer-release-receipt.json"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: explorer-release-receipt-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/explorer-release-receipt.json
+          if-no-files-found: ignore
+          retention-days: 90

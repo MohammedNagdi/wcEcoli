@@ -9,11 +9,12 @@ from pathlib import Path, PurePosixPath
 import re
 import sys
 import tempfile
+import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from ci_explorer_package import portable, unpack
-from ci_verify_explorer import mint_dataset_token, mint_repo_token
+from ci_verify_explorer import FRONTEND, mint_dataset_token, mint_repo_token, run
 
 
 REPOSITORY = "MohammedNagdi/wcEcoli"
@@ -27,6 +28,10 @@ SOURCE_LIMIT = 100 * 1024**2
 
 class ReleaseError(RuntimeError):
     pass
+
+
+class Regression(ReleaseError):
+    """A failure attributable to a known deployed revision."""
 
 
 def require(condition, message):
@@ -161,6 +166,29 @@ def verify_space_scope(token, *, write):
     )
 
 
+def github_json(endpoint, env):
+    request = Request(
+        f"https://api.github.com/repos/{REPOSITORY}/{endpoint}",
+        headers={"Authorization": "Bearer " + env["GH_TOKEN"],
+                 "Accept": "application/vnd.github+json"},
+    )
+    with urlopen(request, timeout=20) as response:
+        return json.load(response)
+
+
+def approved_review(reviews, digest):
+    relevant = [
+        review for review in reviews
+        if any(item["name"] == PRODUCTION for item in review["environments"])
+    ]
+    require(
+        relevant and all(review["state"] == "approved" for review in relevant)
+        and any(review["user"]["login"] == "MohammedNagdi" and
+                review["comment"].strip() == digest for review in relevant),
+        "Production approval must include the exact plan digest",
+    )
+
+
 class Hub:
     def __init__(self, space_token, dataset_token, descriptor, cache):
         from huggingface_hub import HfApi
@@ -169,8 +197,13 @@ class Hub:
         self.dataset_api = HfApi(endpoint=HUB, token=dataset_token)
         self.descriptor = descriptor
         self.cache = cache
+        self.issued_at = time.monotonic()
 
     def settings(self):
+        if time.monotonic() - self.issued_at >= 50 * 60:
+            self.api.token = mint_repo_token("Space", SPACE)
+            self.dataset_api.token = mint_dataset_token(self.descriptor["dataset"]["repository"])
+            self.issued_at = time.monotonic()
         space = self.api.repo_info(SPACE, repo_type="space")
         runtime = self.api.get_space_runtime(SPACE)
         dataset = self.descriptor["dataset"]
@@ -224,6 +257,182 @@ class Hub:
             files[name] = {"bytes": size, "sha256": portable.host.sha(downloaded)}
         return files
 
+    def dataset_file(self, name):
+        dataset = self.descriptor["dataset"]
+        return self.download(
+            self.dataset_api, dataset["repository"], "dataset", dataset["revision"],
+            f"{dataset['directory']}/{name}",
+        )
+
+    def history(self, revision):
+        return self.api.list_repo_commits(SPACE, repo_type="space", revision=revision)
+
+    def commit(self, parent, files, remove, title):
+        from huggingface_hub import CommitOperationAdd, CommitOperationDelete
+
+        operations = [
+            CommitOperationAdd(path_in_repo=name, path_or_fileobj=str(path))
+            for name, path in files.items()
+        ] + [CommitOperationDelete(path_in_repo=name) for name in remove]
+        return self.api.create_commit(
+            SPACE, repo_type="space", revision="main", parent_commit=parent,
+            operations=operations, commit_message=title, num_threads=1,
+        ).oid
+
+    def baseline_file(self, revision, name):
+        return self.download(self.api, SPACE, "space", revision, name)
+
+
+def confirmed_commit(hub, head, parent, title, expected):
+    history = hub.history(head)
+    require(
+        len(history) >= 2 and history[0].commit_id == head
+        and history[0].title == title and history[1].commit_id == parent
+        and portable.fingerprint(hub.inventory(head)) == expected,
+        "Hub history or resulting inventory differs from the approved operation",
+    )
+    return head
+
+
+def guarded_commit(hub, parent, before, expected, files, remove, title, journal):
+    require(
+        hub.settings()[0] == parent and portable.fingerprint(hub.inventory(parent)) == before,
+        "Space parent or inventory changed before the write",
+    )
+    journal("write_pending", operation=title, expected_parent=parent)
+    try:
+        committed = hub.commit(parent, files, remove, title)
+    except Exception:
+        # The Hub can finish a commit after the runner loses its HTTP response.
+        # Only adopt a verified commit from this plan. Never retry the write blindly.
+        for delay in (1, 2, 4, 8):
+            head = hub.settings()[0]
+            if head != parent:
+                return confirmed_commit(hub, head, parent, title, expected)
+            time.sleep(delay)
+        raise ReleaseError("Commit response unresolved. Review Space history before retrying") from None
+    require(hub.settings()[0] == committed, "Space moved after the write")
+    return confirmed_commit(hub, committed, parent, title, expected)
+
+
+def wait_running(hub, revision):
+    deadline = time.monotonic() + 40 * 60
+    while time.monotonic() < deadline:
+        head, runtime = hub.settings()
+        require(head == revision, "Space head changed during hosted verification")
+        stage = getattr(runtime.stage, "value", runtime.stage)
+        deployed = runtime.raw.get("sha")
+        if deployed == revision:
+            if stage == "RUNNING":
+                return
+            if stage in {"BUILD_ERROR", "RUNTIME_ERROR"}:
+                raise Regression("Hugging Face reported a failure for the deployed revision")
+        require(stage not in {"PAUSED", "STOPPED"}, "Space is paused or stopped")
+        time.sleep(20)
+    raise ReleaseError("Could not confirm the deployed runtime revision before the deadline")
+
+
+def hosted_contract(revision, manifest, reference_sha):
+    status = request_status(f"{HUB}/spaces/{SPACE}/resolve/{revision}/README.md")
+    require(status in {401, 403, 404}, "Anonymous source access could not be confirmed as denied")
+    with urlopen(f"{ORIGIN}/api/health", timeout=20) as response:
+        health = json.load(response)
+    with urlopen(f"{ORIGIN}/api/capabilities", timeout=20) as response:
+        capabilities = json.load(response)
+    expected = {
+        "schema_version": "explorer-capabilities-v1", "mode": "explorer", "read_only": True,
+        "execution": False, "shared_persistence": False, "assistant": False, "training": False,
+        "browser_drafts": True, "references_available": True,
+        "campaign_sha256": manifest["campaign_sha256"], "reference_sha256": reference_sha,
+        "model_sha256": manifest["provenance"]["prepared_model_sha256"],
+        "source_sha256": manifest["provenance"]["simulation_source_sha256"],
+        "molecular_views": ["mRNA", "protein", "reaction_flux", "exchange_flux"],
+    }
+    if health != {"status": "ok", "read_only": True, "scope": "full", "synthetic": False} or any(
+        capabilities.get(key) != value for key, value in expected.items()
+    ):
+        raise Regression("Hosted health or capabilities differ from the verified Dataset")
+    for path in ("/api/jobs", "/api/experiments", "/api/assistant"):
+        # An empty body cannot specify a simulation or a valid shared write.
+        status = request_status(ORIGIN + path, data=b"{}")
+        if status != 405:
+            if 200 <= status < 500 and status != 429:
+                raise Regression("Hosted server did not reject a shared mutation as expected")
+            raise ReleaseError("Hosted mutation check could not establish a result")
+
+
+def hosted_acceptance(hub, revision, dataset, work):
+    manifest_path = hub.dataset_file("manifest.json")
+    require(portable.host.sha(manifest_path) == dataset["manifest_sha256"], "Dataset manifest digest differs")
+    manifest = json.loads(manifest_path.read_text())
+    reference_sha = next(record["sha256"] for record in manifest["files"] if record["path"] == "references.json")
+    references = hub.dataset_file("references.json")
+    require(portable.host.sha(references) == reference_sha, "Dataset references digest differs")
+    wait_running(hub, revision)
+    try:
+        hosted_contract(revision, manifest, reference_sha)
+    except Regression:
+        # Confirm a deterministic application regression with the same running revision.
+        wait_running(hub, revision)
+        hosted_contract(revision, manifest, reference_sha)
+    # Browser or network instability alone is not evidence for automatic rollback.
+    env = {key: os.environ[key] for key in ("PATH", "HOME", "CI", "LANG") if key in os.environ}
+    env.update(EXPLORER_HOSTED_REFERENCES=str(references), EXPLORER_HOSTED_OUTPUT=str(work / "browser"))
+    run(work, "hosted-browser", ["npx", "--no-install", "playwright", "test", "-c",
+        "playwright.staging.config.ts", "--reporter=json"], env, cwd=FRONTEND)
+    report = json.loads((work / "hosted-browser.stdout").read_text())
+    require(report["stats"]["expected"] == 3 and report["stats"]["skipped"] == 0,
+            "Hosted browser coverage is incomplete")
+    require(hub.settings()[0] == revision, "Space head changed during hosted browser checks")
+    return 3
+
+
+def deploy_release(hub, plan, digest, bundle, before, journal, accept, head_check):
+    parent = plan["space_parent"]
+    require(
+        hub.settings()[0] == parent and portable.fingerprint(hub.inventory(parent)) == plan["before_sha256"],
+        "Reviewed Space parent or inventory drifted",
+    )
+    if plan["no_update_required"]:
+        count = accept(parent)
+        require(
+            hub.settings()[0] == parent and portable.fingerprint(hub.inventory(parent)) == plan["before_sha256"],
+            "Space changed during rehearsal",
+        )
+        journal("rehearsal_passed", space_revision=parent, hosted_browser_checks=count)
+        return
+
+    # Verify the baseline is healthy before attributing any failure to the release.
+    accept(parent)
+    head_check()
+    changes = plan["forward"]["add"] + plan["forward"]["replace"]
+    forward = guarded_commit(
+        hub, parent, plan["before_sha256"], plan["after_sha256"],
+        {name: bundle / "space" / name for name in changes}, [],
+        f"Explorer release {digest}", journal,
+    )
+    journal("forward_uploaded", forward_revision=forward)
+    try:
+        count = accept(forward)
+    except Regression:
+        require(hub.inventory(parent) == before, "Rollback baseline differs from the reviewed inventory")
+        restored = {name: hub.baseline_file(parent, name) for name in plan["rollback"]["replace"]}
+        require(
+            all(portable.host.sha(path) == before[name]["sha256"] for name, path in restored.items()),
+            "Rollback source bytes differ from the reviewed inventory",
+        )
+        rolled_back = guarded_commit(
+            hub, forward, plan["after_sha256"], plan["before_sha256"], restored,
+            plan["rollback"]["remove"], f"Explorer rollback {digest}", journal,
+        )
+        journal("rollback_uploaded", rollback_revision=rolled_back)
+        count = accept(rolled_back)
+        journal("rolled_back", space_revision=rolled_back, hosted_browser_checks=count)
+        raise ReleaseError("The release failed acceptance and its rollback passed")
+    require(portable.fingerprint(hub.inventory(forward)) == plan["after_sha256"],
+            "Deployed Space inventory changed during acceptance")
+    journal("accepted", space_revision=forward, hosted_browser_checks=count)
+
 
 def show_plan(plan, digest):
     def paths(names):
@@ -265,17 +474,75 @@ def prepare(args, env, context, work):
         show_plan(plan, digest)
 
 
+def deploy(args, env, context, work):
+    identity, after = candidate(env, context, args.archive, args.report, work / "bundle")
+    digest = env["PLAN_SHA256"]
+    plan = json.loads(args.plan.read_text())
+    require(
+        hex_digest(digest) and portable.fingerprint(plan) == digest
+        and all(plan.get(key) == value for key, value in identity.items()),
+        "Release plan differs from the reviewed candidate",
+    )
+    plan_id = env["PLAN_ID"]
+    require(plan_id.isdecimal() and plan_id not in {
+        identity["package_artifact_id"], identity["verification_artifact_id"]
+    }, "Invalid release plan artifact")
+    require(
+        plan["no_update_required"] == (context["mode"] == "rehearsal"),
+        "Only a rehearsal or a reviewed application update can enter production",
+    )
+    approved_review(github_json(f"actions/runs/{context['run_id']}/approvals", env), digest)
+
+    def head_check():
+        ref = github_json("git/ref/heads/platform", env)
+        require(ref["object"]["sha"] == context["source_revision"],
+                "Candidate is no longer the tip of platform")
+
+    head_check()
+    space_token = mint_repo_token("Space", SPACE)
+    verify_space_scope(space_token, write=True)
+    dataset_token = mint_dataset_token(identity["dataset"]["repository"])
+    hub = Hub(space_token, dataset_token, portable.descriptor(), work / "hub")
+    parent = hub.settings()[0]
+    require(parent == plan["space_parent"], "Space changed after the plan was approved")
+    before = hub.inventory(parent)
+    require(build_plan(identity, parent, before, after) == plan,
+            "Reconstructed Space operations differ from the approved plan")
+
+    receipt = {
+        "schema_version": "explorer-ci-receipt-v1", **identity,
+        "space_parent": parent, "plan_artifact_id": plan_id, "plan_sha256": digest, "events": [],
+    }
+
+    def journal(phase, **details):
+        event = {"phase": phase, **details}
+        receipt["events"].append(event)
+        portable.save(args.receipt, receipt)
+        print(json.dumps(event), flush=True)
+
+    journal("approved")
+    deploy_release(
+        hub, plan, digest, work / "bundle", before, journal,
+        lambda revision: hosted_acceptance(hub, revision, identity["dataset"], work),
+        head_check,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    prepare_command = commands.add_parser("prepare")
-    for name in ("archive", "report", "plan"):
-        prepare_command.add_argument(f"--{name}", required=True, type=Path)
+    for name, action in (("prepare", prepare), ("deploy", deploy)):
+        command = commands.add_parser(name)
+        command.set_defaults(action=action)
+        for path in ("archive", "report", "plan"):
+            command.add_argument(f"--{path}", required=True, type=Path)
+        if name == "deploy":
+            command.add_argument("--receipt", required=True, type=Path)
     args = parser.parse_args()
     try:
         context = ci_context(os.environ)
         with tempfile.TemporaryDirectory(prefix="explorer-release-") as temporary:
-            prepare(args, os.environ, context, Path(temporary))
+            args.action(args, os.environ, context, Path(temporary))
     except ReleaseError as exc:
         sys.exit(str(exc))
     except Exception as exc:

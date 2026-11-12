@@ -700,9 +700,47 @@ The job downloads the same run's package, verifies its digest and inventory,
 starts a local production container, and tests it against the pinned Dataset.
 Verification uses a dedicated Compose project and data volume.
 The resulting verification JSON is the release evidence. A rejected approval,
-failed exchange, or failing verification leaves the package ineligible. Fix the
-reported stage and rerun the failed job for the same landed commit, or run CI
-again for a new commit. Production publication is a separate Phase 5 operation.
+failed exchange, or failing verification leaves the package ineligible. For a
+production candidate, rerun all jobs on the current platform commit to produce
+the package, verification report, and review plan in the same run attempt.
+
+### Review an explorer production release
+
+Configure the `explorer-production` GitHub environment for exactly the
+`platform` branch. Require the repository owner's review, allow self-review,
+and disable administrator bypass. On the Protected explorer Space, use separate
+Hugging Face Trusted Publishers for `scientific-verification` (read-only) and
+`explorer-production` (write). Both match repository
+`MohammedNagdi/wcEcoli`, ref `refs/heads/platform`, and workflow ref
+`MohammedNagdi/wcEcoli/.github/workflows/platform-ci.yml@refs/heads/platform`.
+The existing Dataset publisher supplies the independent Dataset credential.
+
+Set the GitHub Actions repository variable `EXPLORER_RELEASE_MODE` to
+`rehearsal` for the first run. Approve scientific verification, then review
+the Space parent, package fingerprint, and planned operations in the run
+summary. For the production environment review, paste the displayed plan
+digest as the approval comment. Rehearsal requires an identical source
+inventory and runs hosted acceptance without publishing a commit.
+
+After rehearsal passes, set the variable to `active`. A verified push that
+changes the Space's application source queues a production review. An
+identical inventory reports `no_update_required`. Approval covers the displayed
+forward and inverse operations. GitHub serializes changes, and the approved
+candidate must still be the tip of `platform`. An unset variable skips
+release preparation on new runs.
+
+For a hosted update that passes acceptance, create the annotated
+`explorer-vX.Y.Z` tag at the receipt's source commit. Record the Hugging Face
+revision and workflow run in its annotation. Keep the sanitized release receipt
+with the release record before the Actions artifact expires.
+
+If a commit response is lost, the job checks Hub history and the reviewed
+inventory before adopting the result. If the workflow stops after a pending or
+uploaded write, inspect its run log, plan artifact, receipt if present, and the
+Space commit history before taking further action. A confirmed regression on
+the published revision can trigger the reviewed rollback. An ambiguous failure
+requires investigation. Verify the resulting Space revision and hosted checks
+before tagging a release.
 
 ### Rehearse the release from GitHub's artifact
 
