@@ -21,7 +21,14 @@ async function controlledStream(page: Page) {
     }
   })
 }
-async function push(page: Page, events: unknown[], close = false) { await page.evaluate(({ events, close }) => { const host = window as unknown as { stream: ReadableStreamDefaultController<Uint8Array> }; for (const e of events) host.stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(e)}\n\n`)); if (close) host.stream.close() }, { events, close }) }
+async function push(page: Page, events: unknown[], close = false) {
+  await page.waitForFunction(() => !!(window as unknown as { stream?: unknown }).stream)
+  await page.evaluate(({ events, close }) => {
+    const host = window as unknown as { stream: ReadableStreamDefaultController<Uint8Array> }
+    for (const e of events) host.stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(e)}\n\n`))
+    if (close) host.stream.close()
+  }, { events, close })
+}
 
 test.describe('Assistant workbench behavior', () => {
   test('starters fill a draft; Enter, Shift+Enter, Cmd/Ctrl+Enter and IME are respected', async ({ page }) => {
@@ -185,12 +192,15 @@ test.describe('Assistant workbench behavior', () => {
   })
   test('desktop dock permits workspace interaction and keeps conversation, model, draft and scroll on full-page transition', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
-    await mockAssistantApi(page, { reply: Array.from({ length: 80 }, (_, i) => `Evidence line ${i}`).join('\n') })
+    await mockAssistantApi(page, { reply: Array.from({ length: 80 }, (_, i) => `Evidence line ${i}`).join('\n\n') })
     await page.route(/^https?:\/\/[^/]+\/api\/(?!assistant|platform)/, r => r.fulfill({ json: [] })); await page.goto('/guide'); await page.getByTestId('assistant-dock-toggle').click()
     await expect(page.getByTestId('assistant-dock')).toHaveAttribute('role', 'complementary')
     expect((await page.getByTestId('assistant-dock').boundingBox())!.width).toBe(440)
     await page.locator('main').click({ position: { x: 20, y: 20 } }); await send(page)
-    const scroll = page.getByTestId('assistant-scroll-region'); await scroll.evaluate(el => { el.scrollTop = 100 })
+    await expect(page.getByTestId('message-assistant').getByText('Evidence line 79', { exact: true })).toBeVisible()
+    const scroll = page.getByTestId('assistant-scroll-region')
+    await scroll.evaluate(el => { el.scrollTop = 100 })
+    await expect(page.getByTestId('assistant-scroll-down')).toBeVisible()
     await page.getByTestId('assistant-input').fill('Retained draft'); await page.getByRole('button', { name: 'Open full page' }).click()
     await expect(page.getByTestId('assistant-input')).toHaveValue('Retained draft'); await expect(page.getByTestId('message-assistant')).toHaveCount(1)
     await expect.poll(() => scroll.evaluate(el => el.scrollTop)).toBe(100)
