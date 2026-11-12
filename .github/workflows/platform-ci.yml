@@ -150,3 +150,65 @@ jobs:
         run: exit 1
       - name: Report passing checks
         run: echo "All required platform CI jobs passed."
+
+  scientific:
+    name: Private Dataset verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: [required, package]
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'MohammedNagdi/wcEcoli' &&
+      github.ref == 'refs/heads/platform' &&
+      needs.required.result == 'success'
+    environment: scientific-verification
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      CANDIDATE_ID: ${{ needs.package.outputs.artifact-id }}
+      CANDIDATE_SHA256: ${{ needs.package.outputs.sha256 }}
+      CANDIDATE_FINGERPRINT: ${{ needs.package.outputs.fingerprint }}
+    steps:
+      - name: Require exact package outputs
+        shell: bash
+        run: |
+          [[ "$CANDIDATE_ID" =~ ^[1-9][0-9]*$ &&
+             "$CANDIDATE_SHA256" =~ ^[0-9a-f]{64}$ &&
+             "$CANDIDATE_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '20'
+          package-manager-cache: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact-id }}
+          path: ${{ runner.temp }}/candidate
+      - name: Install scientific check dependencies
+        run: python -m pip install -r interface/explorer/requirements.lock
+      - name: Install production browser dependencies
+        working-directory: interface/frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Verify the candidate with the pinned Dataset
+        run: |
+          python interface/tests/ci_verify_explorer.py \
+            --archive "$RUNNER_TEMP/candidate/explorer-package.tar.gz" \
+            --artifact-id "$CANDIDATE_ID" --revision "$GITHUB_SHA" \
+            --sha256 "$CANDIDATE_SHA256" --fingerprint "$CANDIDATE_FINGERPRINT" \
+            --out "$RUNNER_TEMP/explorer-verification.json"
+          cat "$RUNNER_TEMP/explorer-verification.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: explorer-verification-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/explorer-verification.json
+          if-no-files-found: error
+          retention-days: 30

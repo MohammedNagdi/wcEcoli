@@ -261,11 +261,13 @@ def test_launcher_paths_overrides_exit_code_and_argument_boundaries(tmp_path):
     custom = tmp_path / "external preview state"
     custom.mkdir()
     (custom / "compose.json").write_text("{}")
+    (custom / "preview-project").write_text("wcecoli-explorer-123\n")
     (custom / "empty.env").write_text("# no credentials\n")
     result = subprocess.run([str(root / "platform.sh"), "explorer", "logs", "--state-dir", str(custom), "--tail=5", "web"], env=env, capture_output=True)
     assert result.returncode == 0
     call = json.loads(capture.read_text())
     assert call["argv"][-3:] == ["logs", "--tail=5", "web"]
+    assert call["argv"][1:3] == ["--project-name", "wcecoli-explorer-123"]
     assert str(custom / "compose.json") in call["argv"]
     capture.unlink()
     for args in (["config"], ["up", "worker"], ["stop", "-v"], ["logs", "a b;$literal"], ["down", "-v"]):

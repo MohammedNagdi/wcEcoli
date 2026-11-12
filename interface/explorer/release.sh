@@ -12,6 +12,11 @@ if [[ "${1:-}" == --help || "${1:-}" == -h || $# -eq 0 ]]; then
     exit 0
 fi
 COMMAND="${1:-}"
+PROJECT="${EXPLORER_PREVIEW_PROJECT:-wcecoli-explorer}"
+if [[ "$FAMILY" == explorer && ! "$PROJECT" =~ ^wcecoli-explorer(-[a-z0-9]+)?$ ]]; then
+    echo 'Invalid explorer preview project name.' >&2
+    exit 2
+fi
 SERVICE_ARGS=("$COMMAND")
 skip=0
 for value in "${@:2}"; do
@@ -73,7 +78,12 @@ CACHE="$(cd "$CACHE" && pwd -P)"
 EXPLORER_STATE="$(cd "$EXPLORER_STATE" && pwd -P)"
 if [[ "$FAMILY" == explorer && "$COMMAND" =~ ^(ps|logs|stop)$ ]]; then
     [[ -f "$STATE/compose.json" ]] || { echo 'No explorer preview configuration exists.' >&2; exit 2; }
-    exec docker compose --project-name wcecoli-explorer --project-directory "$STATE" --env-file "$STATE/empty.env" --file "$STATE/compose.json" "${SERVICE_ARGS[@]}"
+    PROJECT=wcecoli-explorer
+    if [[ -f "$STATE/preview-project" ]]; then
+        IFS= read -r PROJECT < "$STATE/preview-project"
+        [[ "$PROJECT" =~ ^wcecoli-explorer(-[a-z0-9]+)?$ ]] || { echo 'Invalid explorer preview project name.' >&2; exit 2; }
+    fi
+    exec docker compose --project-name "$PROJECT" --project-directory "$STATE" --env-file "$STATE/empty.env" --file "$STATE/compose.json" "${SERVICE_ARGS[@]}"
 fi
 if ! git -C "$ROOT" diff --quiet HEAD -- interface/explorer interface/frontend interface/backend/hf_export interface/platform.sh platform.sh LICENSE.md; then
     echo 'Commit maintained release inputs before packaging or running release tooling.' >&2
@@ -110,6 +120,7 @@ for directory in ${INPUTS[@]+"${INPUTS[@]}"}; do
     fi
 done
 ENVIRONMENT=(-e "EXPLORER_GIT_REVISION=$REVISION" -e "EXPLORER_CALLER_ROOT=$ROOT")
+if [[ "$PREVIEW" == 1 ]]; then ENVIRONMENT+=(-e "EXPLORER_PREVIEW_PROJECT=$PROJECT"); fi
 if [[ "$COMMAND" != bundle ]]; then
     for key in HF_TOKEN HF_DATASET_READ_TOKEN HF_VERIFY_TOKEN HF_PUBLISH_TOKEN; do
         if [[ -n "${!key:-}" ]]; then ENVIRONMENT+=(-e "$key"); fi
@@ -124,5 +135,5 @@ with tarfile.open(fileobj=sys.stdin.buffer,mode="r|*") as archive:archive.extrac
 os.execv(sys.executable,[sys.executable,str(root/"interface/explorer/portable.py"),*sys.argv[1:]])
 ' "${ARGS[@]}" --family "$FAMILY" --state-dir "$STATE" --output-dir "$OUTPUT" --cache-dir "$CACHE" --explorer-state-dir "$EXPLORER_STATE"
 if [[ "$PREVIEW" == 1 && "$COMMAND" == up ]]; then
-    exec docker compose --project-name wcecoli-explorer --project-directory "$STATE" --env-file "$STATE/empty.env" --file "$STATE/compose.json" up -d --build
+    exec docker compose --project-name "$PROJECT" --project-directory "$STATE" --env-file "$STATE/empty.env" --file "$STATE/compose.json" up -d --build
 fi
