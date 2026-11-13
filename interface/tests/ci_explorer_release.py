@@ -29,6 +29,16 @@ class ReleaseError(RuntimeError):
     pass
 
 
+class HubReadError(ReleaseError):
+    def __init__(self, label, error):
+        self.status = getattr(getattr(error, "response", None), "status_code", None)
+        self.transient = isinstance(error, (ConnectionError, TimeoutError)) or (
+            type(self.status) is int and (self.status in {404, 409, 429} or 500 <= self.status <= 599)
+        )
+        detail = f"HTTP {self.status}" if type(self.status) is int else type(error).__name__
+        super().__init__(f"Hugging Face {label} failed ({detail})")
+
+
 class Regression(ReleaseError):
     """A failure attributable to a known deployed revision."""
 
@@ -42,9 +52,7 @@ def hub_read(label, operation, *args, **kwargs):
     try:
         return operation(*args, **kwargs)
     except Exception as exc:
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        detail = f"HTTP {status}" if type(status) is int else type(exc).__name__
-        raise ReleaseError(f"Hugging Face {label} failed ({detail})") from None
+        raise HubReadError(label, exc) from None
 
 
 def hex_digest(value, size=64):
@@ -281,7 +289,8 @@ class Hub:
         )
 
     def history(self, revision):
-        return self.api.list_repo_commits(SPACE, repo_type="space", revision=revision)
+        return hub_read("Space commit history", self.api.list_repo_commits,
+                        SPACE, repo_type="space", revision=revision, token=self.settings_token or self.api.token)
 
     def commit(self, parent, files, remove, title):
         from huggingface_hub import CommitOperationAdd, CommitOperationDelete
@@ -321,14 +330,22 @@ def guarded_commit(hub, parent, before, expected, files, remove, title, journal)
     except Exception:
         # The Hub can finish a commit after the runner loses its HTTP response.
         # Only adopt a verified commit from this plan. Never retry the write blindly.
-        for delay in (1, 2, 4, 8):
+        committed = None
+    last_read_error = None
+    for delay in (0, 1, 2, 4, 8, 16):
+        if delay:
+            time.sleep(delay)
+        try:
             head = hub.settings()[0]
             if head != parent:
+                require(committed is None or head == committed, "Space moved after the write")
                 return confirmed_commit(hub, head, parent, title, expected)
-            time.sleep(delay)
-        raise ReleaseError("Commit response unresolved. Review Space history before retrying") from None
-    require(hub.settings()[0] == committed, "Space moved after the write")
-    return confirmed_commit(hub, committed, parent, title, expected)
+        except HubReadError as exc:
+            if not exc.transient:
+                raise
+            last_read_error = exc
+    detail = f" Last lookup: {last_read_error}." if last_read_error else ""
+    raise ReleaseError(f"Commit confirmation unresolved. Review Space history before retrying.{detail}")
 
 
 def wait_running(hub, revision):
