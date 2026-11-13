@@ -248,3 +248,40 @@ def test_rehearsal_accepts_hosted_baseline_without_writing(tmp_path, disposable_
     assert hub.settings()[0] == parent
     assert visited == [parent]
     assert events == [("rehearsal_passed", {"space_revision": parent, "hosted_browser_checks": 3})]
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_runtime_variables_are_checked_only_after_production_approval(monkeypatch, approved):
+    from types import SimpleNamespace
+
+    class RepositoryNotFoundError(Exception):
+        response = SimpleNamespace(status_code=401)
+
+    descriptor = release.portable.descriptor()
+    dataset = descriptor["dataset"]
+
+    def read_variables(_space):
+        raise RepositoryNotFoundError("response contains a private request diagnostic")
+
+    hub = object.__new__(release.Hub)
+    hub.descriptor = descriptor
+    hub.approved = approved
+    hub.issued_at = release.time.monotonic()
+    runtime = SimpleNamespace(hardware=descriptor["space"]["hardware"])
+    hub.api = SimpleNamespace(
+        repo_info=lambda *args, **kwargs: SimpleNamespace(
+            sha=PARENT, visibility=descriptor["space"]["visibility"]
+        ),
+        get_space_runtime=lambda _space: runtime,
+        get_space_variables=read_variables,
+    )
+    hub.dataset_api = SimpleNamespace(
+        repo_info=lambda *args, **kwargs: SimpleNamespace(sha=dataset["revision"], private=True)
+    )
+    if approved:
+        with pytest.raises(
+            release.ReleaseError, match=r"^Hugging Face Space runtime variables failed \(HTTP 401\)$"
+        ):
+            hub.settings()
+    else:
+        assert hub.settings() == (PARENT, runtime)
