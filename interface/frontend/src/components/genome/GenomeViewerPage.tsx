@@ -4,7 +4,6 @@ import { Link, useLocation } from 'react-router-dom'
 import {IS_EXPLORER} from '../../explorer/mode'
 import {guideTopicHref} from '../../explorer/guideLinks'
 import { useRegisterAssistantContext } from '@deployment/assistant'
-import { getAllGenes } from '../../api/client'
 import type { Gene } from '../../types'
 import { CATEGORY_FILL, GENOME_LENGTH, hasGenomePosition } from '../../utils/genome'
 import { categoryLabel } from '../../utils/labels'
@@ -12,6 +11,7 @@ import { SearchInput } from '../common/SearchInput'
 import { CategoryBadge, DirectionBadge } from '../common/Badge'
 import { GenomeContextRail } from '../genes/GenomeContextRail'
 import { useGeneDetail } from '../../hooks/useGenes'
+import { useGenomeCatalog } from './useGenomeCatalog'
 import { useUrlWorkspaceState } from '../../hooks/useUrlWorkspaceState'
 import {
   CircularGenomeMap,
@@ -62,10 +62,7 @@ export function GenomeViewerPage({
     notFound,
     retry: retryDetail,
   } = useGeneDetail(selectedGene)
-  const [genes, setGenes] = useState<Gene[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [attempt, setAttempt] = useState(0)
+  const { genes, loading, error, retry } = useGenomeCatalog()
   const [tab, setTab] = useState<'details' | 'legend'>('details')
   const [categoriesOpen, setCategoriesOpen] = useState(false)
   const narrow = useMediaQuery('(max-width: 1099px)')
@@ -158,22 +155,6 @@ export function GenomeViewerPage({
       (a, b) => b.count - a.count,
     )
   }, [mappedGenes])
-  useEffect(() => {
-    const controller = new AbortController()
-    setLoading(true)
-    setError(null)
-    setGenes([])
-    getAllGenes((batch) => {
-      if (!controller.signal.aborted) setGenes((current) => [...current, ...batch])
-    }, controller.signal)
-      .catch((error) => {
-        if (!controller.signal.aborted) setError(error.message)
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false)
-      })
-    return () => controller.abort()
-  }, [attempt])
   useEffect(() => {
     if (selectedGene) setTab('details')
   }, [selectedGene])
@@ -479,7 +460,7 @@ export function GenomeViewerPage({
             <button
               type="button"
               className="workspace-secondary-button"
-              onClick={() => setAttempt((current) => current + 1)}
+              onClick={retry}
             >
               Retry genome data
             </button>
