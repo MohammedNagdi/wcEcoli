@@ -215,7 +215,15 @@ class Hub:
             self.dataset_api.token = mint_dataset_token(self.descriptor["dataset"]["repository"])
             self.issued_at = time.monotonic()
         space = hub_read("Space repository metadata", self.api.repo_info, SPACE, repo_type="space")
-        runtime = hub_read("Space runtime", self.api.get_space_runtime, SPACE)
+        # The repository response includes runtime metadata. The separate
+        # /runtime endpoint requires access the content reader does not have.
+        runtime = space.runtime
+        if runtime is None and self.approved:
+            runtime = hub_read("Space runtime", self.api.get_space_runtime, SPACE)
+        hardware_ok = (
+            runtime.hardware == self.descriptor["space"]["hardware"]
+            if runtime is not None else not self.approved
+        )
         dataset = self.descriptor["dataset"]
         info = hub_read(
             "pinned Dataset repository metadata", self.dataset_api.repo_info,
@@ -223,7 +231,7 @@ class Hub:
         )
         require(
             space.visibility == self.descriptor["space"]["visibility"]
-            and runtime.hardware == self.descriptor["space"]["hardware"]
+            and hardware_ok
             and info.private is True and info.sha == dataset["revision"],
             "Space visibility, hardware, or private Dataset pin differs",
         )
