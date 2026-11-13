@@ -1,5 +1,8 @@
 """Exercise the production release boundaries without calling a real service."""
 
+import json
+from types import SimpleNamespace
+
 import pytest
 
 import ci_explorer_release as release
@@ -49,19 +52,60 @@ def test_promotion_rejects_fork_and_reused_package_attempt():
         release.ci_context({**env, "PACKAGE_ATTEMPT": "1"})
 
 
-def test_approval_requires_the_right_reviewer_environment_and_digest():
-    approval = {
-        "state": "approved", "environments": [{"name": release.PRODUCTION}],
-        "user": {"login": "MohammedNagdi"}, "comment": "the-plan",
-    }
-    release.approved_review([approval], "the-plan")
-    for change in (
-        {"state": "rejected"}, {"comment": "older-plan"},
-        {"environments": [{"name": "scientific-verification"}]},
-        {"user": {"login": "another-reviewer"}},
-    ):
-        with pytest.raises(release.ReleaseError, match="exact plan digest"):
-            release.approved_review([{**approval, **change}], "the-plan")
+@pytest.mark.parametrize("package_attempt", ["1", "2"], ids=["partial-rerun", "full-rerun"])
+def test_production_reruns_stop_before_loading_artifacts(package_attempt, tmp_path):
+    env = {"PACKAGE_ATTEMPT": package_attempt}
+    with pytest.raises(release.ReleaseError, match="first attempt of a new platform push"):
+        release.deploy(SimpleNamespace(), env, {"run_attempt": "2"}, tmp_path)
+
+
+@pytest.mark.parametrize(("change", "error"), [
+    (None, None),
+    ("digest", "Release plan differs"),
+    ("verification", "Release plan differs"),
+    ("artifact", "Invalid release plan artifact"),
+    ("tip", "no longer the tip"),
+    ("parent", "Space changed"),
+    ("inventory", "operations differ"),
+])
+def test_native_gate_release_still_checks_the_reviewed_plan(tmp_path, monkeypatch, change, error):
+    context = {"run_attempt": "1", "run_id": "100", "mode": "active", "source_revision": PARENT}
+    descriptor = release.portable.descriptor()
+    identity = {**context, "package_artifact_id": "10", "verification_artifact_id": "11",
+                "dataset": descriptor["dataset"], "space": descriptor["space"]}
+    before, after = {"README.md": OLD}, {"README.md": NEW}
+    plan = release.build_plan(identity, PARENT, before, after)
+    if change == "verification":
+        plan["verification_artifact_id"] = "99"
+    args = SimpleNamespace(archive=None, report=None, plan=tmp_path / "plan.json", receipt=tmp_path / "receipt.json")
+    release.portable.save(args.plan, plan)
+    env = {"PLAN_SHA256": "0" * 64 if change == "digest" else release.portable.fingerprint(plan),
+           "PLAN_ID": "11" if change == "artifact" else "12", "HF_SPACE_SETTINGS_READ_TOKEN": "reader"}
+    monkeypatch.setattr(release, "candidate", lambda *args: (identity, after))
+
+    def github_json(endpoint, env):
+        assert endpoint == "git/ref/heads/platform"
+        return {"object": {"sha": "0" * 40 if change == "tip" else PARENT}}
+
+    monkeypatch.setattr(release, "github_json", github_json)
+    monkeypatch.setattr(release, "mint_repo_token", lambda *args: "writer")
+    monkeypatch.setattr(release, "mint_dataset_token", lambda *args: "reader")
+    monkeypatch.setattr(release, "verify_space_scope", lambda *args, **kwargs: None)
+    hub = SimpleNamespace(settings=lambda: ("0" * 40 if change == "parent" else PARENT, None),
+                          inventory=lambda _: {"README.md": {**OLD, "bytes": 3}} if change == "inventory" else before)
+    monkeypatch.setattr(release, "Hub", lambda *args, **kwargs: hub)
+    writes = []
+    monkeypatch.setattr(release, "deploy_release", lambda *args: writes.append(args[1]))
+    if error:
+        with pytest.raises(release.ReleaseError, match=error):
+            release.deploy(args, env, context, tmp_path)
+        assert writes == []
+    else:
+        release.deploy(args, env, context, tmp_path)
+        assert writes == [plan]
+        receipt = json.loads(args.receipt.read_text())
+        assert receipt["plan_sha256"] == env["PLAN_SHA256"]
+        assert receipt["events"] == [{"phase": "approved"}]
 
 
 @pytest.fixture

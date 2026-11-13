@@ -20,7 +20,6 @@ from ci_verify_explorer import FRONTEND, mint_dataset_token, mint_repo_token, ru
 REPOSITORY = "MohammedNagdi/wcEcoli"
 SPACE = "Safrot/wcecoli-explorer"
 ORIGIN = "https://safrot-wcecoli-explorer.hf.space"
-PRODUCTION = "explorer-production"
 HUB = "https://huggingface.co"
 EXPECTED_COUNTS = (48, 3948)
 SOURCE_LIMIT = 100 * 1024**2
@@ -183,19 +182,6 @@ def github_json(endpoint, env):
     )
     with urlopen(request, timeout=20) as response:
         return json.load(response)
-
-
-def approved_review(reviews, digest):
-    relevant = [
-        review for review in reviews
-        if any(item["name"] == PRODUCTION for item in review["environments"])
-    ]
-    require(
-        relevant and all(review["state"] == "approved" for review in relevant)
-        and any(review["user"]["login"] == "MohammedNagdi" and
-                review["comment"].strip() == digest for review in relevant),
-        "Production approval must include the exact plan digest",
-    )
 
 
 class Hub:
@@ -477,12 +463,16 @@ def show_plan(plan, digest):
     print(f"- Verified report artifact: `{plan['verification_artifact_id']}`")
     print(f"- Space parent: `{plan['space_parent']}`")
     print(f"- Dataset revision: `{plan['dataset']['revision']}`")
+    print(f"- Plan SHA-256: `{digest}`")
     print(f"- Forward additions: {paths(plan['forward']['add'])}")
     print(f"- Forward replacements: {paths(plan['forward']['replace'])}")
     print(f"- Rollback replacements: {paths(plan['rollback']['replace'])}")
     print(f"- Rollback removals: {paths(plan['rollback']['remove'])}")
-    if plan["mode"] == "rehearsal" or not plan["no_update_required"]:
-        print(f"\nUse this exact GitHub approval comment: `{digest}`")
+    if plan["run_attempt"] != "1":
+        print("\nProduction is available on the first attempt of a new push to `platform`.")
+    elif plan["mode"] == "rehearsal" or not plan["no_update_required"]:
+        print("\nReview this plan, then select **Review deployments**, **explorer-production**, "
+              "and **Approve and deploy**. The approval comment is optional.")
 
 
 def prepare(args, env, context, work):
@@ -505,6 +495,7 @@ def prepare(args, env, context, work):
 
 
 def deploy(args, env, context, work):
+    require(context["run_attempt"] == "1", "Production requires the first attempt of a new platform push")
     identity, after = candidate(env, context, args.archive, args.report, work / "bundle")
     digest = env["PLAN_SHA256"]
     plan = json.loads(args.plan.read_text())
@@ -521,8 +512,6 @@ def deploy(args, env, context, work):
         plan["no_update_required"] == (context["mode"] == "rehearsal"),
         "Only a rehearsal or a reviewed application update can enter production",
     )
-    approved_review(github_json(f"actions/runs/{context['run_id']}/approvals", env), digest)
-
     def head_check():
         ref = github_json("git/ref/heads/platform", env)
         require(ref["object"]["sha"] == context["source_revision"],
