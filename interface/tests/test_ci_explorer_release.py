@@ -260,12 +260,14 @@ def test_runtime_variables_are_checked_only_after_production_approval(monkeypatc
     descriptor = release.portable.descriptor()
     dataset = descriptor["dataset"]
 
-    def read_variables(_space):
+    def read_variables(space, *, token):
+        assert space == release.SPACE
+        assert token == "settings-reader"
         raise RepositoryNotFoundError("response contains a private request diagnostic")
 
     hub = object.__new__(release.Hub)
     hub.descriptor = descriptor
-    hub.approved = approved
+    hub.settings_token = "settings-reader" if approved else None
     hub.issued_at = release.time.monotonic()
     runtime = SimpleNamespace(hardware=descriptor["space"]["hardware"])
     hub.api = SimpleNamespace(
@@ -294,7 +296,7 @@ def test_missing_space_runtime_is_deferred_but_wrong_hardware_blocks(approved, h
 
     hub = object.__new__(release.Hub)
     hub.descriptor = release.portable.descriptor()
-    hub.approved = approved
+    hub.settings_token = "settings-reader" if approved else None
     hub.issued_at = release.time.monotonic()
     hub.api = SimpleNamespace(
         repo_info=lambda *args, **kwargs: SimpleNamespace(
