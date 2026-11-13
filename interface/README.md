@@ -721,6 +721,9 @@ the Space parent, package fingerprint, and planned operations in the run
 summary. For the production environment review, paste the displayed plan
 digest as the approval comment. Rehearsal requires an identical source
 inventory and runs hosted acceptance without publishing a commit.
+Release preparation reads the Space inventory, visibility, and runtime hardware
+with the read-only publisher. The production job checks the Space's configured
+Dataset variables after approval and before rehearsal or any commit.
 
 After rehearsal passes, set the variable to `active`. A verified push that
 changes the Space's application source queues a production review. An

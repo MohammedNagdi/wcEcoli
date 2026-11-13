@@ -39,6 +39,15 @@ def require(condition, message):
         raise ReleaseError(message)
 
 
+def hub_read(label, operation, *args, **kwargs):
+    try:
+        return operation(*args, **kwargs)
+    except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        detail = f"HTTP {status}" if type(status) is int else type(exc).__name__
+        raise ReleaseError(f"Hugging Face {label} failed ({detail})") from None
+
+
 def hex_digest(value, size=64):
     return isinstance(value, str) and re.fullmatch(f"[0-9a-f]{{{size}}}", value)
 
@@ -162,7 +171,7 @@ def verify_space_scope(token, *, write):
     status = request_status(url, token)
     require(
         status == 200 if write else status in {401, 403},
-        "Space credential did not have the expected repository write permission",
+        f"Space credential did not have the expected repository write permission (HTTP {status})",
     )
 
 
@@ -190,13 +199,14 @@ def approved_review(reviews, digest):
 
 
 class Hub:
-    def __init__(self, space_token, dataset_token, descriptor, cache):
+    def __init__(self, space_token, dataset_token, descriptor, cache, *, approved=False):
         from huggingface_hub import HfApi
 
         self.api = HfApi(endpoint=HUB, token=space_token)
         self.dataset_api = HfApi(endpoint=HUB, token=dataset_token)
         self.descriptor = descriptor
         self.cache = cache
+        self.approved = approved
         self.issued_at = time.monotonic()
 
     def settings(self):
@@ -204,10 +214,11 @@ class Hub:
             self.api.token = mint_repo_token("Space", SPACE)
             self.dataset_api.token = mint_dataset_token(self.descriptor["dataset"]["repository"])
             self.issued_at = time.monotonic()
-        space = self.api.repo_info(SPACE, repo_type="space")
-        runtime = self.api.get_space_runtime(SPACE)
+        space = hub_read("Space repository metadata", self.api.repo_info, SPACE, repo_type="space")
+        runtime = hub_read("Space runtime", self.api.get_space_runtime, SPACE)
         dataset = self.descriptor["dataset"]
-        info = self.dataset_api.repo_info(
+        info = hub_read(
+            "pinned Dataset repository metadata", self.dataset_api.repo_info,
             dataset["repository"], repo_type="dataset", revision=dataset["revision"]
         )
         require(
@@ -216,6 +227,13 @@ class Hub:
             and info.private is True and info.sha == dataset["revision"],
             "Space visibility, hardware, or private Dataset pin differs",
         )
+        # Repository content read access need not include Space configuration.
+        # Read it after production approval, before any commit or rehearsal.
+        if self.approved:
+            self.check_variables(dataset)
+        return space.sha, runtime
+
+    def check_variables(self, dataset):
         expected = {
             "EXPLORER_DATA_MODE": "hub",
             "EXPLORER_DATASET_REPO": dataset["repository"],
@@ -225,17 +243,17 @@ class Hub:
             "EXPLORER_RELEASE": "/data/current",
             "EXPLORER_CACHE": "/data",
         }
-        variables = self.api.get_space_variables(SPACE)
+        variables = hub_read("Space runtime variables", self.api.get_space_variables, SPACE)
         require(
             all(getattr(variables.get(name), "value", None) == value for name, value in expected.items()),
             "Space runtime Dataset configuration differs",
         )
-        return space.sha, runtime
 
     def download(self, api, repo, kind, revision, name):
         from huggingface_hub import hf_hub_download
 
-        return Path(hf_hub_download(
+        return Path(hub_read(
+            f"{kind} file download", hf_hub_download,
             repo, name, repo_type=kind, revision=revision, token=api.token,
             endpoint=HUB, cache_dir=self.cache,
         ))
@@ -243,7 +261,9 @@ class Hub:
     def inventory(self, revision):
         files = {}
         total = 0
-        for name in self.api.list_repo_files(SPACE, repo_type="space", revision=revision):
+        paths = hub_read("Space source inventory", self.api.list_repo_files,
+                         SPACE, repo_type="space", revision=revision)
+        for name in paths:
             path = PurePosixPath(name)
             require(
                 not path.is_absolute() and ".." not in path.parts and "\\" not in name
@@ -502,7 +522,7 @@ def deploy(args, env, context, work):
     space_token = mint_repo_token("Space", SPACE)
     verify_space_scope(space_token, write=True)
     dataset_token = mint_dataset_token(identity["dataset"]["repository"])
-    hub = Hub(space_token, dataset_token, portable.descriptor(), work / "hub")
+    hub = Hub(space_token, dataset_token, portable.descriptor(), work / "hub", approved=True)
     parent = hub.settings()[0]
     require(parent == plan["space_parent"], "Space changed after the plan was approved")
     before = hub.inventory(parent)
