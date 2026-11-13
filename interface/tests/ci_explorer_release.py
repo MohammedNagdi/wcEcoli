@@ -199,14 +199,14 @@ def approved_review(reviews, digest):
 
 
 class Hub:
-    def __init__(self, space_token, dataset_token, descriptor, cache, *, approved=False):
+    def __init__(self, space_token, dataset_token, descriptor, cache, *, settings_token=None):
         from huggingface_hub import HfApi
 
         self.api = HfApi(endpoint=HUB, token=space_token)
         self.dataset_api = HfApi(endpoint=HUB, token=dataset_token)
         self.descriptor = descriptor
         self.cache = cache
-        self.approved = approved
+        self.settings_token = settings_token
         self.issued_at = time.monotonic()
 
     def settings(self):
@@ -218,11 +218,11 @@ class Hub:
         # The repository response includes runtime metadata. The separate
         # /runtime endpoint requires access the content reader does not have.
         runtime = space.runtime
-        if runtime is None and self.approved:
+        if runtime is None and self.settings_token:
             runtime = hub_read("Space runtime", self.api.get_space_runtime, SPACE)
         hardware_ok = (
             runtime.hardware == self.descriptor["space"]["hardware"]
-            if runtime is not None else not self.approved
+            if runtime is not None else not self.settings_token
         )
         dataset = self.descriptor["dataset"]
         info = hub_read(
@@ -237,7 +237,7 @@ class Hub:
         )
         # Repository content read access need not include Space configuration.
         # Read it after production approval, before any commit or rehearsal.
-        if self.approved:
+        if self.settings_token:
             self.check_variables(dataset)
         return space.sha, runtime
 
@@ -251,7 +251,9 @@ class Hub:
             "EXPLORER_RELEASE": "/data/current",
             "EXPLORER_CACHE": "/data",
         }
-        variables = hub_read("Space runtime variables", self.api.get_space_variables, SPACE)
+        variables = hub_read(
+            "Space runtime variables", self.api.get_space_variables, SPACE, token=self.settings_token,
+        )
         require(
             all(getattr(variables.get(name), "value", None) == value for name, value in expected.items()),
             "Space runtime Dataset configuration differs",
@@ -527,10 +529,14 @@ def deploy(args, env, context, work):
                 "Candidate is no longer the tip of platform")
 
     head_check()
+    settings_token = env.get("HF_SPACE_SETTINGS_READ_TOKEN", "").strip()
+    require(settings_token, "The explorer-production environment needs HF_SPACE_SETTINGS_READ_TOKEN")
     space_token = mint_repo_token("Space", SPACE)
     verify_space_scope(space_token, write=True)
     dataset_token = mint_dataset_token(identity["dataset"]["repository"])
-    hub = Hub(space_token, dataset_token, portable.descriptor(), work / "hub", approved=True)
+    hub = Hub(
+        space_token, dataset_token, portable.descriptor(), work / "hub", settings_token=settings_token,
+    )
     parent = hub.settings()[0]
     require(parent == plan["space_parent"], "Space changed after the plan was approved")
     before = hub.inventory(parent)

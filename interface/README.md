@@ -714,6 +714,13 @@ Hugging Face Trusted Publishers for `scientific-verification` (read-only) and
 `MohammedNagdi/wcEcoli`, ref `refs/heads/platform`, and workflow ref
 `MohammedNagdi/wcEcoli/.github/workflows/platform-ci.yml@refs/heads/platform`.
 The existing Dataset publisher supplies the independent Dataset credential.
+Hugging Face's publisher credentials cannot list the Space's runtime variables.
+Add `HF_SPACE_SETTINGS_READ_TOKEN` as a secret on the `explorer-production`
+GitHub environment. Use a dedicated Hugging Face credential that can read the
+variables on `Safrot/wcecoli-explorer`, preferably a fine-grained token with
+read access limited to that Space. Confirm it can list the variables before
+saving it. The production job uses this credential only for that read. Space
+source writes still use the short-lived production publisher credential.
 
 Set the GitHub Actions repository variable `EXPLORER_RELEASE_MODE` to
 `rehearsal` for the first run. Approve scientific verification, then review
@@ -721,6 +728,10 @@ the Space parent, package fingerprint, and planned operations in the run
 summary. For the production environment review, paste the displayed plan
 digest as the approval comment. Rehearsal requires an identical source
 inventory and runs hosted acceptance without publishing a commit.
+If the approval form records an empty comment, use GitHub's
+`POST /repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments` API
+with the pending production environment ID, `state: approved`, and the
+current plan digest in `comment`.
 Release preparation reads the Space inventory and checks visibility and runtime
 hardware when the repository metadata includes it. The production job requires
 the expected hardware and configured Dataset variables after approval and
