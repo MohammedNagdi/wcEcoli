@@ -39,6 +39,17 @@ def test_scope_probe_fails_closed(monkeypatch, status, write):
         release.verify_space_scope("fixture", write=write)
 
 
+def test_confirmation_reads_space_history_with_the_settings_credential():
+    def history(repo, *, repo_type, revision, token):
+        assert (repo, repo_type, revision, token) == (release.SPACE, "space", PARENT, "reader")
+        return [PARENT]
+
+    hub = object.__new__(release.Hub)
+    hub.api = SimpleNamespace(token="writer", list_repo_commits=history)
+    hub.settings_token = "reader"
+    assert hub.history(PARENT) == [PARENT]
+
+
 def test_promotion_rejects_fork_and_reused_package_attempt():
     env = {
         "GITHUB_REPOSITORY": release.REPOSITORY, "GITHUB_REF": "refs/heads/platform",
@@ -175,8 +186,11 @@ def disposable_space(tmp_path):
     return hub
 
 
-@pytest.mark.parametrize("outcome", ["accepted", "lost_response", "rolled_back", "ambiguous", "drift", "stale"])
-def test_deploy_and_restore_on_disposable_space(tmp_path, disposable_space, outcome):
+@pytest.mark.parametrize("outcome", [
+    "accepted", "lost_response", "delayed_history", "history_forbidden", "wrong_inventory",
+    "rolled_back", "ambiguous", "drift", "stale",
+])
+def test_deploy_and_restore_on_disposable_space(tmp_path, disposable_space, outcome, monkeypatch):
     hub = disposable_space
     parent, _ = hub.settings()
     before = hub.inventory(parent)
@@ -188,6 +202,23 @@ def test_deploy_and_restore_on_disposable_space(tmp_path, disposable_space, outc
     plan = release.build_plan({"mode": "active"}, parent, before, after)
     digest = release.portable.fingerprint(plan)
     events = []
+    history_calls = []
+    history = hub.history
+    inventory = hub.inventory
+
+    def read_history(revision):
+        history_calls.append(revision)
+        if len(history_calls) == 1 and outcome in {"delayed_history", "history_forbidden"}:
+            status = 404 if outcome == "delayed_history" else 403
+            error = RuntimeError("private Hub request diagnostic")
+            error.response = SimpleNamespace(status_code=status)
+            raise release.HubReadError("Space commit history", error)
+        return history(revision)
+
+    monkeypatch.setattr(hub, "history", read_history)
+    monkeypatch.setattr(release.time, "sleep", lambda _: None)
+    if outcome == "wrong_inventory":
+        monkeypatch.setattr(hub, "inventory", lambda revision: {} if revision != parent else inventory(revision))
 
     def journal(phase, **details):
         events.append((phase, details))
@@ -207,7 +238,7 @@ def test_deploy_and_restore_on_disposable_space(tmp_path, disposable_space, outc
                 raise release.ReleaseError("Upstream outage")
         return 3
 
-    if outcome in {"rolled_back", "ambiguous", "drift", "stale"}:
+    if outcome in {"rolled_back", "ambiguous", "drift", "stale", "history_forbidden", "wrong_inventory"}:
         with pytest.raises(release.ReleaseError):
             release.deploy_release(hub, plan, digest, bundle, before, journal, accept, head_check)
     else:
@@ -222,9 +253,14 @@ def test_deploy_and_restore_on_disposable_space(tmp_path, disposable_space, outc
         assert hub.settings()[0] == parent
     else:
         assert hub.commits == 1
-        assert hub.inventory(hub.settings()[0]) == after
-        if outcome in {"accepted", "lost_response"}:
+        assert inventory(hub.settings()[0]) == after
+        if outcome in {"accepted", "lost_response", "delayed_history"}:
             assert events[-1][0] == "accepted"
+    if outcome == "delayed_history":
+        assert len(history_calls) == 2
+    elif outcome in {"history_forbidden", "wrong_inventory"}:
+        assert len(history_calls) == 1
+        assert events[-1][0] == "write_pending"
 
 
 def test_candidate_requires_science_proof_bound_to_artifact_and_attempt(tmp_path, monkeypatch):
