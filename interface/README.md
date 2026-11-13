@@ -701,8 +701,8 @@ starts a local production container, and tests it against the pinned Dataset.
 Verification uses a dedicated Compose project and data volume.
 The resulting verification JSON is the release evidence. A rejected approval,
 failed exchange, or failing verification leaves the package ineligible. For a
-production candidate, rerun all jobs on the current platform commit to produce
-the package, verification report, and review plan in the same run attempt.
+production candidate, use the first attempt of a new push to `platform` so
+the package, verification report, and review plan come from that attempt.
 
 ### Review an explorer production release
 
@@ -725,13 +725,11 @@ source writes still use the short-lived production publisher credential.
 Set the GitHub Actions repository variable `EXPLORER_RELEASE_MODE` to
 `rehearsal` for the first run. Approve scientific verification, then review
 the Space parent, package fingerprint, and planned operations in the run
-summary. For the production environment review, paste the displayed plan
-digest as the approval comment. Rehearsal requires an identical source
-inventory and runs hosted acceptance without publishing a commit.
-If the approval form records an empty comment, use GitHub's
-`POST /repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments` API
-with the pending production environment ID, `state: approved`, and the
-current plan digest in `comment`.
+summary. Select **Review deployments**, select **explorer-production**, and
+click **Approve and deploy**. The comment is optional. The displayed plan
+digest is checked by the workflow and recorded in the release receipt.
+Rehearsal requires an identical source inventory and runs hosted acceptance
+without publishing a commit.
 Release preparation reads the Space inventory and checks visibility and runtime
 hardware when the repository metadata includes it. The production job requires
 the expected hardware and configured Dataset variables after approval and
@@ -743,6 +741,11 @@ identical inventory reports `no_update_required`. Approval covers the displayed
 forward and inverse operations. GitHub serializes changes, and the approved
 candidate must still be the tip of `platform`. An unset variable skips
 release preparation on new runs.
+
+CI and scientific verification can be rerun. To retry production, merge a new
+commit through a pull request to `platform` and review the new run's plan.
+If the failed run may have written to the Space, inspect its receipt and the
+live Space revision before starting a new release.
 
 For a hosted update that passes acceptance, create the annotated
 `explorer-vX.Y.Z` tag at the receipt's source commit. Record the Hugging Face

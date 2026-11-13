@@ -250,6 +250,7 @@ jobs:
       github.event_name == 'push' &&
       github.repository == 'MohammedNagdi/wcEcoli' &&
       github.ref == 'refs/heads/platform' &&
+      github.run_attempt == '1' &&
       needs.scientific.result == 'success' &&
       needs.scientific.outputs.review-required == 'true'
     environment: explorer-production
