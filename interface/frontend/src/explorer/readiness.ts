@@ -18,6 +18,7 @@ export function acceptExplorerCapabilities(attempt:number,value:unknown){
  current=validateExplorerCapabilities(value);return true
 }
 export function clearExplorerCapabilities(attempt:number){if(attempt===generation){current=null;++generation}}
+export function explorerReferenceFingerprint(){return current?.reference_sha256 ?? null}
 export function draftBinding(){
  if(!current)throw new Error('Explorer reference metadata has not loaded')
  return {campaign_sha256:current.campaign_sha256,reference_sha256:current.reference_sha256,model_sha256:current.model_sha256,source_sha256:current.source_sha256}
