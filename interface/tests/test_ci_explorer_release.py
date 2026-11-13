@@ -270,9 +270,8 @@ def test_runtime_variables_are_checked_only_after_production_approval(monkeypatc
     runtime = SimpleNamespace(hardware=descriptor["space"]["hardware"])
     hub.api = SimpleNamespace(
         repo_info=lambda *args, **kwargs: SimpleNamespace(
-            sha=PARENT, visibility=descriptor["space"]["visibility"]
+            sha=PARENT, visibility=descriptor["space"]["visibility"], runtime=runtime,
         ),
-        get_space_runtime=lambda _space: runtime,
         get_space_variables=read_variables,
     )
     hub.dataset_api = SimpleNamespace(
@@ -285,3 +284,32 @@ def test_runtime_variables_are_checked_only_after_production_approval(monkeypatc
             hub.settings()
     else:
         assert hub.settings() == (PARENT, runtime)
+
+
+@pytest.mark.parametrize(("approved", "hardware"), [
+    (False, None), (False, "cpu-upgrade"), (True, None),
+])
+def test_missing_space_runtime_is_deferred_but_wrong_hardware_blocks(approved, hardware):
+    from types import SimpleNamespace
+
+    hub = object.__new__(release.Hub)
+    hub.descriptor = release.portable.descriptor()
+    hub.approved = approved
+    hub.issued_at = release.time.monotonic()
+    hub.api = SimpleNamespace(
+        repo_info=lambda *args, **kwargs: SimpleNamespace(
+            sha=PARENT, visibility="protected",
+            runtime=SimpleNamespace(hardware=hardware) if hardware else None,
+        ),
+        get_space_runtime=lambda _space: None,
+    )
+    hub.dataset_api = SimpleNamespace(
+        repo_info=lambda *args, **kwargs: SimpleNamespace(
+            sha=hub.descriptor["dataset"]["revision"], private=True,
+        )
+    )
+    if not approved and hardware is None:
+        assert hub.settings() == (PARENT, None)
+    else:
+        with pytest.raises(release.ReleaseError, match="visibility, hardware, or private Dataset pin differs"):
+            hub.settings()
