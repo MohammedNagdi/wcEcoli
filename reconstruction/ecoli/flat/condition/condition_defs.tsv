@@ -25,3 +25,7 @@
 "plus_quercetin"	"minimal_plus_quercetin"	{}	44.0	[]	[]
 "plus_tungstate"	"minimal_plus_tungstate"	{}	44.0	[]	[]
 "plus_cytidine"	"minimal_plus_cytidine"	{}	44.0	[]	["CPLX0-7740"]
+"minus_leu"	"minimal_aa_minus_leu"	{}	25.0	[]	[]
+"minus_thr"	"minimal_aa_minus_thr"	{}	25.0	[]	[]
+"minus_arg"	"minimal_aa_minus_arg"	{}	25.0	[]	[]
+"no_oxygen_plus_nitrate"	"minimal_minus_oxygen_plus_nitrate"	{}	82.0	["FNR-4FE-4S-CPLX", "PHOSPHO-ARCA", "CPLX0-226", "PHOSPHO-NARL"]	[]

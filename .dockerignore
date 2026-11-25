@@ -127,3 +127,13 @@ reconstruction/ecoli/scripts/nca/data/regulon-db/*.tsv
 *.fdb_latexmk
 *.fls
 *.synctex.gz
+
+# Local dev environments & artifacts (keep build context lean) #
+################################################################
+/.venv
+**/.venv
+**/node_modules
+/test-results
+/runs
+/.codex_tmp
+/.lock

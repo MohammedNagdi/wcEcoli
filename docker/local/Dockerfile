@@ -41,7 +41,8 @@ RUN find . -name "*.egg-info" -type d -prune -exec rm -rf {} + \
     && (pip install -e . --no-deps --no-build-isolation || true)
 
 COPY docker/local/entrypoint.sh /usr/local/bin/wcecoli-entrypoint
-RUN chmod +x /usr/local/bin/wcecoli-entrypoint \
+RUN sed -i 's/\r$//' /usr/local/bin/wcecoli-entrypoint \
+    && chmod +x /usr/local/bin/wcecoli-entrypoint \
     && umask 000 \
     && mkdir -p /wcEcoli/out /wcEcoli/cache /.aesara
 

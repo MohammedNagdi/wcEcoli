@@ -10,6 +10,7 @@ variants = [
 	'add_one_aa_shift',
 	'condition',
 	'gene_knockout',
+	'graded_gene_knockout',
 	'mene_params',
 	'metabolism_kinetic_objective_weight',
 	'metabolism_secretion_penalty',
